@@ -72,7 +72,12 @@ def create_ldap_user(user, ldap_config):
 
         # Connect to the LDAP server
         server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
-        conn = Connection(server, user=ldap_config['bind_dn'], password=ldap_config['bind_password'], auto_bind=True)
+        conn = Connection(
+            server,
+            user=ldap_config['bind_dn'],
+            password=ldap_config['bind_password'],
+            auto_bind=True
+        )
 
         # Ensure the group base DN exists
         group_base = ldap_config.get('group_base', 'ou=groups,dc=example,dc=org')
@@ -80,10 +85,38 @@ def create_ldap_user(user, ldap_config):
             print(f"Cannot proceed without group base DN: {group_base}")
             return
 
-        # Create or update the user
+        # Prepare user DN
         user_dn = f"uid={user['uid']},{ldap_config['user_base']}"
+
+        # Ensure 'runAsUser' and 'runAsGroup' are present
+        if 'runAsUser' not in user or 'runAsGroup' not in user:
+            print(f"'runAsUser' and 'runAsGroup' must be provided for user {user['uid']}")
+            return
+
+        # Set 'uidNumber' and 'gidNumber' if not present
+        if 'uidNumber' not in user or not user.get('uidNumber'):
+            user['uidNumber'] = user['runAsUser']
+
+        if 'gidNumber' not in user or not user.get('gidNumber'):
+            user['gidNumber'] = user['runAsGroup']
+
+        # Ensure 'homeDirectory' and 'loginShell' are set
+        if 'homeDirectory' not in user or not user.get('homeDirectory'):
+            user['homeDirectory'] = f"/home/{user['uid']}"
+
+        if 'loginShell' not in user or not user.get('loginShell'):
+            user['loginShell'] = '/bin/bash'
+
+        # Prepare attributes
         attrs = {
-            'objectClass': ['inetOrgPerson', 'organizationalPerson', 'person', 'posixAccount', 'kubernetesSC', 'top'],
+            'objectClass': [
+                'inetOrgPerson',
+                'organizationalPerson',
+                'person',
+                'posixAccount',
+                'kubernetesSC',
+                'top'
+            ],
             'uid': user['uid'],
             'cn': user['cn'],
             'sn': user['sn'],
@@ -97,10 +130,10 @@ def create_ldap_user(user, ldap_config):
             'runAsUser': str(user['runAsUser']),
             'runAsGroup': str(user['runAsGroup']),
             'fsGroup': str(user['fsGroup']),
-            'uidNumber': str(user.get('uidNumber', user['runAsUser'])),
-            'gidNumber': str(user.get('gidNumber', user['runAsGroup'])),
-            'homeDirectory': user.get('homeDirectory', f"/home/{user['uid']}"),
-            'loginShell': user.get('loginShell', '/bin/bash'),
+            'uidNumber': str(user['uidNumber']),
+            'gidNumber': str(user['gidNumber']),
+            'homeDirectory': user['homeDirectory'],
+            'loginShell': user['loginShell'],
         }
 
         # Check if the user already exists
@@ -136,7 +169,11 @@ def create_ldap_user(user, ldap_config):
         for group_name in user_groups:
             group_dn = f"cn={group_name},{group_base}"
             if not conn.search(group_dn, '(objectClass=groupOfNames)', search_scope='BASE', attributes=['member']):
-                group_attrs = {'objectClass': ['groupOfNames', 'top'], 'cn': group_name, 'member': [user_dn]}
+                group_attrs = {
+                    'objectClass': ['groupOfNames', 'top'],
+                    'cn': group_name,
+                    'member': [user_dn]
+                }
                 if conn.add(group_dn, attributes=group_attrs):
                     print(f"Group {group_name} created and user {user['uid']} added as member.")
                 else:
@@ -156,6 +193,7 @@ def create_ldap_user(user, ldap_config):
     finally:
         if conn:
             conn.unbind()
+
 
 def load_users_from_yaml(path):
     """

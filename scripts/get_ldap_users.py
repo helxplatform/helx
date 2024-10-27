@@ -27,9 +27,10 @@ def fetch_user_details(ldap_server_url, bind_dn, bind_password, search_base, gro
     """
     Fetches user details from the LDAP server and processes their attributes.
 
-    The function binds to an LDAP server and retrieves user entries based on 
-    the specified search base and filter. It also checks group memberships for 
-    each user and processes attributes like `cn`, `mail`, `telephoneNumber`, etc.
+    The function binds to an LDAP server and retrieves user entries based on
+    the specified search base and filter. It also checks group memberships for
+    each user and processes attributes like `cn`, `mail`, `telephoneNumber`, etc.,
+    including posixAccount attributes.
 
     Args:
         ldap_server_url (str): The URL of the LDAP server (e.g., ldap://localhost).
@@ -45,20 +46,12 @@ def fetch_user_details(ldap_server_url, bind_dn, bind_password, search_base, gro
     try:
         parsed_url = urlparse(ldap_server_url)
         host = parsed_url.hostname
-        port = parsed_url.port
+        port = parsed_url.port if parsed_url.port else (636 if parsed_url.scheme == 'ldaps' else 389)
         use_ssl = parsed_url.scheme == 'ldaps'
 
         # Initialize and bind to the LDAP server
         server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
         conn = Connection(server, user=bind_dn, password=bind_password, auto_bind=True)
-
-        # Search for user entries
-        search_filter = '(objectClass=inetOrgPerson)'
-        retrieve_attributes = [
-            'uid', 'cn', 'sn', 'mail', 'telephoneNumber',
-            'givenName', 'displayName', 'o', 'ou',
-            'runAsUser', 'runAsGroup', 'fsGroup', 'supplementalGroups'
-        ]
 
         # Check if the search base exists
         base_check = conn.search(search_base, '(objectClass=*)', search_scope=SUBTREE, attributes=[])
@@ -66,7 +59,15 @@ def fetch_user_details(ldap_server_url, bind_dn, bind_password, search_base, gro
             print(f"Search base '{search_base}' does not exist.")
             return []
 
-        # Search for users and process the results
+        # Search for user entries
+        search_filter = '(|(objectClass=inetOrgPerson)(objectClass=posixAccount))'
+        retrieve_attributes = [
+            'uid', 'cn', 'sn', 'mail', 'telephoneNumber',
+            'givenName', 'displayName', 'o', 'ou',
+            'runAsUser', 'runAsGroup', 'fsGroup', 'supplementalGroups',
+            'uidNumber', 'gidNumber', 'homeDirectory', 'loginShell'
+        ]
+
         conn.search(search_base, search_filter, search_scope=SUBTREE, attributes=retrieve_attributes)
 
         # Return an empty list if no users are found
@@ -82,14 +83,20 @@ def fetch_user_details(ldap_server_url, bind_dn, bind_password, search_base, gro
             # Process each attribute and handle missing attributes
             for attr in retrieve_attributes:
                 if attr in entry_dict and entry_dict[attr]:
-                    if attr in ['runAsUser', 'runAsGroup', 'fsGroup']:
+                    if attr in ['runAsUser', 'runAsGroup', 'fsGroup', 'uidNumber', 'gidNumber']:
                         processed_entry[attr] = int(entry_dict[attr][0])
                     elif attr == 'supplementalGroups':
                         processed_entry[attr] = [int(x) for x in entry_dict[attr]]
                     else:
                         processed_entry[attr] = entry_dict[attr][0]
                 else:
-                    processed_entry[attr] = ""
+                    # Assign default values for certain attributes
+                    if attr in ['uidNumber', 'gidNumber']:
+                        processed_entry[attr] = None
+                    elif attr == 'supplementalGroups':
+                        processed_entry[attr] = []
+                    else:
+                        processed_entry[attr] = ""
 
             # Fetch group memberships for the user
             user_dn = entry.entry_dn

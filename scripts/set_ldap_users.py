@@ -51,12 +51,12 @@ def create_ldap_user(user, ldap_config):
     """
     Create or update an LDAP user and manage group memberships.
 
-    This function creates a new LDAP user if they don't exist or updates the user's 
+    This function creates a new LDAP user if they don't exist or updates the user's
     attributes if they already exist. It also handles assigning the user to LDAP groups.
 
     Args:
         user (dict): Dictionary containing user details such as UID, CN, SN, and groups.
-        ldap_config (dict): Dictionary containing LDAP configuration details such as 
+        ldap_config (dict): Dictionary containing LDAP configuration details such as
                             LDAP server URL, bind DN, and base DNs.
 
     Returns:
@@ -83,7 +83,7 @@ def create_ldap_user(user, ldap_config):
         # Create or update the user
         user_dn = f"uid={user['uid']},{ldap_config['user_base']}"
         attrs = {
-            'objectClass': ['inetOrgPerson', 'organizationalPerson', 'person', 'kubernetesSC', 'top'],
+            'objectClass': ['inetOrgPerson', 'organizationalPerson', 'person', 'posixAccount', 'kubernetesSC', 'top'],
             'uid': user['uid'],
             'cn': user['cn'],
             'sn': user['sn'],
@@ -96,7 +96,11 @@ def create_ldap_user(user, ldap_config):
             'supplementalGroups': [str(group) for group in user.get('supplementalGroups', [])],
             'runAsUser': str(user['runAsUser']),
             'runAsGroup': str(user['runAsGroup']),
-            'fsGroup': str(user['fsGroup'])
+            'fsGroup': str(user['fsGroup']),
+            'uidNumber': str(user.get('uidNumber', user['runAsUser'])),
+            'gidNumber': str(user.get('gidNumber', user['runAsGroup'])),
+            'homeDirectory': user.get('homeDirectory', f"/home/{user['uid']}"),
+            'loginShell': user.get('loginShell', '/bin/bash'),
         }
 
         # Check if the user already exists

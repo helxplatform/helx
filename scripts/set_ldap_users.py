@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from ldap3 import Server, Connection, ALL, MODIFY_ADD, MODIFY_REPLACE
+from ldap3 import Server, Connection, ALL, MODIFY_ADD, MODIFY_REPLACE, SUBTREE
 from ldap3.core.exceptions import LDAPException
 import yaml
 import argparse
@@ -23,177 +23,305 @@ def load_ldap_config(config_file="helx_ldap_config.yaml"):
             return yaml.safe_load(file)
     return None
 
+def connect_to_ldap(ldap_config):
+    """
+    Establishes a connection to the LDAP server.
+
+    Args:
+        ldap_config (dict): LDAP configuration details.
+
+    Returns:
+        ldap3.Connection: An active LDAP connection.
+    """
+    parsed_url = urlparse(ldap_config['ldap_server'])
+    host = parsed_url.hostname
+    port = parsed_url.port if parsed_url.port else (636 if parsed_url.scheme == 'ldaps' else 389)
+    use_ssl = parsed_url.scheme == 'ldaps'
+
+    # Connect to the LDAP server
+    server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
+    conn = Connection(
+        server,
+        user=ldap_config['bind_dn'],
+        password=ldap_config['bind_password'],
+        auto_bind=True
+    )
+    return conn
+
 def ensure_group_base_dn_exists(conn, group_base):
     """
-    Ensure the group base DN exists in the LDAP directory. If it doesn't exist, create it.
+    Ensures that the group base DN exists in the LDAP directory.
 
     Args:
         conn (ldap3.Connection): An active LDAP connection.
-        group_base (str): The base DN for the group.
+        group_base (str): The group base DN.
 
     Returns:
-        bool: True if the group base DN exists or is successfully created, False otherwise.
+        bool: True if the group base DN exists or was created successfully.
     """
+    if conn.search(group_base, '(objectClass=*)', search_scope='BASE'):
+        return True
+    else:
+        # Attempt to create the group base DN
+        dn_components = group_base.split(',')
+        for i in range(len(dn_components), 0, -1):
+            dn = ','.join(dn_components[:i])
+            if conn.search(dn, '(objectClass=*)', search_scope='BASE'):
+                break
+            else:
+                # Create the missing DN component
+                attrs = {'objectClass': 'organizationalUnit', 'ou': dn_components[i-1][3:]}
+                if not conn.add(dn, attributes=attrs):
+                    print(f"Failed to create DN {dn}: {conn.result['description']}")
+                    return False
+        return True
 
-    if not conn.search(group_base, '(objectClass=*)', search_scope='BASE'):
-        attrs = {
-            'objectClass': ['top', 'organizationalUnit'],
-            'ou': group_base.split(',')[0].split('=')[1]
-        }
-        if conn.add(group_base, attributes=attrs):
-            print(f"Created group base DN: {group_base}")
-        else:
-            print(f"Failed to create group base DN {group_base}: {conn.result['description']}")
-            return False
-    return True
-
-def create_ldap_user(user, ldap_config):
+def prepare_user_attributes(user):
     """
-    Create or update an LDAP user and manage group memberships.
-
-    This function creates a new LDAP user if they don't exist or updates the user's
-    attributes if they already exist. It also handles assigning the user to LDAP groups.
+    Prepares the user attributes for LDAP entry.
 
     Args:
-        user (dict): Dictionary containing user details such as UID, CN, SN, and groups.
-        ldap_config (dict): Dictionary containing LDAP configuration details such as
-                            LDAP server URL, bind DN, and base DNs.
+        user (dict): User details.
+
+    Returns:
+        dict: A dictionary of user attributes.
+    """
+    # Ensure 'runAsUser' and 'runAsGroup' are present
+    if 'runAsUser' not in user or 'runAsGroup' not in user:
+        raise ValueError(f"'runAsUser' and 'runAsGroup' must be provided for user {user['uid']}")
+
+    # Set 'uidNumber' and 'gidNumber' if not present
+    user['uidNumber'] = user.get('uidNumber', user['runAsUser'])
+    user['gidNumber'] = user.get('gidNumber', user['runAsGroup'])
+
+    # Ensure 'homeDirectory' and 'loginShell' are set
+    user['homeDirectory'] = user.get('homeDirectory', f"/home/{user['uid']}")
+    user['loginShell'] = user.get('loginShell', '/bin/bash')
+
+    attrs = {
+        'objectClass': [
+            'inetOrgPerson',
+            'organizationalPerson',
+            'person',
+            'posixAccount',
+            'kubernetesSC',
+            'top'
+        ],
+        'uid': user['uid'],
+        'cn': user['cn'],
+        'sn': user['sn'],
+        'mail': user.get('email', ''),
+        'telephoneNumber': user.get('telephoneNumber', ''),
+        'o': user.get('o', ''),
+        'ou': user.get('ou', ''),
+        'givenName': user.get('givenName', ''),
+        'displayName': user.get('displayName', ''),
+        'supplementalGroups': [str(group) for group in user.get('supplementalGroups', [])],
+        'runAsUser': str(user['runAsUser']),
+        'runAsGroup': str(user['runAsGroup']),
+        'fsGroup': str(user['fsGroup']),
+        'uidNumber': str(user['uidNumber']),
+        'gidNumber': str(user['gidNumber']),
+        'homeDirectory': user['homeDirectory'],
+        'loginShell': user['loginShell'],
+    }
+    return attrs
+
+def create_or_update_user(conn, user_dn, attrs):
+    """
+    Creates a new LDAP user or updates an existing one.
+
+    Args:
+        conn (ldap3.Connection): An active LDAP connection.
+        user_dn (str): The distinguished name of the user.
+        attrs (dict): The user's attributes.
 
     Returns:
         None
     """
+    if conn.search(user_dn, '(objectClass=*)', search_scope='BASE', attributes=['*']):
+        existing_entry = conn.entries[0]
+        existing_attrs = existing_entry.entry_attributes_as_dict
+        modifications = {}
 
+        # Compare and update attributes
+        for attr, new_value in attrs.items():
+            existing_value = existing_attrs.get(attr, [])
+            if isinstance(new_value, list):
+                if set(new_value) != set(existing_value):
+                    modifications[attr] = [(MODIFY_REPLACE, new_value)]
+            else:
+                if new_value != (existing_value[0] if existing_value else ''):
+                    modifications[attr] = [(MODIFY_REPLACE, [new_value])]
+        if modifications:
+            if conn.modify(user_dn, modifications):
+                print(f"User {attrs['uid']} updated successfully.")
+            else:
+                print(f"Failed to update user {attrs['uid']}: {conn.result['description']}")
+        else:
+            print(f"No updates necessary for user {attrs['uid']}.")
+    else:
+        if conn.add(user_dn, attributes=attrs):
+            print(f"User {attrs['uid']} created successfully.")
+        else:
+            print(f"Failed to create user {attrs['uid']}: {conn.result['description']}")
+
+def get_existing_posix_groups(conn, group_base):
+    """
+    Retrieves existing posixGroup entries from LDAP.
+
+    Args:
+        conn (ldap3.Connection): An active LDAP connection.
+        group_base (str): The group base DN.
+
+    Returns:
+        dict: A mapping of group names to their gidNumbers.
+    """
+    group_gid_map = {}
+    conn.search(
+        search_base=group_base,
+        search_filter='(objectClass=posixGroup)',
+        search_scope=SUBTREE,
+        attributes=['cn', 'gidNumber']
+    )
+    for entry in conn.entries:
+        group_name = entry.cn.value
+        gid_number = int(entry.gidNumber.value)
+        group_gid_map[group_name] = gid_number
+    return group_gid_map
+
+def handle_posix_group_memberships(conn, user, group_base, group_gid_map):
+    """
+    Handles posixGroup memberships for the user.
+
+    Args:
+        conn (ldap3.Connection): An active LDAP connection.
+        user (dict): User details.
+        group_base (str): The group base DN.
+        group_gid_map (dict): Mapping of group names to gidNumbers.
+
+    Returns:
+        None
+    """
+    # Find the next available gidNumber
+    if group_gid_map:
+        next_gid_number = max(group_gid_map.values()) + 1
+    else:
+        next_gid_number = 1000  # Starting gidNumber for groups
+
+    posix_groups = user.get('posixGroups', [])
+    for group_name in posix_groups:
+        group_dn = f"cn={group_name},{group_base}"
+
+        # Check if the group exists
+        if group_name in group_gid_map:
+            gid_number = group_gid_map[group_name]
+            group_exists = True
+        else:
+            gid_number = next_gid_number
+            next_gid_number += 1
+            group_gid_map[group_name] = gid_number
+            group_exists = False
+
+        if not group_exists:
+            # Create the posixGroup
+            group_attrs = {
+                'objectClass': ['posixGroup', 'top'],
+                'cn': group_name,
+                'gidNumber': str(gid_number),
+                'memberUid': [user['uid']]
+            }
+            if conn.add(group_dn, attributes=group_attrs):
+                print(f"Posix group {group_name} created with gidNumber {gid_number} and user {user['uid']} added as member.")
+            else:
+                print(f"Failed to create posix group {group_name}: {conn.result['description']}")
+        else:
+            # Group exists, check if user is a member
+            if conn.search(group_dn, '(objectClass=posixGroup)', search_scope='BASE', attributes=['memberUid']):
+                group_entry = conn.entries[0]
+                member_uids = group_entry.memberUid.values if 'memberUid' in group_entry else []
+                if user['uid'] not in member_uids:
+                    if conn.modify(group_dn, {'memberUid': [(MODIFY_ADD, [user['uid']])]}):
+                        print(f"User {user['uid']} added to posix group {group_name}.")
+                    else:
+                        print(f"Failed to add user {user['uid']} to posix group {group_name}: {conn.result['description']}")
+                else:
+                    print(f"User {user['uid']} is already a member of posix group {group_name}.")
+            else:
+                print(f"Failed to search posix group {group_name}: {conn.result['description']}")
+
+def handle_group_of_names_memberships(conn, user_dn, user, group_base):
+    """
+    Handles groupOfNames memberships for the user.
+
+    Args:
+        conn (ldap3.Connection): An active LDAP connection.
+        user_dn (str): The distinguished name of the user.
+        user (dict): User details.
+        group_base (str): The group base DN.
+
+    Returns:
+        None
+    """
+    user_groups = user.get('groups', [])
+    for group_name in user_groups:
+        group_dn = f"cn={group_name},{group_base}"
+        if not conn.search(group_dn, '(objectClass=groupOfNames)', search_scope='BASE', attributes=['member']):
+            group_attrs = {
+                'objectClass': ['groupOfNames', 'top'],
+                'cn': group_name,
+                'member': [user_dn]
+            }
+            if conn.add(group_dn, attributes=group_attrs):
+                print(f"Group {group_name} created and user {user['uid']} added as member.")
+            else:
+                print(f"Failed to create group {group_name}: {conn.result['description']}")
+        else:
+            group_entry = conn.entries[0]
+            if user_dn not in group_entry.member:
+                if conn.modify(group_dn, {'member': [(MODIFY_ADD, [user_dn])]}):
+                    print(f"User {user['uid']} added to group {group_name}.")
+                else:
+                    print(f"Failed to add user {user['uid']} to group {group_name}: {conn.result['description']}")
+            else:
+                print(f"User {user['uid']} is already a member of group {group_name}.")
+
+
+def create_ldap_user(user, ldap_config):
+    """
+    Main function to create or update an LDAP user and manage group memberships.
+
+    Args:
+        user (dict): User details.
+        ldap_config (dict): LDAP configuration details.
+
+    Returns:
+        None
+    """
     conn = None
     try:
-        parsed_url = urlparse(ldap_config['ldap_server'])
-        host = parsed_url.hostname
-        port = parsed_url.port if parsed_url.port else (636 if parsed_url.scheme == 'ldaps' else 389)
-        use_ssl = parsed_url.scheme == 'ldaps'
-
-        # Connect to the LDAP server
-        server = Server(host, port=port, use_ssl=use_ssl, get_info=ALL)
-        conn = Connection(
-            server,
-            user=ldap_config['bind_dn'],
-            password=ldap_config['bind_password'],
-            auto_bind=True
-        )
-
-        # Ensure the group base DN exists
+        conn = connect_to_ldap(ldap_config)
         group_base = ldap_config.get('group_base', 'ou=groups,dc=example,dc=org')
+
         if not ensure_group_base_dn_exists(conn, group_base):
             print(f"Cannot proceed without group base DN: {group_base}")
             return
 
-        # Prepare user DN
         user_dn = f"uid={user['uid']},{ldap_config['user_base']}"
+        attrs = prepare_user_attributes(user)
+        create_or_update_user(conn, user_dn, attrs)
 
-        # Ensure 'runAsUser' and 'runAsGroup' are present
-        if 'runAsUser' not in user or 'runAsGroup' not in user:
-            print(f"'runAsUser' and 'runAsGroup' must be provided for user {user['uid']}")
-            return
-
-        # Set 'uidNumber' and 'gidNumber' if not present
-        if 'uidNumber' not in user or not user.get('uidNumber'):
-            user['uidNumber'] = user['runAsUser']
-
-        if 'gidNumber' not in user or not user.get('gidNumber'):
-            user['gidNumber'] = user['runAsGroup']
-
-        # Ensure 'homeDirectory' and 'loginShell' are set
-        if 'homeDirectory' not in user or not user.get('homeDirectory'):
-            user['homeDirectory'] = f"/home/{user['uid']}"
-
-        if 'loginShell' not in user or not user.get('loginShell'):
-            user['loginShell'] = '/bin/bash'
-
-        # Prepare attributes
-        attrs = {
-            'objectClass': [
-                'inetOrgPerson',
-                'organizationalPerson',
-                'person',
-                'posixAccount',
-                'kubernetesSC',
-                'top'
-            ],
-            'uid': user['uid'],
-            'cn': user['cn'],
-            'sn': user['sn'],
-            'mail': user.get('email', ''),
-            'telephoneNumber': user.get('telephoneNumber', ''),
-            'o': user.get('o', ''),
-            'ou': user.get('ou', ''),
-            'givenName': user.get('givenName', ''),
-            'displayName': user.get('displayName', ''),
-            'supplementalGroups': [str(group) for group in user.get('supplementalGroups', [])],
-            'runAsUser': str(user['runAsUser']),
-            'runAsGroup': str(user['runAsGroup']),
-            'fsGroup': str(user['fsGroup']),
-            'uidNumber': str(user['uidNumber']),
-            'gidNumber': str(user['gidNumber']),
-            'homeDirectory': user['homeDirectory'],
-            'loginShell': user['loginShell'],
-        }
-
-        # Check if the user already exists
-        if conn.search(user_dn, '(objectClass=*)', search_scope='BASE', attributes=['*']):
-            existing_entry = conn.entries[0]
-            existing_attrs = existing_entry.entry_attributes_as_dict
-            modifications = {}
-
-            # Compare and update attributes
-            for attr, new_value in attrs.items():
-                existing_value = existing_attrs.get(attr, [])
-                if isinstance(new_value, list):
-                    if set(new_value) != set(existing_value):
-                        modifications[attr] = [(MODIFY_REPLACE, new_value)]
-                else:
-                    if new_value != (existing_value[0] if existing_value else ''):
-                        modifications[attr] = [(MODIFY_REPLACE, [new_value])]
-            if modifications:
-                if conn.modify(user_dn, modifications):
-                    print(f"User {user['uid']} updated successfully.")
-                else:
-                    print(f"Failed to update user {user['uid']}: {conn.result['description']}")
-            else:
-                print(f"No updates necessary for user {user['uid']}.")
-        else:
-            if conn.add(user_dn, attributes=attrs):
-                print(f"User {user['uid']} created successfully.")
-            else:
-                print(f"Failed to create user {user['uid']}: {conn.result['description']}")
-
-        # Handle group memberships
-        user_groups = user.get('groups', [])
-        for group_name in user_groups:
-            group_dn = f"cn={group_name},{group_base}"
-            if not conn.search(group_dn, '(objectClass=groupOfNames)', search_scope='BASE', attributes=['member']):
-                group_attrs = {
-                    'objectClass': ['groupOfNames', 'top'],
-                    'cn': group_name,
-                    'member': [user_dn]
-                }
-                if conn.add(group_dn, attributes=group_attrs):
-                    print(f"Group {group_name} created and user {user['uid']} added as member.")
-                else:
-                    print(f"Failed to create group {group_name}: {conn.result['description']}")
-            else:
-                group_entry = conn.entries[0]
-                if user_dn not in group_entry.member:
-                    if conn.modify(group_dn, {'member': [(MODIFY_ADD, [user_dn])]}):
-                        print(f"User {user['uid']} added to group {group_name}.")
-                    else:
-                        print(f"Failed to add user {user['uid']} to group {group_name}: {conn.result['description']}")
-                else:
-                    print(f"User {user['uid']} is already a member of group {group_name}.")
+        # Build group_gid_map from existing posixGroups
+        group_gid_map = get_existing_posix_groups(conn, group_base)
+        handle_posix_group_memberships(conn, user, group_base, group_gid_map)
+        handle_group_of_names_memberships(conn, user_dn, user, group_base)
 
     except LDAPException as e:
         print(f"Error in creating user {user['uid']}: {e}")
+        traceback.print_exc()
     finally:
         if conn:
             conn.unbind()
-
 
 def load_users_from_yaml(path):
     """

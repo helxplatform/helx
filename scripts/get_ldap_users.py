@@ -149,31 +149,33 @@ def process_user_entries(user_entries, uid_to_posix_groups, dn_to_groups):
         for attr in retrieve_attributes:
             if attr in entry_dict and entry_dict[attr]:
                 if attr in ['runAsUser', 'runAsGroup', 'fsGroup', 'uidNumber', 'gidNumber']:
-                    processed_entry[attr] = int(entry_dict[attr][0])
+                    value = entry_dict[attr][0]
+                    # Only include the attribute if it's a valid int
+                    if value:
+                        processed_entry[attr] = int(value)
                 elif attr == 'supplementalGroups':
-                    processed_entry[attr] = [int(x) for x in entry_dict[attr]]
+                    supplemental_groups = [int(x) for x in entry_dict[attr]]
+                    if supplemental_groups:
+                        processed_entry[attr] = supplemental_groups
                 else:
                     processed_entry[attr] = entry_dict[attr][0]
-            else:
-                # Assign default values for certain attributes
-                if attr in ['uidNumber', 'gidNumber']:
-                    processed_entry[attr] = None
-                elif attr == 'supplementalGroups':
-                    processed_entry[attr] = []
-                else:
-                    processed_entry[attr] = ""
+            # Do not add attributes that are not present or valid
 
         # Assign posixGroup memberships
-        uid = processed_entry['uid']
-        posix_groups = uid_to_posix_groups.get(uid, [])
-        processed_entry['posixGroups'] = posix_groups
+        uid = processed_entry.get('uid')
+        if uid:
+            posix_groups = uid_to_posix_groups.get(uid, [])
+            if posix_groups:
+                processed_entry['posixGroups'] = posix_groups
 
         # Assign groupOfNames memberships
         user_dn = entry.entry_dn
         groups = dn_to_groups.get(user_dn, [])
-        processed_entry['groups'] = groups
+        if groups:
+            processed_entry['groups'] = groups
 
         result_set.append(processed_entry)
+
     return result_set
 
 def fetch_user_details(ldap_server_url, bind_dn, bind_password, search_base, group_base):

@@ -101,9 +101,10 @@ successfully:
 4. Port-forward OpenLDAP: kubectl port-forward svc/openldap 5389:389
 5. Apply the memberOf overlay: make apply_memberof
 6. Apply the Kubernetes SC overlay: make apply_kubernetes_sc
-7. List users: ./scripts/get_ldap_users.py
-8. Add users from a YAML file: ./scripts/set_ldap_users.py test/users.yaml
-9. Verify users: ./scripts/get_ldap_users.py
+7. Allow Anonymous Access to public info: make allow_anon
+8. List users: ./scripts/get_ldap_users.py
+9. Add users from a YAML file: ./scripts/set_ldap_users.py test/users.yaml
+10. Verify users: ./scripts/get_ldap_users.py
 
 
 ## Configuration Files and Scripts

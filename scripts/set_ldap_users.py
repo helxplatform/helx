@@ -156,10 +156,23 @@ def create_or_update_user(conn, user_dn, attrs):
         None
     """
 
-    # Ensure supplementalGroups is either populated with valid integers or omitted
     if 'supplementalGroups' in attrs:
-        if not attrs['supplementalGroups'] or not all(isinstance(val, int) for val in attrs['supplementalGroups']):
+        if not attrs['supplementalGroups']:
             attrs['supplementalGroups'] = None
+        else:
+            valid_groups = []
+            for val in attrs['supplementalGroups']:
+                try:
+                    int_val = int(val)
+                    valid_groups.append(int_val)
+                except ValueError:
+                    # Handle the case where the value cannot be converted to an integer
+                    print(f"Invalid supplementalGroup value: {val}")
+                    pass  # You can choose to skip invalid values or handle them differently
+            if valid_groups:
+                attrs['supplementalGroups'] = valid_groups
+            else:
+                attrs['supplementalGroups'] = None
 
     if conn.search(user_dn, '(objectClass=*)', search_scope='BASE', attributes=['*']):
         existing_entry = conn.entries[0]

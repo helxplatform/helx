@@ -82,8 +82,6 @@ def ensure_group_base_dn_exists(conn, group_base):
                 if not conn.add(dn, attributes=attrs):
                     print(f"Failed to create DN {dn}: {conn.result['description']}")
                     return False
-            else:
-                print(f"Skipping creation of {dn} (e.g., dc=example) since it’s not an 'ou'.")
     return True
 
 def prepare_user_attributes(user):
@@ -281,7 +279,7 @@ def handle_posix_group_memberships(conn, user, group_base, group_info_map):
             group_exists = True
         else:
             # If the group does not exist, assign a new gidNumber
-            gid_number = max(group_info_map.values(), default=(1000, []))[0] + 1
+            gid_number = max(group_info_map.values(), default=(8192, []))[0] + 1
             group_info_map[group_name] = (gid_number, [])
             group_exists = False
 

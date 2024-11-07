@@ -13,7 +13,7 @@ $(CONFIG_FILE): $(SCRIPT)
 	@echo "$(CONFIG_FILE) has been generated."
 
 # Generate openldap_values.yaml using Python script
-openldap_values.yaml: helx_ldap_config.yaml scripts/generate_openldap_values.py
+openldap_values.yaml: $(CONFIG_FILE) scripts/generate_openldap_values.py
 	@echo "Generating openldap_values.yaml..."
 	scripts/generate_openldap_values.py
 
@@ -26,13 +26,11 @@ helm_repo_add:
 
 # Deploy OpenLDAP using the generated values file
 helm_deploy: openldap_values.yaml
-	@echo "Deploying OpenLDAP with Helm..."
-	helm install openldap openldap/openldap-stack-ha -f openldap_values.yaml
+	@# Extract the namespace from the config file and deploy
+	@NAMESPACE=$$(python3 -c "import yaml; print(yaml.safe_load(open('$(CONFIG_FILE)'))['namespace'])") && \
+	echo "Deploying OpenLDAP with Helm to namespace: $$NAMESPACE" && \
+	helm install openldap openldap/openldap-stack-ha -f openldap_values.yaml -n $$NAMESPACE
 	@echo "OpenLDAP has been deployed."
-
-add_system_users:
-	@echo "Applying Kubernetes service account LDIFs..."
-	python3 scripts/apply_adds.py new/system-users
 
 # Apply the memberOf overlay using the generated script
 apply_memberof:
@@ -46,6 +44,18 @@ apply_kubernetes_sc:
 allow_anon:
 	@echo "Applying Kubernetes service account LDIFs..."
 	python3 scripts/apply_configs.py config/anon
+
+# Apply all configurations
+configure: apply_memberof apply_kubernetes_sc allow_anon
+	@echo "All configurations have been applied."
+
+# Create Kubernetes secret with admin password
+user_mutator_secret:
+	@echo "Creating Kubernetes secret user-mutator-ldap-password..."
+	@NAMESPACE=$$(python3 -c "import yaml; config = yaml.safe_load(open('$(CONFIG_FILE)')); print(config['namespace'])") && \
+	PASSWORD=$$(python3 -c "import yaml; config = yaml.safe_load(open('$(CONFIG_FILE)')); print(config['ldap']['admin']['password'])") && \
+	kubectl create secret generic user-mutator-ldap-password --from-literal=password=$$PASSWORD -n $$NAMESPACE
+	@echo "Kubernetes secret 'user-mutator-ldap-password' has been created in namespace $$NAMESPACE."
 
 # Check if Python is installed
 check-python:

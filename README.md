@@ -57,7 +57,7 @@ Port-forward the OpenLDAP service to your local machine on port 5389:
 kubectl port-forward svc/openldap 5389:389
 ```
 
-### Step 4: Apply LDAP Overlays and Extensions
+### Step 4: Configure LDAP
 
 Run the following Makefile targets to set up the necessary LDAP extensions 
 and overlays:
@@ -65,6 +65,11 @@ and overlays:
 ```
 make apply_memberof  # Apply the memberOf overlay to OpenLDAP
 make apply_kubernetes_sc  # Apply the Kubernetes security context overlay
+make allow_anon  # Apply the Kubernetes security context overlay
+```
+or simply instead the combined target
+```
+make configure
 ```
 
 ### Step 5: List Existing LDAP Users
@@ -99,12 +104,10 @@ successfully:
 2. Add the Helm repository: make helm_add
 3. Deploy OpenLDAP: make helm_deploy
 4. Port-forward OpenLDAP: kubectl port-forward svc/openldap 5389:389
-5. Apply the memberOf overlay: make apply_memberof
-6. Apply the Kubernetes SC overlay: make apply_kubernetes_sc
-7. Allow Anonymous Access to public info: make allow_anon
-8. List users: ./scripts/get_ldap_users.py
-9. Add users from a YAML file: ./scripts/set_ldap_users.py test/users.yaml
-10. Verify users: ./scripts/get_ldap_users.py
+5. Configure LDAP
+6. List users: ./scripts/get_ldap_users.py
+7. Add users from a YAML file: ./scripts/set_ldap_users.py test/users.yaml
+8. Verify users: ./scripts/get_ldap_users.py
 
 
 ## Configuration Files and Scripts

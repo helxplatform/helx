@@ -26,7 +26,7 @@ def prompt_password_with_default(prompt_text, default_password):
 
 def generate_ldap_config():
     """
-    Generate helx_ldap_config.yaml based on user input or defaults, with random 
+    Generate helx_ldap_config.yaml based on user input or defaults, with random
     password generation.
     """
     print("HElX LDAP Configuration Setup")
@@ -35,12 +35,14 @@ def generate_ldap_config():
     default_server_url = "ldap://localhost:5389"
     default_admin_dn = "cn=admin,dc=example,dc=org"
     default_config_dn = "cn=admin,cn=config"
+    default_namespace = "default"
 
     # Generate random passwords as defaults
     default_admin_password = generate_random_password()
     default_config_password = generate_random_password()
 
     # Ask for input with defaults
+    namespace = prompt_with_default("Namespace", default_namespace)
     server_url = prompt_with_default("LDAP Server URL", default_server_url)
     admin_dn = prompt_with_default("Admin Bind DN", default_admin_dn)
     config_dn = prompt_with_default("Config DN", default_config_dn)
@@ -51,6 +53,7 @@ def generate_ldap_config():
 
     # Construct the configuration dictionary
     ldap_config = {
+        'namespace': namespace,
         'ldap': {
             'server_url': server_url,
             'admin': {

@@ -304,7 +304,7 @@ to modify data access is done by applying LDIFs, and so likewise, the
 directory `config/anon` contains the file `access.ldif` which is applied
 by the same program.
 
-### Makefile Suppoer
+### Makefile Support
 As above the same program is invoked with the anon directory.
 ```
 make allow_anon

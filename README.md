@@ -57,7 +57,7 @@ Port-forward the OpenLDAP service to your local machine on port 5389:
 kubectl port-forward svc/openldap 5389:389
 ```
 
-### Step 4: Apply LDAP Overlays and Extensions
+### Step 4: Configure LDAP
 
 Run the following Makefile targets to set up the necessary LDAP extensions 
 and overlays:
@@ -65,6 +65,11 @@ and overlays:
 ```
 make apply_memberof  # Apply the memberOf overlay to OpenLDAP
 make apply_kubernetes_sc  # Apply the Kubernetes security context overlay
+make allow_anon  # Apply the Kubernetes security context overlay
+```
+or simply instead the combined target
+```
+make configure
 ```
 
 ### Step 5: List Existing LDAP Users
@@ -95,15 +100,14 @@ successfully:
 
 ### Summary of Steps
 
-1. Install dependencies: pip install -r requirements.txt
-2. Add the Helm repository: make helm_add
-3. Deploy OpenLDAP: make helm_deploy
-4. Port-forward OpenLDAP: kubectl port-forward svc/openldap 5389:389
-5. Apply the memberOf overlay: make apply_memberof
-6. Apply the Kubernetes SC overlay: make apply_kubernetes_sc
-7. List users: ./scripts/get_ldap_users.py
-8. Add users from a YAML file: ./scripts/set_ldap_users.py test/users.yaml
-9. Verify users: ./scripts/get_ldap_users.py
+1. Install dependencies: `pip install -r requirements.txt`
+2. Add the Helm repository: `make helm_add`
+3. Deploy OpenLDAP: `make helm_deploy`
+4. Port-forward OpenLDAP: `kubectl port-forward svc/openldap 5389:389`
+5. Configure LDAP: `make configure`
+6. List users: `./scripts/get_ldap_users.py`
+7. Add users from a YAML file: `./scripts/set_ldap_users.py test/users.yaml`
+8. Verify users: `./scripts/get_ldap_users.py`
 
 
 ## Configuration Files and Scripts
@@ -276,16 +280,34 @@ pod on behalf of a user.  This is done with LDIF as well.
 
 In addition to managing the `memberOf` overlay, the repository also includes 
 LDIF files related to Kubernetes service account configuration. These LDIF 
-files are located in the `ldif/kubernetesSC` directory and can be processed 
+files are located in the `config/kubernetesSC` directory and can be processed 
 using the same generic LDIF-applying script.
 
 ### Makefile Support
 
 The `apply_kubernetes_sc` Makefile target automates the process of applying 
 these LDIF files. It uses the same generic script (`apply_ldif_files.py`) but 
-starts in the `ldif/kubernetesSC` directory.
+starts in the `config/kubernetesSC` directory.
 ```
 make apply_kubernetes_sc
+```
+## Anonymous access
+
+libnss-ldap works best if it can make anonymous queries to the LDAP server,
+but as there are security implications we want to make access restricted to
+only non-sensitive data.
+
+### Altering access through the use of ACL LDIFs.
+
+As in the previous cases, configuration/specialization of an LDAP server
+to modify data access is done by applying LDIFs, and so likewise, the
+directory `config/anon` contains the file `access.ldif` which is applied
+by the same program.
+
+### Makefile Support
+As above the same program is invoked with the anon directory.
+```
+make allow_anon
 ```
 
 ## General Use Scripts

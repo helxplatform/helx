@@ -4,7 +4,7 @@ replace: olcAccess
 olcAccess: {0}to attrs=userPassword,shadowLastChange
   by self write
   by dn="cn=admin,dc=example,dc=org" write
-  by anonymous auth
+  by anonymous read
   by * none
 olcAccess: {1}to dn.subtree="ou=users,dc=example,dc=org"
   by anonymous read
@@ -14,6 +14,6 @@ olcAccess: {2}to dn.subtree="ou=groups,dc=example,dc=org"
   by anonymous read
   by self read
   by * none
-olcAccess: {3}to * 
+olcAccess: {3}to *
   by dn="cn=admin,dc=example,dc=org" write
   by * none

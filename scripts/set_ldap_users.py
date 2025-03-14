@@ -104,8 +104,8 @@ def prepare_user_attributes(user):
         raise ValueError(f"'either runAsGroup' or 'gidNumber' must be provided for user {user['uid']}")
 
     # Set 'uidNumber' and 'gidNumber' if not present
-    if not user.get('uidNumber',None): user['uidNumber'] = user['runAsUser']
-    if not user.get('gidNumber',None): user['gidNumber'] = user['runAsGroup']
+    if user.get('uidNumber',None) == None: user['uidNumber'] = user.get('runAsUser','0')
+    if user.get('gidNumber',None) == None: user['gidNumber'] = user.get('runAsGroup','0')
 
     # Ensure 'homeDirectory' and 'loginShell' are set
     user['homeDirectory'] = user.get('homeDirectory', f"/home/{user['uid']}")
@@ -117,7 +117,7 @@ def prepare_user_attributes(user):
             'organizationalPerson',
             'person',
             'posixAccount',
-            'kubernetesSC',
+            'helxUser',
             'top'
         ],
         'uid': user.get('uid', None),
@@ -136,7 +136,8 @@ def prepare_user_attributes(user):
         'uidNumber': str(user.get('uidNumber', None)) if 'uidNumber' in user else None,
         'gidNumber': str(user.get('gidNumber', None)) if 'gidNumber' in user else None,
         'homeDirectory': user.get('homeDirectory', None),
-        'loginShell': user.get('loginShell', None)
+        'loginShell': user.get('loginShell', None),
+        'userAlias': user.get('userAlias', None)
     }
 
     return attrs

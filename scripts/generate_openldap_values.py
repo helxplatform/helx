@@ -21,8 +21,17 @@ def generate_helm_values(config):
         'persistence': {
             'enabled': True
         },
+        'phpldapadmin': {
+            'enabled': False
+        },
         'replication': {
             'enabled': False
+        },
+        'ltb-passwd': {
+            'enabled': False
+        },
+       'env': {
+            'LDAP_ALLOW_ANON_BINDING': 'yes'
         }
     }
 

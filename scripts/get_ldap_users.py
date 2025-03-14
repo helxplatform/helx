@@ -45,6 +45,7 @@ def connect_to_ldap(ldap_server_url, bind_dn, bind_password):
     conn = Connection(server, user=bind_dn, password=bind_password, auto_bind=True)
     return conn
 
+
 def fetch_all_users(conn, search_base):
     """
     Fetches all user entries from the LDAP directory.
@@ -56,16 +57,15 @@ def fetch_all_users(conn, search_base):
     Returns:
         list: A list of ldap3.Entry objects representing user entries.
     """
-    search_filter = '(|(objectClass=inetOrgPerson)(objectClass=posixAccount))'
-    retrieve_attributes = [
-        'uid', 'cn', 'sn', 'mail', 'telephoneNumber',
-        'givenName', 'displayName', 'o', 'ou',
-        'runAsUser', 'runAsGroup', 'fsGroup', 'supplementalGroups',
-        'uidNumber', 'gidNumber', 'homeDirectory', 'loginShell'
-    ]
+    search_filter = '(&(objectClass=inetOrgPerson)(objectClass=posixAccount))'
+    # Instead of listing extension attributes (which might not be defined),
+    # request all user and operational attributes. This avoids the invalid
+    # attribute error while still retrieving extension attributes if they exist.
+    retrieve_attributes = ["*", "+"]
 
     conn.search(search_base, search_filter, search_scope=SUBTREE, attributes=retrieve_attributes)
     return conn.entries
+
 
 def fetch_posix_groups(conn, group_base):
     """
@@ -137,7 +137,7 @@ def process_user_entries(user_entries, uid_to_posix_groups, dn_to_groups):
         'uid', 'cn', 'sn', 'mail', 'telephoneNumber',
         'givenName', 'displayName', 'o', 'ou',
         'runAsUser', 'runAsGroup', 'fsGroup', 'supplementalGroups',
-        'uidNumber', 'gidNumber', 'homeDirectory', 'loginShell'
+        'uidNumber', 'gidNumber', 'homeDirectory', 'loginShell', 'userAlias'
     ]
 
     result_set = []

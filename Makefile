@@ -37,16 +37,16 @@ apply_memberof:
 	@echo "Applying memberOf overlay..."
 	python3 scripts/apply_configs.py config/memberof
 
-apply_kubernetes_sc:
-	@echo "Applying Kubernetes service account LDIFs..."
-	python3 scripts/apply_configs.py config/kubernetesSC
-
 allow_anon:
 	@echo "Applying Kubernetes service account LDIFs..."
 	python3 scripts/apply_configs.py config/anon
 
+apply_helx_user:
+	@echo "Applying Kubernetes service account LDIFs..."
+	python3 scripts/apply_configs.py config/helxUser
+
 # Apply all configurations
-configure: apply_memberof apply_kubernetes_sc allow_anon
+configure: apply_memberof allow_anon apply_helx_user
 	@echo "All configurations have been applied."
 
 # Create Kubernetes secret with admin password

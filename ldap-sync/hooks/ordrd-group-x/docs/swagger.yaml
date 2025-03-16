@@ -1,0 +1,86 @@
+basePath: /
+definitions:
+  main.DerivedSpec:
+    properties:
+      baseDN:
+        type: string
+      filter:
+        type: string
+      id:
+        type: string
+      refresh:
+        type: integer
+    type: object
+  main.HookRequest:
+    properties:
+      content:
+        additionalProperties: true
+        type: object
+      dn:
+        type: string
+    type: object
+  main.HookResponse:
+    properties:
+      derived:
+        items:
+          $ref: '#/definitions/main.DerivedSpec'
+        type: array
+      transformed:
+        $ref: '#/definitions/main.Transformed'
+    type: object
+  main.Transformed:
+    properties:
+      content:
+        $ref: '#/definitions/main.TransformedContent'
+      dn:
+        type: string
+    type: object
+  main.TransformedContent:
+    properties:
+      cn:
+        type: string
+      member:
+        items:
+          type: string
+        type: array
+      objectClass:
+        items:
+          type: string
+        type: array
+    type: object
+host: localhost:5001
+info:
+  contact: {}
+  description: This service transforms LDAP entries and derives additional search
+    specifications.
+  title: LDAP Sync Hook Service
+  version: "1.0"
+paths:
+  /hook:
+    post:
+      consumes:
+      - application/json
+      description: Receives an LDAP entry, applies transformation logic, and returns
+        the transformed entry along with derived search specifications.
+      parameters:
+      - description: LDAP Entry Payload
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/main.HookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.HookResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Process LDAP hook payload
+swagger: "2.0"

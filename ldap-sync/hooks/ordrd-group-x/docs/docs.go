@@ -17,17 +17,20 @@ const docTemplate = `{
     "paths": {
         "/hook": {
             "post": {
-                "description": "Receives an LDAP entry, applies transformation logic, and returns the transformed entry along with derived search specifications.",
+                "description": "Receives LDAP entry payloads and returns a transformed",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
                     "application/json"
                 ],
-                "summary": "Process LDAP hook payload",
+                "tags": [
+                    "hook"
+                ],
+                "summary": "Process LDAP hook",
                 "parameters": [
                     {
-                        "description": "LDAP Entry Payload",
+                        "description": "LDAP Hook Request",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -46,10 +49,7 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     }
                 }
@@ -57,20 +57,11 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "main.DerivedSpec": {
+        "main.ErrorResponse": {
             "type": "object",
             "properties": {
-                "baseDN": {
+                "message": {
                     "type": "string"
-                },
-                "filter": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "refresh": {
-                    "type": "integer"
                 }
             }
         },
@@ -92,11 +83,36 @@ const docTemplate = `{
                 "derived": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.DerivedSpec"
+                        "$ref": "#/definitions/main.SearchSpec"
                     }
                 },
+                "reset": {
+                    "type": "boolean"
+                },
                 "transformed": {
-                    "$ref": "#/definitions/main.Transformed"
+                    "description": "set to null if transformation fails",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/main.Transformed"
+                        }
+                    ]
+                }
+            }
+        },
+        "main.SearchSpec": {
+            "type": "object",
+            "properties": {
+                "baseDN": {
+                    "type": "string"
+                },
+                "filter": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "refresh": {
+                    "type": "integer"
                 }
             }
         },
@@ -104,30 +120,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
-                    "$ref": "#/definitions/main.TransformedContent"
+                    "type": "object",
+                    "additionalProperties": true
                 },
                 "dn": {
                     "type": "string"
-                }
-            }
-        },
-        "main.TransformedContent": {
-            "type": "object",
-            "properties": {
-                "cn": {
-                    "type": "string"
-                },
-                "member": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "objectClass": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 }
             }
         }
@@ -140,8 +137,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:5001",
 	BasePath:         "/",
 	Schemes:          []string{},
-	Title:            "LDAP Sync Hook Service",
-	Description:      "This service transforms LDAP entries and derives additional search specifications.",
+	Title:            "ordrd-group-x Hook Service",
+	Description:      "This hook service integrates with the LDAP synchronization",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

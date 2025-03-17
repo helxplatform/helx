@@ -85,6 +85,7 @@ type TransformedEntry struct {
 type HookResponse struct {
 	Transformed *TransformedEntry   `json:"transformed"`
 	Derived     []DerivedSearchSpec `json:"derived"`
+	Reset       bool                `json:"reset"`
 }
 
 var config Config
@@ -259,6 +260,14 @@ func processHookResponse(resp interface{}) {
 			searchResults[ds.ID] = make(map[string]LDAPResult)
 			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, stopChan)
 			log.Printf("Derived search created: %s", ds.ID)
+		}
+	}
+	// Process the reset directive.
+	if hookResp.Reset {
+		log.Printf("Reset directive received. Discarding internal search results.")
+		// Clear all internal search results.
+		for id := range searchResults {
+			searchResults[id] = make(map[string]LDAPResult)
 		}
 	}
 }

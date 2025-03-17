@@ -25,6 +25,8 @@ definitions:
         items:
           $ref: '#/definitions/main.DerivedSearchSpec'
         type: array
+      reset:
+        type: boolean
       transformed:
         $ref: '#/definitions/main.TransformedEntry'
     type: object
@@ -84,12 +86,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Receives an LDAP entry, applies transformation logic, and returns
-        the transformed entry along with derived search specifications.
+      description: Process LDAP hook payload and transform it.
       parameters:
-      - description: LDAP Entry Payload
+      - description: LDAP Hook Payload
         in: body
-        name: payload
+        name: hook
         required: true
         schema:
           $ref: '#/definitions/main.HookRequest'
@@ -106,7 +107,7 @@ paths:
             additionalProperties:
               type: string
             type: object
-      summary: Process LDAP hook payload
+      summary: Process LDAP Hook
   /readyz:
     get:
       description: Returns OK if the application is ready to serve traffic.

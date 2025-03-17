@@ -40,18 +40,18 @@ const docTemplate = `{
         },
         "/hook": {
             "post": {
-                "description": "Receives an LDAP entry, applies transformation logic, and returns the transformed entry along with derived search specifications.",
+                "description": "Process LDAP hook payload and transform it.",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
                     "application/json"
                 ],
-                "summary": "Process LDAP hook payload",
+                "summary": "Process LDAP Hook",
                 "parameters": [
                     {
-                        "description": "LDAP Entry Payload",
-                        "name": "payload",
+                        "description": "LDAP Hook Payload",
+                        "name": "hook",
                         "in": "body",
                         "required": true,
                         "schema": {
@@ -368,6 +368,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/main.DerivedSearchSpec"
                     }
+                },
+                "reset": {
+                    "type": "boolean"
                 },
                 "transformed": {
                     "$ref": "#/definitions/main.TransformedEntry"

@@ -1,15 +1,9 @@
 basePath: /
 definitions:
-  main.DerivedSpec:
+  main.ErrorResponse:
     properties:
-      baseDN:
+      message:
         type: string
-      filter:
-        type: string
-      id:
-        type: string
-      refresh:
-        type: integer
     type: object
   main.HookRequest:
     properties:
@@ -23,47 +17,48 @@ definitions:
     properties:
       derived:
         items:
-          $ref: '#/definitions/main.DerivedSpec'
+          $ref: '#/definitions/main.SearchSpec'
         type: array
+      reset:
+        type: boolean
       transformed:
-        $ref: '#/definitions/main.Transformed'
+        allOf:
+        - $ref: '#/definitions/main.Transformed'
+        description: set to null if transformation fails
+    type: object
+  main.SearchSpec:
+    properties:
+      baseDN:
+        type: string
+      filter:
+        type: string
+      id:
+        type: string
+      refresh:
+        type: integer
     type: object
   main.Transformed:
     properties:
       content:
-        $ref: '#/definitions/main.TransformedContent'
+        additionalProperties: true
+        type: object
       dn:
         type: string
-    type: object
-  main.TransformedContent:
-    properties:
-      cn:
-        type: string
-      member:
-        items:
-          type: string
-        type: array
-      objectClass:
-        items:
-          type: string
-        type: array
     type: object
 host: localhost:5001
 info:
   contact: {}
-  description: This service transforms LDAP entries and derives additional search
-    specifications.
-  title: LDAP Sync Hook Service
+  description: This hook service integrates with the LDAP synchronization
+  title: ordrd-group-x Hook Service
   version: "1.0"
 paths:
   /hook:
     post:
       consumes:
       - application/json
-      description: Receives an LDAP entry, applies transformation logic, and returns
-        the transformed entry along with derived search specifications.
+      description: Receives LDAP entry payloads and returns a transformed
       parameters:
-      - description: LDAP Entry Payload
+      - description: LDAP Hook Request
         in: body
         name: payload
         required: true
@@ -79,8 +74,8 @@ paths:
         "400":
           description: Bad Request
           schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Process LDAP hook payload
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Process LDAP hook
+      tags:
+      - hook
 swagger: "2.0"

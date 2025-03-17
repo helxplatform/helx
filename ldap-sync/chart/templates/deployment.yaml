@@ -54,6 +54,7 @@ spec:
         {{- range $index,$hook := .Values.config.hooks }}
         - name: {{ $hook.name }}
           image: {{ $hook.image.repository }}:{{ $hook.image.tag }}
+          imagePullPolicy: Always
         {{- end }}
         {{-  end }}
       volumes:

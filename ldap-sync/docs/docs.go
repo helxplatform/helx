@@ -40,18 +40,21 @@ const docTemplate = `{
         },
         "/hook": {
             "post": {
-                "description": "Process LDAP hook payload and transform it.",
+                "description": "Receives LDAP entry payloads and returns a transformed",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
                     "application/json"
                 ],
-                "summary": "Process LDAP Hook",
+                "tags": [
+                    "hook"
+                ],
+                "summary": "Process LDAP hook",
                 "parameters": [
                     {
-                        "description": "LDAP Hook Payload",
-                        "name": "hook",
+                        "description": "LDAP Hook Request",
+                        "name": "payload",
                         "in": "body",
                         "required": true,
                         "schema": {
@@ -68,6 +71,70 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/loglevel": {
+            "get": {
+                "description": "Returns the current log level.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "log"
+                ],
+                "summary": "Get current log level",
+                "responses": {
+                    "200": {
+                        "description": "current log level",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update the logging level at runtime.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "log"
+                ],
+                "summary": "Update log level",
+                "parameters": [
+                    {
+                        "description": "New log level",
+                        "name": "level",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.LogLevelRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated log level",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid payload or log level",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -348,6 +415,14 @@ const docTemplate = `{
                 }
             }
         },
+        "main.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "main.HookRequest": {
             "type": "object",
             "properties": {
@@ -374,6 +449,14 @@ const docTemplate = `{
                 },
                 "transformed": {
                     "$ref": "#/definitions/main.TransformedEntry"
+                }
+            }
+        },
+        "main.LogLevelRequest": {
+            "type": "object",
+            "properties": {
+                "level": {
+                    "type": "string"
                 }
             }
         },

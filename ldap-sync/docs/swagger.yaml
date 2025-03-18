@@ -11,6 +11,11 @@ definitions:
       refresh:
         type: integer
     type: object
+  main.ErrorResponse:
+    properties:
+      message:
+        type: string
+    type: object
   main.HookRequest:
     properties:
       content:
@@ -29,6 +34,11 @@ definitions:
         type: boolean
       transformed:
         $ref: '#/definitions/main.TransformedEntry'
+    type: object
+  main.LogLevelRequest:
+    properties:
+      level:
+        type: string
     type: object
   main.ResultEntryFull:
     properties:
@@ -86,11 +96,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: Process LDAP hook payload and transform it.
+      description: Receives LDAP entry payloads and returns a transformed
       parameters:
-      - description: LDAP Hook Payload
+      - description: LDAP Hook Request
         in: body
-        name: hook
+        name: payload
         required: true
         schema:
           $ref: '#/definitions/main.HookRequest'
@@ -104,10 +114,54 @@ paths:
         "400":
           description: Bad Request
           schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Process LDAP hook
+      tags:
+      - hook
+  /loglevel:
+    get:
+      description: Returns the current log level.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: current log level
+          schema:
             additionalProperties:
               type: string
             type: object
-      summary: Process LDAP Hook
+      summary: Get current log level
+      tags:
+      - log
+    put:
+      consumes:
+      - application/json
+      description: Update the logging level at runtime.
+      parameters:
+      - description: New log level
+        in: body
+        name: level
+        required: true
+        schema:
+          $ref: '#/definitions/main.LogLevelRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated log level
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Invalid payload or log level
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update log level
+      tags:
+      - log
   /readyz:
     get:
       description: Returns OK if the application is ready to serve traffic.

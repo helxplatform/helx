@@ -3,9 +3,10 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"reflect"
@@ -43,6 +44,11 @@ type SearchSpec struct {
 	Refresh int
 	Stop    chan struct{}
 	BaseDN  string // New field: the base DN to use for this search.
+}
+
+// LogLevelRequest represents the payload for updating the log level.
+type LogLevelRequest struct {
+	Level string `json:"level"`
 }
 
 // SearchInfo represents the JSON structure for a search.
@@ -89,8 +95,61 @@ type HookResponse struct {
 }
 
 var config Config
+var logger *slog.Logger
+var currentLogLevel string
 var searches = make(map[string]*SearchSpec)
 var searchResults = make(map[string]map[string]LDAPResult)
+
+// initLogger initializes the logger using log/slog.
+// It checks the --loglevel flag first, then the LOG_LEVEL env variable,
+// and defaults to "info" if neither is set.
+func initLogger(loglevel string) {
+	lvlStr := os.Getenv("LOG_LEVEL")
+	if loglevel != "" {
+		lvlStr = loglevel
+	}
+	if lvlStr == "" {
+		lvlStr = "info"
+	}
+	var lvl slog.Level = slog.LevelInfo
+	switch strings.ToLower(lvlStr) {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	case "info":
+		lvl = slog.LevelInfo
+	}
+	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     lvl,
+		AddSource: true,
+	})
+	logger = slog.New(h)
+	logger.Info("Logger initialized", "level", lvlStr)
+}
+
+// setLogLevel updates the global logger to the new level.
+func setLogLevel(newLevel string) {
+	var lvl slog.Level = slog.LevelInfo
+	switch strings.ToLower(newLevel) {
+	case "debug":
+		lvl = slog.LevelDebug
+	case "warn":
+		lvl = slog.LevelWarn
+	case "error":
+		lvl = slog.LevelError
+	case "info":
+		lvl = slog.LevelInfo
+	}
+	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     lvl,
+		AddSource: true,
+	})
+	logger = slog.New(h)
+	logger.Info("Log level updated", "newLevel", newLevel)
+}
 
 // loadConfig reads the YAML config file
 func loadConfig(path string) error {
@@ -195,7 +254,7 @@ func storeDestinationLDAP(entry *TransformedEntry) error {
 		if err = l.Add(addReq); err != nil {
 			return err
 		}
-		log.Printf("Added entry %s to destination LDAP", entry.DN)
+		logger.Info("Added entry to destination LDAP", "DN", entry.DN)
 	} else {
 		// If the entry exists, update it.
 		modReq := ldap.NewModifyRequest(entry.DN, nil)
@@ -205,33 +264,24 @@ func storeDestinationLDAP(entry *TransformedEntry) error {
 		if err = l.Modify(modReq); err != nil {
 			return err
 		}
-		log.Printf("Modified entry %s in destination LDAP", entry.DN)
+		logger.Info("Modified entry in destination LDAP", "DN", entry.DN)
 	}
 	return nil
 }
 
 // processHookResponse is a stub for processing the hook response.
-func processHookResponse(resp interface{}) {
-	// Convert resp (which might be a generic map) into our HookResponse struct.
-	var hookResp HookResponse
-	data, err := json.Marshal(resp)
-	if err != nil {
-		log.Printf("Error marshalling hook response: %v", err)
-		return
-	}
-	if err := json.Unmarshal(data, &hookResp); err != nil {
-		log.Printf("Error unmarshalling hook response: %v", err)
-		return
-	}
+func processHookResponse(hookResp HookResponse) {
+	// Log the parsed hook response values.
+	logger.Debug("Processing Hook response", "Transformed", hookResp.Transformed, "Derived", hookResp.Derived, "Reset", hookResp.Reset)
 
 	// Process the transformed element (if present).
 	if hookResp.Transformed != nil {
-		log.Printf("Processing transformed hook response for DN: %s", hookResp.Transformed.DN)
+		logger.Debug("Processing transformed hook response for DN", "DN", hookResp.Transformed.DN)
 		if err := storeDestinationLDAP(hookResp.Transformed); err != nil {
-			log.Printf("Error storing entry in destination LDAP: %v", err)
+			logger.Error("Error storing entry in destination LDAP", "Err", err)
 		}
 	} else {
-		log.Printf("No transformed data in hook response")
+		logger.Info("No transformed data in hook response")
 	}
 
 	// Process each derived search provided.
@@ -245,7 +295,7 @@ func processHookResponse(resp interface{}) {
 			spec.BaseDN = ds.BaseDN
 			spec.Stop = stopChan
 			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, stopChan)
-			log.Printf("Derived search updated: %s", ds.ID)
+			logger.Info("Derived search updated", "SearchId", ds.ID)
 		} else {
 			// Create a new search.
 			stopChan := make(chan struct{})
@@ -259,12 +309,12 @@ func processHookResponse(resp interface{}) {
 			// Initialize the structured results store for this search id.
 			searchResults[ds.ID] = make(map[string]LDAPResult)
 			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, stopChan)
-			log.Printf("Derived search created: %s", ds.ID)
+			logger.Info("Derived search created", "SearchId", ds.ID)
 		}
 	}
 	// Process the reset directive.
 	if hookResp.Reset {
-		log.Printf("Reset directive received. Discarding internal search results.")
+		logger.Info("Reset directive received. Discarding internal search results")
 		// Clear all internal search results.
 		for id := range searchResults {
 			searchResults[id] = make(map[string]LDAPResult)
@@ -276,7 +326,7 @@ func processHookResponse(resp interface{}) {
 func sendHooks(result LDAPResult) {
 	payload, err := json.Marshal(result)
 	if err != nil {
-		log.Printf("Error marshalling hook payload for DN %s: %v", result.DN, err)
+		logger.Error("Error marshalling hook payload for DN", "DN", result.DN, "Err", err)
 		return
 	}
 	for _, url := range config.Hooks {
@@ -284,21 +334,20 @@ func sendHooks(result LDAPResult) {
 		go func(hookURL string) {
 			resp, err := http.Post(hookURL, "application/json", bytes.NewBuffer(payload))
 			if err != nil {
-				log.Printf("Error posting to hook %s: %v", hookURL, err)
+				logger.Error("Error posting to hook", "URL", hookURL, "Err", err)
 				return
 			}
 			defer resp.Body.Close()
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
-				log.Printf("Error reading hook response from %s: %v", hookURL, err)
+				logger.Error("Error reading hook response", "URL", hookURL, "Err", err)
 				return
 			}
-			var hookResp struct {
-				Transformed interface{} `json:"transformed"`
-				Derived     interface{} `json:"derived"`
-			}
+
+			var hookResp HookResponse
+
 			if err := json.Unmarshal(body, &hookResp); err != nil {
-				log.Printf("Error unmarshalling hook response from %s: %v", hookURL, err)
+				logger.Error("Error unmarshalling hook response", "URL", hookURL, "Err", err)
 				return
 			}
 			processHookResponse(hookResp)
@@ -328,15 +377,15 @@ func processLDAPEntry(id string, entry *ldap.Entry) {
 	// Update the searchResults for the given search id.
 	if existing, exists := searchResults[id][dn]; !exists {
 		searchResults[id][dn] = newResult
-		log.Printf("New item retrieved: %s for search id: %s", dn, id)
+		logger.Info("New item retrieved", "DN", dn, "SearchId", id)
 		sendHooks(newResult)
 	} else {
 		if !reflect.DeepEqual(existing.Content, attrMap) {
 			searchResults[id][dn] = newResult
-			log.Printf("Updated item: %s for search id: %s", dn, id)
+			logger.Info("Updated item search", "DN", dn, "SearchId", id)
 			sendHooks(newResult)
 		} else {
-			log.Printf("No change for: %s for search id: %s", dn, id)
+			logger.Debug("No change", "DN", dn, "SearchId", id)
 		}
 	}
 }
@@ -346,17 +395,17 @@ func ldapSearchAndSync(id, filter, baseDN string, refresh int, stopChan chan str
 	for {
 		select {
 		case <-stopChan:
-			log.Printf("Search %s cancelled", id)
+			logger.Info("Search cancelled", "SearchId", id)
 			return
 		default:
 		}
 
-		log.Printf("Performing LDAP search with filter: %s for search id: %s using baseDN: %s", filter, id, baseDN)
+		logger.Debug("Performing LDAP search with filter", "Filter", filter, "SearchId", id, "BaseDN", baseDN)
 
 		// Connect and bind using the helper.
 		l, err := connectAndBindLDAP()
 		if err != nil {
-			log.Printf("Error connecting and binding to LDAP: %v", err)
+			logger.Error("Error connecting and binding to LDAP", "Err", err)
 			select {
 			case <-stopChan:
 				return
@@ -368,7 +417,7 @@ func ldapSearchAndSync(id, filter, baseDN string, refresh int, stopChan chan str
 		// Perform the LDAP search using the helper.
 		sr, err := performLDAPSearch(l, baseDN, filter)
 		if err != nil {
-			log.Printf("Error performing search: %v", err)
+			logger.Error("Error performing search", "Err", err)
 			l.Close()
 			select {
 			case <-stopChan:
@@ -386,7 +435,7 @@ func ldapSearchAndSync(id, filter, baseDN string, refresh int, stopChan chan str
 
 		select {
 		case <-stopChan:
-			log.Printf("Search %s cancelled during wait", id)
+			logger.Debug("Search cancelled", "SearchId", id)
 			return
 		case <-time.After(time.Duration(refresh) * time.Second):
 		}
@@ -542,6 +591,8 @@ func deleteSearchHandler(c echo.Context) error {
 	close(spec.Stop)
 	// Remove from the map.
 	delete(searches, id)
+	// Remove the results too
+	delete(searchResults, id)
 	return c.String(http.StatusOK, "Search deleted")
 }
 
@@ -584,6 +635,56 @@ func getResultsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, entries)
 }
 
+// getLogLevelHandler is a REST endpoint that reports the current log level.
+// @Summary Get current log level
+// @Description Returns the current log level.
+// @Tags log
+// @Produce json
+// @Success 200 {object} map[string]string "current log level"
+// @Router /loglevel [get]
+func getLogLevelHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{
+		"level": currentLogLevel,
+	})
+}
+
+// logLevelHandler is a REST endpoint to update log level at runtime.
+// @Summary Update log level
+// @Description Update the logging level at runtime.
+// @Tags log
+// @Accept json
+// @Produce json
+// @Param level body LogLevelRequest true "New log level"
+// @Success 200 {object} map[string]string "Updated log level"
+// @Failure 400 {object} map[string]string "Invalid payload or log level"
+// @Router /loglevel [put]
+func logLevelHandler(c echo.Context) error {
+	type reqBody struct {
+		Level string `json:"level"`
+	}
+	var req reqBody
+	if err := c.Bind(&req); err != nil {
+		logger.Error("Failed to bind log level request", "Err", err)
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid payload",
+		})
+	}
+	newLevel := strings.ToLower(req.Level)
+	switch newLevel {
+	case "debug", "info", "warn", "error":
+		setLogLevel(newLevel)
+	default:
+		logger.Error("Invalid log level provided", "Level", req.Level)
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "Invalid log level",
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "Log level updated",
+		"level":   req.Level,
+	})
+}
+
 // healthzHandler handles the liveness probe.
 // @Summary Liveness Probe
 // @Description Returns OK if the application is running.
@@ -612,17 +713,21 @@ func readyzHandler(c echo.Context) error {
 // @host localhost:5500
 // @BasePath /
 func main() {
+	var loglevel string
+
+	flag.StringVar(&loglevel, "loglevel", "", "Set the log level (debug, info, warn, error)")
+	flag.Parse()
+	initLogger(loglevel)
+
 	// Load configuration from /etc/ldap-sync/config.yaml.
 	if err := loadConfig("/etc/ldap-sync/config.yaml"); err != nil {
-		log.Fatalf("Error loading config: %v", err)
+		logger.Error("Error loading config", "Err", err)
 		os.Exit(1)
 	}
 
 	// Initialize Echo.
 	e := echo.New()
 	e.Use(middleware.Recover())
-
-	// Configure Logger middleware to skip logging for /healthz and /readyz endpoints.
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Skipper: func(c echo.Context) bool {
 			path := c.Request().URL.Path
@@ -636,6 +741,8 @@ func main() {
 	e.PUT("/search/:id", updateSearchHandler)
 	e.DELETE("/search/:id", deleteSearchHandler)
 	e.GET("/results/:id", getResultsHandler)
+	e.PUT("/loglevel", logLevelHandler)
+	e.GET("/loglevel", getLogLevelHandler)
 	e.GET("/healthz", healthzHandler)
 	e.GET("/readyz", readyzHandler)
 
@@ -647,6 +754,10 @@ func main() {
 	// Register the Swagger documentation endpoint.
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 
-	log.Println("Server started on :5500")
-	e.Start(":5500")
+	e.GET("/", func(c echo.Context) error {
+		return c.Redirect(http.StatusFound, "/swagger/index.html")
+	})
+
+	logger.Info("Server started on :5500")
+	e.Logger.Fatal(e.Start(":5500"))
 }

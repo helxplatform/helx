@@ -51,11 +51,11 @@ DEBUG := false
 endif
 
 ifndef LOG_LEVEL
-LOG_LEVEL := "info"
+LOG_LEVEL := "INFO"
 endif
 
 ifeq "${DEBUG}" "true"
-LOG_LEVEL := "debug"
+LOG_LEVEL := "DEBUG"
 endif
 
 ifeq "${ENVS_FROM_FILE}" "true"

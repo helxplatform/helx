@@ -354,6 +354,8 @@ class KubernetesCompute(Compute):
             raise DeleteException (
                 message=f"Failed to delete system: {name}",
                 details=text)
+        
+        logger.info (f"terminated app with sid { name }")
         return {
         }
     

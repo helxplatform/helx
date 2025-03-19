@@ -1,0 +1,126 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "This hook service integrates with the LDAP synchronization",
+        "title": "ordrd-group-x Hook Service",
+        "contact": {},
+        "version": "1.0"
+    },
+    "host": "localhost:5001",
+    "basePath": "/",
+    "paths": {
+        "/hook": {
+            "post": {
+                "description": "Receives LDAP entry payloads and returns a transformed",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "hook"
+                ],
+                "summary": "Process LDAP hook",
+                "parameters": [
+                    {
+                        "description": "LDAP Hook Request",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.HookRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.HookResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "main.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.HookRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "dn": {
+                    "type": "string"
+                }
+            }
+        },
+        "main.HookResponse": {
+            "type": "object",
+            "properties": {
+                "derived": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/main.SearchSpec"
+                    }
+                },
+                "reset": {
+                    "type": "boolean"
+                },
+                "transformed": {
+                    "description": "set to null if transformation fails",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/main.Transformed"
+                        }
+                    ]
+                }
+            }
+        },
+        "main.SearchSpec": {
+            "type": "object",
+            "properties": {
+                "baseDN": {
+                    "type": "string"
+                },
+                "filter": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "refresh": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.Transformed": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "dn": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

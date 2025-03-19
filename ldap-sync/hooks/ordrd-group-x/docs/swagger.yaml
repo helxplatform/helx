@@ -1,0 +1,81 @@
+basePath: /
+definitions:
+  main.ErrorResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  main.HookRequest:
+    properties:
+      content:
+        additionalProperties: true
+        type: object
+      dn:
+        type: string
+    type: object
+  main.HookResponse:
+    properties:
+      derived:
+        items:
+          $ref: '#/definitions/main.SearchSpec'
+        type: array
+      reset:
+        type: boolean
+      transformed:
+        allOf:
+        - $ref: '#/definitions/main.Transformed'
+        description: set to null if transformation fails
+    type: object
+  main.SearchSpec:
+    properties:
+      baseDN:
+        type: string
+      filter:
+        type: string
+      id:
+        type: string
+      refresh:
+        type: integer
+    type: object
+  main.Transformed:
+    properties:
+      content:
+        additionalProperties: true
+        type: object
+      dn:
+        type: string
+    type: object
+host: localhost:5001
+info:
+  contact: {}
+  description: This hook service integrates with the LDAP synchronization
+  title: ordrd-group-x Hook Service
+  version: "1.0"
+paths:
+  /hook:
+    post:
+      consumes:
+      - application/json
+      description: Receives LDAP entry payloads and returns a transformed
+      parameters:
+      - description: LDAP Hook Request
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/main.HookRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.HookResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Process LDAP hook
+      tags:
+      - hook
+swagger: "2.0"

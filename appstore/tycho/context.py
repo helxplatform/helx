@@ -47,7 +47,7 @@ class TychoContext:
         if tycho_config_url != "":
             tycho_config_url += "/" if not tycho_config_url.endswith("/") else ""
         self.tycho_config_url = tycho_config_url
-        logger.info (f"-- TychoContext.__init__: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {self.tycho_config_url} | stub: {stub}")
+        logger.debug (f"-- TychoContext.__init__: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {self.tycho_config_url} | stub: {stub}")
         self.http_session = CachedSession (cache_name='tycho-registry')
         self.registry = self._get_config(registry_config)
         self.app_defaults = self._get_config(app_defaults_config)
@@ -62,7 +62,7 @@ class TychoContext:
 
     def _get_config(self, file_name):
         """ Load the registry metadata. """
-        logger.info (f"-- loading config:\n file_name: {file_name}\ntycho_config_url: {self.tycho_config_url}")
+        logger.debug (f"-- loading config:\n file_name: {file_name}\ntycho_config_url: {self.tycho_config_url}")
         config = {}
         if self.tycho_config_url == "":
             """ Load it from the Tycho conf directory for now. Perhaps more dynamic in the future. """
@@ -113,7 +113,7 @@ class TychoContext:
         for mixer in context.get("mixin", []):
             for app in apps:
                 if contexts.get(mixer,None) != None and contexts[mixer].get("apps",None) != None and contexts[mixer]["apps"].get(app,None) != None:
-                    logger.info("mixing " + app)
+                    logger.debug("mixing " + app)
                     apps[app] = mixin_merge.merge(copy.deepcopy(apps[app]),copy.deepcopy(contexts[mixer]["apps"].get(app))) 
         return apps
 
@@ -123,7 +123,7 @@ class TychoContext:
         contexts = self.registry.get ('contexts', {})
         if not self.product in contexts:
             raise ContextException (f"undefined product {self.product} not found in contexts.")
-        logger.info (f"-- load-context: id:{self.product}")
+        logger.debug (f"-- load-context: id:{self.product}")
         '''
         context = contexts[self.product]
         apps = context.get ('apps', {})
@@ -286,7 +286,7 @@ class TychoContext:
     
     def start (self, principal, app_id, resource_request, host, extra_container_env={}):
         """ Get application metadata, docker-compose structure, settings, and compose API request. """
-        logger.info(f"\nprincipal: {principal}\napp_id: {app_id}\n"
+        logger.debug(f"\nprincipal: {principal}\napp_id: {app_id}\n"
                     f"resource_request: {resource_request}\nhost: {host}")
         spec = self.get_spec (app_id)
         logger.debug(f"context.start - \nspec: {spec}")
@@ -358,7 +358,7 @@ class TychoContext:
             running = { v.name : v.port for v in system.services }
             for name, port in services.items ():
                 assert name in running, f"Svc {name} expected but {services.keys()} actually running."            
-            logger.info (
+            logger.debug (
                 f"  -- started app id:{app_id} user:{principal.username} id:{system.identifier} services:{list(running.items ())}")
         return system
     
@@ -429,7 +429,7 @@ class ContextFactory:
             logger.debug("ContextFactory.__init__: creating contexts dictionary")
             self.contexts = {}
     def get (self, product, registry_config="app-registry.yaml", app_defaults_config="app-defaults.yaml", context_type="null", tycho_config_url=""):
-        logger.info (f"-- ContextFactory.get: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {tycho_config_url} | context_type: {context_type}")
+        logger.debug (f"-- ContextFactory.get: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {tycho_config_url} | context_type: {context_type}")
         if context_type in self.contexts:
             logger.debug(f"ContextFactory.get: returning existing context for {context_type}")
             returnContext = self.contexts[context_type]

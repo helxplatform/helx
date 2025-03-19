@@ -74,7 +74,7 @@ class KubernetesCompute(Compute):
                             continue
                         else:
                             notExists = False
-                            logger.info(f"PVC {volume['volume_name']} exists.")
+                            logger.debug(f"PVC {volume['volume_name']} exists.")
                             break
                 if notExists and volume["volume_name"] != 'stdnfs':
                     volumesNA.append(index)
@@ -89,7 +89,7 @@ class KubernetesCompute(Compute):
             field_sel_api_response = self.api.list_namespaced_service(field_selector=f"metadata.name={ambassador_service_name}", namespace=namespace)
             return len(field_sel_api_response.items) == 1
         except ApiException as e:
-            logger.info(f"There was a problem assessing whether the ambassador service is running.", e)
+            logger.debug(f"There was a problem assessing whether the ambassador service is running.", e)
 
     def start (self, system, namespace="default"):
         """ Start an abstractly described distributed system on the cluster.
@@ -243,7 +243,7 @@ class KubernetesCompute(Compute):
                 message=f"Unable to start system: {system.name}",
                 details=text)
 
-        logger.info (f"result of the app launch: {json.dumps(result,indent=2)}")
+        logger.debug (f"result of the app launch: {json.dumps(result,indent=2)}")
         return result
 
     def get_service_ip_address (self, service_metadata):
@@ -258,7 +258,7 @@ class KubernetesCompute(Compute):
         ip_address = None if os.environ.get("DEV_PHASE", "prod") != "test" else "127.0.0.1"
         try:
             app_id = service_metadata.metadata.labels["tycho-app"]
-            logger.info (f"-================================> *** {app_id}")
+            logger.debug (f"-================================> *** {app_id}")
             if not app_id in port_forwards:
                 port_forwards[app_id] = app_id #process.pid
                 sleep (3)

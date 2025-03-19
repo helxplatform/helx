@@ -350,7 +350,7 @@ class TychoClient:
             :returns: A list of all the patches applied to the system
             :rtype: A list
         """
-        logger.info(f"System specifications and metadata to be modified: {mod_items}")
+        logger.debug(f"System specifications and metadata to be modified: {mod_items}")
         try:
             response = self.modify(mod_items)
             logger.debug(f"TychoClient.patch - {json.dumps(response, indent=2)}")
@@ -422,7 +422,7 @@ class TychoClientFactory:
                 if len(ip) > 0:
                     try:
                         ipaddress.ip_address (ip)
-                        logger.info (f"configuring minikube ip: {ip}")
+                        logger.debug (f"configuring minikube ip: {ip}")
                         port = service.spec.ports[0].node_port
                         logger.debug (f"located tycho api instance in minikube")
                         url = f"http://{ip}:{port}"
@@ -433,9 +433,9 @@ class TychoClientFactory:
         except Exception as e:
             url = default_url
             print(f"url: {url}")
-            logger.info (f"cannot find {name} in namespace {namespace}")
+            logger.debug (f"cannot find {name} in namespace {namespace}")
 
-        logger.info (f"creating tycho client with url: {url}")
+        logger.debug (f"creating tycho client with url: {url}")
         return TychoClient (url=url)
 
 
@@ -578,7 +578,7 @@ if __name__ == "__main__":
             """ That didn't work so use the default value. """
             client = TychoClient (url=args.service)
     if not client:
-        logger.info (f"creating client directly {args.service}")
+        logger.debug (f"creating client directly {args.service}")
         client = TychoClient (url=args.service)
 
     if args.up:

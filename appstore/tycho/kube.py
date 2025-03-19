@@ -243,6 +243,7 @@ class KubernetesCompute(Compute):
                 message=f"Unable to start system: {system.name}",
                 details=text)
 
+        logger.info (f"launched app { system.name } with sid { system.identifier }")
         logger.debug (f"result of the app launch: {json.dumps(result,indent=2)}")
         return result
 

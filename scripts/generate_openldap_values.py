@@ -30,10 +30,17 @@ def generate_helm_values(config):
         'ltb-passwd': {
             'enabled': False
         },
-       'env': {
+        'env': {
             'LDAP_ALLOW_ANON_BINDING': 'yes'
         }
     }
+
+    # Configure podSecurityContext based on the OpenShift flag.
+    if config.get("openshift", False):
+        helm_values['podSecurityContext'] = {
+            'enabled': True,
+            'fsGroup': None
+        }
 
     # Write the Helm values to openldap_values.yaml
     with open("openldap_values.yaml", "w") as helm_file:

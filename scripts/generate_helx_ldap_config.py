@@ -50,10 +50,15 @@ def generate_ldap_config():
     # Prompt for passwords with generated defaults
     admin_password = prompt_password_with_default("Admin Password", default_admin_password)
     config_password = prompt_password_with_default("Config Password", default_config_password)
+    
+    # Prompt for OpenShift flag (default is false)
+    openshift_input = prompt_with_default("Running on OpenShift? (true/false)", "false")
+    openshift = openshift_input.lower() == "true"
 
-    # Construct the configuration dictionary
+    # Construct the configuration dictionary, including the new "openshift" flag
     ldap_config = {
         'namespace': namespace,
+        'openshift': openshift,
         'ldap': {
             'server_url': server_url,
             'admin': {

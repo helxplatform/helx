@@ -186,8 +186,7 @@ class TychoClient:
             :param request: A request formatted as above.
             :type request: JSON
         """
-        logger.error (f"-- delete: {json.dumps(request, indent=2)}")
-        print (f"-- delete: {json.dumps(request, indent=2)}")
+        logger.debug (f"-- delete service: {json.dumps(request, indent=2)}")
         return self.request ("delete", request)
     
     def status (self, request): 
@@ -259,10 +258,10 @@ class TychoClient:
         response = self.start (request)
         logger.debug (f"client.up - response: {response}")
         if response.status == 'error':
-            print (response.message)
+            logger.error (f"failed to bring up service: { response.message }")
         else:
             format_string = '{:<30} {:<35} {:<15} {:<7}'
-            print (format_string.format("SERVICE", "GUID", "IP_ADDRESS", "PORT"))
+            logger.debug (f"brought up service: { format_string.format('SERVICE', 'GUID', 'IP_ADDRESS', 'PORT') }")
             for service in response.services:
                 print (format_string.format (
                     TemplateUtils.trunc (service.name, max_len=28),
@@ -429,11 +428,11 @@ class TychoClientFactory:
                     except ValueError as e:
                         logger.error ("unable to get minikube ip address")
                         traceback.print_exc()
-            print(f"URL: {url}")
+            logger.debug (f"using client URL: {url}")
         except Exception as e:
             url = default_url
-            print(f"url: {url}")
             logger.debug (f"cannot find {name} in namespace {namespace}")
+            logger.debug (f"using fallback client URL: {url}")
 
         logger.debug (f"creating tycho client with url: {url}")
         return TychoClient (url=url)
@@ -522,7 +521,7 @@ if __name__ == "__main__":
             system = metadata['System']
         if 'Settings' in metadata.keys():
             settings = metadata['Settings']
-            print(f"settings: {settings}")
+            logger.debug(f"using settings: {settings}")
 
     elif args.file:
         if not args.name:

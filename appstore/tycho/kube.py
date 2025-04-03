@@ -89,7 +89,7 @@ class KubernetesCompute(Compute):
             field_sel_api_response = self.api.list_namespaced_service(field_selector=f"metadata.name={ambassador_service_name}", namespace=namespace)
             return len(field_sel_api_response.items) == 1
         except ApiException as e:
-            logger.debug(f"There was a problem assessing whether the ambassador service is running.", e)
+            logger.info(f"There was a problem assessing whether the ambassador service is running.", e)
 
     def start (self, system, namespace="default"):
         """ Start an abstractly described distributed system on the cluster.

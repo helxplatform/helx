@@ -1,9 +1,10 @@
 import functools
 import logging
-from dataclasses import asdict
 import time
 import os
 import re
+from typing import Optional
+from dataclasses import asdict
 
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
@@ -358,7 +359,7 @@ class AppViewSet(viewsets.GenericViewSet):
         # TODO change this to serializer.data after discovery on nested object data
         return Response(apps)
 
-    def retrieve(self, request, app_id=None):
+    def retrieve(self, request, app_id: Optional[str]=None):
         """
         Provide app details.
         """
@@ -790,7 +791,9 @@ class UsersViewSet(viewsets.GenericViewSet):
         if request.session.get("Authorization", None):
             return request.session["Authorization"].split(" ")[1]
         else:
-            logger.error(f"Authorization not set for {request.user.username}")
+            # This is not necessarily an error, since authorization (access token)
+            # may or may not be used, i.e., with authentication via sessionid.
+            logger.debug(f"Authorization not set for {request.user.username}")
             return None
 
     def list(self, request):

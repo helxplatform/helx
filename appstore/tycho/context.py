@@ -47,7 +47,7 @@ class TychoContext:
         if tycho_config_url != "":
             tycho_config_url += "/" if not tycho_config_url.endswith("/") else ""
         self.tycho_config_url = tycho_config_url
-        logger.info (f"-- TychoContext.__init__: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {self.tycho_config_url} | stub: {stub}")
+        logger.debug (f"-- TychoContext.__init__: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {self.tycho_config_url} | stub: {stub}")
         self.http_session = CachedSession (cache_name='tycho-registry')
         self.registry = self._get_config(registry_config)
         self.app_defaults = self._get_config(app_defaults_config)

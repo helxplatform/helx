@@ -159,6 +159,7 @@ OIDC_SESSION_MANAGEMENT_ENABLE = True
 SAML_URL = "/accounts/saml"
 SAML_ACS_URL = "/saml2_auth/acs/"
 #SAML_ACS_URL = "/sso/acs/"
+SOCIALACCOUNT_ADAPATER = "appstore.adapter.SocialAccountAdapter"
 SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_PROVIDERS = {
@@ -344,6 +345,11 @@ LOGGING = {
             "handlers": ["console"],
             "level": LOG_LEVEL,
         },
+        # Info logs coming from xmlschema are generally irrelevant and crowd the logs
+        "xmlschema": {
+            "handlers": ["console"],
+            "level": "WARNING"
+        }
     },
 }
 

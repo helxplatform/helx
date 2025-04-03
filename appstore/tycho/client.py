@@ -186,7 +186,8 @@ class TychoClient:
             :param request: A request formatted as above.
             :type request: JSON
         """
-        logger.debug (f"-- delete service: {json.dumps(request, indent=2)}")
+        logger.error (f"-- delete: {json.dumps(request, indent=2)}")
+        print (f"-- delete: {json.dumps(request, indent=2)}")
         return self.request ("delete", request)
     
     def status (self, request): 
@@ -258,10 +259,10 @@ class TychoClient:
         response = self.start (request)
         logger.debug (f"client.up - response: {response}")
         if response.status == 'error':
-            logger.error (f"failed to bring up service: { response.message }")
+            print (response.message)
         else:
             format_string = '{:<30} {:<35} {:<15} {:<7}'
-            logger.debug (f"brought up service: { format_string.format('SERVICE', 'GUID', 'IP_ADDRESS', 'PORT') }")
+            print (format_string.format("SERVICE", "GUID", "IP_ADDRESS", "PORT"))
             for service in response.services:
                 print (format_string.format (
                     TemplateUtils.trunc (service.name, max_len=28),
@@ -349,7 +350,7 @@ class TychoClient:
             :returns: A list of all the patches applied to the system
             :rtype: A list
         """
-        logger.debug(f"System specifications and metadata to be modified: {mod_items}")
+        logger.info(f"System specifications and metadata to be modified: {mod_items}")
         try:
             response = self.modify(mod_items)
             logger.debug(f"TychoClient.patch - {json.dumps(response, indent=2)}")
@@ -421,20 +422,20 @@ class TychoClientFactory:
                 if len(ip) > 0:
                     try:
                         ipaddress.ip_address (ip)
-                        logger.debug (f"configuring minikube ip: {ip}")
+                        logger.info (f"configuring minikube ip: {ip}")
                         port = service.spec.ports[0].node_port
                         logger.debug (f"located tycho api instance in minikube")
                         url = f"http://{ip}:{port}"
                     except ValueError as e:
                         logger.error ("unable to get minikube ip address")
                         traceback.print_exc()
-            logger.debug (f"using client URL: {url}")
+            print(f"URL: {url}")
         except Exception as e:
             url = default_url
-            logger.debug (f"cannot find {name} in namespace {namespace}")
-            logger.debug (f"using fallback client URL: {url}")
+            print(f"url: {url}")
+            logger.info (f"cannot find {name} in namespace {namespace}")
 
-        logger.debug (f"creating tycho client with url: {url}")
+        logger.info (f"creating tycho client with url: {url}")
         return TychoClient (url=url)
 
 
@@ -521,7 +522,7 @@ if __name__ == "__main__":
             system = metadata['System']
         if 'Settings' in metadata.keys():
             settings = metadata['Settings']
-            logger.debug(f"using settings: {settings}")
+            print(f"settings: {settings}")
 
     elif args.file:
         if not args.name:
@@ -577,7 +578,7 @@ if __name__ == "__main__":
             """ That didn't work so use the default value. """
             client = TychoClient (url=args.service)
     if not client:
-        logger.debug (f"creating client directly {args.service}")
+        logger.info (f"creating client directly {args.service}")
         client = TychoClient (url=args.service)
 
     if args.up:

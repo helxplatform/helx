@@ -623,11 +623,13 @@ class InstanceViewSet(viewsets.GenericViewSet):
         if s:
             serializer = InstanceSpecSerializer(data=asdict(s))
             try:
+                logger.info(f"Launched app { app_id }-{ system.identifier } for user { username }")
                 serializer.is_valid(raise_exception=True)
                 return Response(serializer.validated_data)
-            except serializers.ValidationError:
+            except serializers.ValidationError as e:
                 # Delete invalid instance configuration that we won't be tracking
                 # for the user.
+                logger.error(f"Failed to launch app { app_id } for user { username }; exception: { str(e) }")
                 tycho.delete({"name": system.services[0].identifier})
                 return Response(
                     serializer.errors, status=drf_status.HTTP_400_BAD_REQUEST
@@ -635,6 +637,7 @@ class InstanceViewSet(viewsets.GenericViewSet):
         else:
             # Failed to construct a tracked instance, attempt to remove
             # potentially created instance rather than leaving it hanging.
+            logger.error(f"Failed to launch app { app_id } for user { username }; null instance spec")
             tycho.delete({"name": system.services[0].identifier})
             identity_token.delete()
             return Response(
@@ -683,12 +686,12 @@ class InstanceViewSet(viewsets.GenericViewSet):
         """
         serializer = self.get_serializer(data={"sid": sid})
         serializer.is_valid(raise_exception=True)
-        logger.debug(f"\nDeleting: {sid}")
         status = tycho.status({"name": serializer.validated_data["sid"]})
         if status.services != None and len(status.services) == 1:
-            logger.info("service username: " + str(status.services[0].username))
-            logger.info("request username: " + str(request.user.username))
+            logger.debug("service username: " + str(status.services[0].username))
+            logger.debug("request username: " + str(request.user.username))
             if status.services[0].username == request.user.username:
+                logger.info(f"Terminating app id { sid } for user { request.user.username }")
                 response = tycho.delete({"name": serializer.validated_data["sid"]})
                 # Delete all the tokens the user had associated with that app
                 consumer_id = UserIdentityToken.compute_app_consumer_id(serializer.validated_data["sid"])
@@ -699,7 +702,9 @@ class InstanceViewSet(viewsets.GenericViewSet):
                 # to the front end?
                 time.sleep(2)
                 return Response(response)
-            else: return Response(status=drf_status.HTTP_403_FORBIDDEN)
+            else:
+                logger.warning(f"User { request.user.username } attempted to terminate app id { sid } owned by user { status.services[0].username }")
+                return Response(status=drf_status.HTTP_403_FORBIDDEN)
         else: return Response(status=drf_status.HTTP_404_NOT_FOUND)
 
     def partial_update(self, request, sid=None):

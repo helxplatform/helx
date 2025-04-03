@@ -74,7 +74,7 @@ class KubernetesCompute(Compute):
                             continue
                         else:
                             notExists = False
-                            logger.debug(f"PVC {volume['volume_name']} exists.")
+                            logger.info(f"PVC {volume['volume_name']} exists.")
                             break
                 if notExists and volume["volume_name"] != 'stdnfs':
                     volumesNA.append(index)
@@ -243,8 +243,7 @@ class KubernetesCompute(Compute):
                 message=f"Unable to start system: {system.name}",
                 details=text)
 
-        logger.info (f"launched app { system.name } with sid { system.identifier }")
-        logger.debug (f"result of the app launch: {json.dumps(result,indent=2)}")
+        logger.info (f"result of the app launch: {json.dumps(result,indent=2)}")
         return result
 
     def get_service_ip_address (self, service_metadata):
@@ -259,7 +258,7 @@ class KubernetesCompute(Compute):
         ip_address = None if os.environ.get("DEV_PHASE", "prod") != "test" else "127.0.0.1"
         try:
             app_id = service_metadata.metadata.labels["tycho-app"]
-            logger.debug (f"-================================> *** {app_id}")
+            logger.info (f"-================================> *** {app_id}")
             if not app_id in port_forwards:
                 port_forwards[app_id] = app_id #process.pid
                 sleep (3)
@@ -354,8 +353,6 @@ class KubernetesCompute(Compute):
             raise DeleteException (
                 message=f"Failed to delete system: {name}",
                 details=text)
-        
-        logger.info (f"terminated app with sid { name }")
         return {
         }
     

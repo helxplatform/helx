@@ -184,7 +184,7 @@ class System:
         containers_exist = len(containers) > 0
         none_are_null = not any([ c for c in containers if c == None ])
         assert containers_exist and none_are_null, "System container elements may not be null."
-        logger.debug(f"=======> Constructing system from containers = {containers}")
+        logger.info(f"=======> Constructing system from containers = {containers}")
         self.containers = list(map(lambda v : Container(**v), containers)) \
                           if isinstance(containers[0], dict) else \
                              containers
@@ -242,11 +242,11 @@ class System:
         self.proxy_rewrite = proxy_rewrite
         # """Flag for checking if an IRODS connection is enabled"""
         if os.environ.get("IROD_HOST") != None:
-            logger.debug("Irods host enabled")
+            logger.info("Irods host enabled")
             self.irods_enabled = True
             self.nfsrods_host = os.environ.get('NFSRODS_HOST', '')
         else:
-            logger.debug("Irods host not enabled")
+            logger.info("Irods host not enabled")
         """gitea settings"""
         self.gitea_integration = gitea_integration
         self.gitea_host = os.environ.get("GITEA_HOST", " ")
@@ -403,7 +403,7 @@ class System:
                             volume = volume.replace(k, v)
                         spec.get('volumes', []).append(volume)
                 except Exception as e:
-                    logger.debug("No volumes specified in the configuration.")
+                    logger.info("No volumes specified in the configuration.")
             """ Adding entrypoint to container if exists """
             if isinstance(entrypoint, str):
                 entrypoint = entrypoint.split ()

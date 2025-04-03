@@ -343,13 +343,9 @@ LOGGING = {
             "handlers": ["console"],
             "level": LOG_LEVEL,
         },
-        "tycho.client": {
+        "tycho": {
             "handlers": ["console"],
-            "level": LOG_LEVEL,
-        },
-        "tycho.kube": {
-            "handlers": ["console"],
-            "level": LOG_LEVEL,
+            "level": "WARNING",
         },
         # Info logs coming from xmlschema are generally irrelevant and crowd the logs
         "xmlschema": {

@@ -80,7 +80,7 @@ class StartSystemResource(TychoResource):
     def post(self, request):
         response = {}
         try:
-            logger.debug(f"actions.StartSystemResource.post - start-system: {json.dumps(request, indent=2)}")
+            logger.info(f"actions.StartSystemResource.post - start-system: {json.dumps(request, indent=2)}")
             self.validate(request, component="System")
             system = tycho().parse(request)
             response = self.create_response(
@@ -130,7 +130,7 @@ class StatusSystemResource(TychoResource):
             response = self.create_response(
                 exception=e,
                 message=f"Failed to get system status.")
-        logger.debug (f" { json.dumps(response, indent=2) }")
+        # print(json.dumps(response, indent=2))
         return response
 
 

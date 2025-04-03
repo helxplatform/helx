@@ -15,7 +15,7 @@ def on_user_logged_out(sender, request, user, **kwargs):
     else: logger.info("User logged out (identity unavailable)")
 
 @receiver(user_login_failed)
-def on_user_failed_login(sender, credentials, request):
+def on_user_failed_login(sender, credentials, request, **kwargs):
     # This will generally only work for form-based login (i.e., not for allauth).
     # Allauth failures are logged within the LoginRedirectAdapter `on_authentication_error` hook.
     logger.info(f"User failed to login with username { credentials.get('username', '<unknown>') }")

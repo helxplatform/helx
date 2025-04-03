@@ -323,6 +323,12 @@ LOGGING = {
             "level": LOG_LEVEL,
             "propagate": False,
         },
+        "django.request": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+            "filters": ["skip_superfluous_endpoint_logs"]
+        },
         "django.template": {
             "handlers": ["console"],
             "level": LOG_LEVEL,
@@ -351,6 +357,11 @@ LOGGING = {
             "level": "WARNING"
         }
     },
+    "filters": {
+        "skip_superfluous_endpoint_logs": {
+            "()": "appstore.logging.SuperfluousEndpointLogFilter"
+        }
+    }
 }
 
 csrf_strings = os.environ.get("CSRF_DOMAINS", "")

@@ -23,6 +23,8 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
             self.get_response = get_response
         else:
             self.get_response = self._get_response
+        
+        super().__init__(get_response)
 
     def process_request(self, request):
         user = request.user

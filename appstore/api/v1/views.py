@@ -623,8 +623,8 @@ class InstanceViewSet(viewsets.GenericViewSet):
         if s:
             serializer = InstanceSpecSerializer(data=asdict(s))
             try:
-                logger.info(f"Launched app { app_id }-{ system.identifier } for user { username }")
                 serializer.is_valid(raise_exception=True)
+                logger.info(f"Launched app { app_id }-{ system.identifier } for user { username }")
                 return Response(serializer.validated_data)
             except serializers.ValidationError as e:
                 # Delete invalid instance configuration that we won't be tracking

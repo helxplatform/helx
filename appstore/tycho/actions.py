@@ -130,7 +130,7 @@ class StatusSystemResource(TychoResource):
             response = self.create_response(
                 exception=e,
                 message=f"Failed to get system status.")
-        print(json.dumps(response, indent=2))
+        # print(json.dumps(response, indent=2))
         return response
 
 

@@ -1,13 +1,13 @@
-FROM python:3.9.18-slim-bullseye
+FROM python:3.9.21-slim-bullseye
 
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
 # Least privilege: Run as a non-root user.
-ENV USER appstore
-ENV APP_HOME /usr/src/inst-mgmt
-ENV HOME /home/$USER
-ENV UID 1000
+ENV USER=appstore
+ENV APP_HOME=/usr/src/inst-mgmt
+ENV HOME=/home/$USER
+ENV UID=1000
 
 RUN mkdir $APP_HOME
 

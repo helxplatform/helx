@@ -43,7 +43,8 @@ type SearchSpec struct {
 	Filter  string
 	Refresh int
 	Stop    chan struct{}
-	BaseDN  string // New field: the base DN to use for this search.
+	BaseDN  string // The base DN to use for this search.
+	Oneshot bool   // one-shot -- don't involve the hook
 }
 
 // LogLevelRequest represents the payload for updating the log level.
@@ -56,6 +57,8 @@ type SearchInfo struct {
 	ID      string `json:"id"`
 	Filter  string `json:"filter"`
 	Refresh int    `json:"refresh"`
+	BaseDN  string
+	Oneshot bool
 }
 
 // DerivedSearchSpec describes a search as provided via a hook response.
@@ -64,6 +67,7 @@ type DerivedSearchSpec struct {
 	Filter  string `json:"filter"`
 	Refresh int    `json:"refresh"`
 	BaseDN  string `json:"baseDN"`
+	Oneshot bool   `json:"oneshot"`
 }
 
 // LDAPResult holds an LDAP entry in a structured way.
@@ -269,6 +273,60 @@ func storeDestinationLDAP(entry *TransformedEntry) error {
 	return nil
 }
 
+// ldapSearchAndSync performs the LDAP search on the source server and synchronizes the results.
+func ldapSearchAndSync(id, filter, baseDN string, refresh int, oneshot bool, stopChan chan struct{}) {
+	for {
+		select {
+		case <-stopChan:
+			logger.Info("Search cancelled", "SearchId", id)
+			return
+		default:
+		}
+
+		logger.Debug("Performing LDAP search with filter", "Filter", filter, "SearchId", id, "BaseDN", baseDN)
+		l, err := connectAndBindLDAP()
+		if err != nil {
+			logger.Error("Error connecting and binding to LDAP", "Err", err)
+			select {
+			case <-stopChan:
+				return
+			case <-time.After(time.Duration(refresh) * time.Second):
+			}
+			continue
+		}
+
+		sr, err := performLDAPSearch(l, baseDN, filter)
+		if err != nil {
+			logger.Error("Error performing search", "Err", err)
+			l.Close()
+			select {
+			case <-stopChan:
+				return
+			case <-time.After(time.Duration(refresh) * time.Second):
+			}
+			continue
+		}
+		l.Close()
+
+		for _, entry := range sr.Entries {
+			processLDAPEntry(id, entry, oneshot)
+		}
+
+		// If one-shot mode is active, exit after one iteration.
+		if oneshot {
+			logger.Info("One-shot search completed", "SearchId", id)
+			return
+		}
+
+		select {
+		case <-stopChan:
+			logger.Debug("Search cancelled", "SearchId", id)
+			return
+		case <-time.After(time.Duration(refresh) * time.Second):
+		}
+	}
+}
+
 // processHookResponse is a stub for processing the hook response.
 func processHookResponse(hookResp HookResponse) {
 	// Log the parsed hook response values.
@@ -293,8 +351,9 @@ func processHookResponse(hookResp HookResponse) {
 			spec.Filter = ds.Filter
 			spec.Refresh = ds.Refresh
 			spec.BaseDN = ds.BaseDN
+			spec.Oneshot = ds.Oneshot
 			spec.Stop = stopChan
-			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, stopChan)
+			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, ds.Oneshot, stopChan)
 			logger.Info("Derived search updated", "SearchId", ds.ID)
 		} else {
 			// Create a new search.
@@ -303,12 +362,13 @@ func processHookResponse(hookResp HookResponse) {
 				Filter:  ds.Filter,
 				Refresh: ds.Refresh,
 				BaseDN:  ds.BaseDN,
+				Oneshot: ds.Oneshot,
 				Stop:    stopChan,
 			}
 			searches[ds.ID] = spec
 			// Initialize the structured results store for this search id.
 			searchResults[ds.ID] = make(map[string]LDAPResult)
-			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, stopChan)
+			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, ds.Oneshot, stopChan)
 			logger.Info("Derived search created", "SearchId", ds.ID)
 		}
 	}
@@ -358,7 +418,7 @@ func sendHooks(result LDAPResult) {
 // processLDAPEntry processes a single LDAP entry, updating the searchResults
 // for the given search id. It builds a structured attribute map, and logs whether
 // the entry is new, updated, or unchanged.
-func processLDAPEntry(id string, entry *ldap.Entry) {
+func processLDAPEntry(id string, entry *ldap.Entry, oneshot bool) {
 	dn := entry.DN
 	attrMap := make(map[string]interface{})
 	for _, attr := range entry.Attributes {
@@ -374,70 +434,21 @@ func processLDAPEntry(id string, entry *ldap.Entry) {
 		Content: attrMap,
 	}
 
-	// Update the searchResults for the given search id.
 	if existing, exists := searchResults[id][dn]; !exists {
 		searchResults[id][dn] = newResult
 		logger.Info("New item retrieved", "DN", dn, "SearchId", id)
-		sendHooks(newResult)
+		if !oneshot {
+			sendHooks(newResult)
+		}
 	} else {
 		if !reflect.DeepEqual(existing.Content, attrMap) {
 			searchResults[id][dn] = newResult
 			logger.Info("Updated item search", "DN", dn, "SearchId", id)
-			sendHooks(newResult)
+			if !oneshot {
+				sendHooks(newResult)
+			}
 		} else {
 			logger.Debug("No change", "DN", dn, "SearchId", id)
-		}
-	}
-}
-
-// ldapSearchAndSync performs the LDAP search on the source server and synchronizes the results.
-func ldapSearchAndSync(id, filter, baseDN string, refresh int, stopChan chan struct{}) {
-	for {
-		select {
-		case <-stopChan:
-			logger.Info("Search cancelled", "SearchId", id)
-			return
-		default:
-		}
-
-		logger.Debug("Performing LDAP search with filter", "Filter", filter, "SearchId", id, "BaseDN", baseDN)
-
-		// Connect and bind using the helper.
-		l, err := connectAndBindLDAP()
-		if err != nil {
-			logger.Error("Error connecting and binding to LDAP", "Err", err)
-			select {
-			case <-stopChan:
-				return
-			case <-time.After(time.Duration(refresh) * time.Second):
-			}
-			continue
-		}
-
-		// Perform the LDAP search using the helper.
-		sr, err := performLDAPSearch(l, baseDN, filter)
-		if err != nil {
-			logger.Error("Error performing search", "Err", err)
-			l.Close()
-			select {
-			case <-stopChan:
-				return
-			case <-time.After(time.Duration(refresh) * time.Second):
-			}
-			continue
-		}
-		l.Close()
-
-		// Process each entry (using the helper we created earlier).
-		for _, entry := range sr.Entries {
-			processLDAPEntry(id, entry)
-		}
-
-		select {
-		case <-stopChan:
-			logger.Debug("Search cancelled", "SearchId", id)
-			return
-		case <-time.After(time.Duration(refresh) * time.Second):
 		}
 	}
 }
@@ -452,6 +463,7 @@ func ldapSearchAndSync(id, filter, baseDN string, refresh int, stopChan chan str
 // @Param filter formData string true "LDAP search filter"
 // @Param refresh formData int true "Refresh interval in seconds"
 // @Param baseDN formData string false "Optional base DN for the search; defaults to global config if omitted"
+// @Param oneShot formData bool false "If set to true, the search will run in one-shot mode (hook subsystem will not be engaged). Defaults to true."
 // @Success 200 {string} string "Search created"
 // @Failure 400 {string} string "Invalid parameters or search already exists"
 // @Router /search [post]
@@ -473,17 +485,31 @@ func createSearchHandler(c echo.Context) error {
 	if err != nil {
 		return c.String(http.StatusBadRequest, "Invalid refresh parameter")
 	}
+
+	// Parse oneShot parameter; default to true if not provided.
+	oneShotStr := c.FormValue("oneShot")
+	oneshot := true
+	if oneShotStr != "" {
+		parsed, err := strconv.ParseBool(oneShotStr)
+		if err != nil {
+			return c.String(http.StatusBadRequest, "Invalid oneShot parameter")
+		}
+		oneshot = parsed
+	}
+
 	stopChan := make(chan struct{})
 	spec := &SearchSpec{
 		Filter:  filter,
 		Refresh: refresh,
 		Stop:    stopChan,
 		BaseDN:  baseDN,
+		Oneshot: oneshot,
 	}
 	searches[id] = spec
 	// Initialize the structured results store for this search id.
 	searchResults[id] = make(map[string]LDAPResult)
-	go ldapSearchAndSync(id, filter, baseDN, refresh, stopChan)
+	// Pass the oneshot flag to the search routine.
+	go ldapSearchAndSync(id, filter, baseDN, refresh, oneshot, stopChan)
 	return c.String(http.StatusOK, "Search created")
 }
 
@@ -508,6 +534,8 @@ func getSearchHandler(c echo.Context) error {
 			ID:      id,
 			Filter:  spec.Filter,
 			Refresh: spec.Refresh,
+			BaseDN:  spec.BaseDN,
+			Oneshot: spec.Oneshot,
 		}
 		return c.JSON(http.StatusOK, result)
 	}
@@ -519,6 +547,8 @@ func getSearchHandler(c echo.Context) error {
 			ID:      k,
 			Filter:  spec.Filter,
 			Refresh: spec.Refresh,
+			BaseDN:  spec.BaseDN,
+			Oneshot: spec.Oneshot,
 		})
 	}
 	return c.JSON(http.StatusOK, results)
@@ -534,15 +564,14 @@ func getSearchHandler(c echo.Context) error {
 // @Param filter formData string true "LDAP search filter"
 // @Param refresh formData int true "Refresh interval in seconds"
 // @Param baseDN formData string false "Optional base DN for the search; defaults to global config if omitted"
+// @Param oneShot formData bool false "If set to true, the search will run in one-shot mode (hook subsystem will not be engaged). Defaults to true."
 // @Success 200 {string} string "Search updated"
 // @Failure 400 {string} string "Invalid parameters or search does not exist"
 // @Router /search/{id} [put]
 func updateSearchHandler(c echo.Context) error {
 	id := c.Param("id")
-	filter := c.FormValue("filter")
-	filter = strings.TrimSpace(filter) // Trim whitespace
+	filter := strings.TrimSpace(c.FormValue("filter"))
 	refreshStr := c.FormValue("refresh")
-	// Get optional baseDN; default to global config if omitted.
 	baseDN := c.FormValue("baseDN")
 	if baseDN == "" {
 		baseDN = config.Source.BaseDN
@@ -558,17 +587,29 @@ func updateSearchHandler(c echo.Context) error {
 	if err != nil {
 		return c.String(http.StatusBadRequest, "Invalid refresh parameter")
 	}
+
+	// Parse oneShot parameter; default to true if not provided.
+	oneShotStr := c.FormValue("oneShot")
+	oneshot := true
+	if oneShotStr != "" {
+		parsed, err := strconv.ParseBool(oneShotStr)
+		if err != nil {
+			return c.String(http.StatusBadRequest, "Invalid oneShot parameter")
+		}
+		oneshot = parsed
+	}
+
 	// Cancel the current search.
 	close(spec.Stop)
-	// Create a new stop channel.
 	stopChan := make(chan struct{})
 	// Update the search spec.
 	spec.Filter = filter
 	spec.Refresh = refresh
 	spec.BaseDN = baseDN
+	spec.Oneshot = oneshot
 	spec.Stop = stopChan
-	// Restart the search goroutine.
-	go ldapSearchAndSync(id, filter, baseDN, refresh, stopChan)
+	// Restart the search goroutine with the new oneshot flag.
+	go ldapSearchAndSync(id, filter, baseDN, refresh, oneshot, stopChan)
 	return c.String(http.StatusOK, "Search updated")
 }
 

@@ -1,12 +1,11 @@
-# Dockerfile
-# Build stage using Go 1.23
+# Build stage
 FROM golang:1.23 AS builder
 WORKDIR /app
-COPY . .
+COPY go.mod go.sum main.go ./
 RUN go mod download
-RUN go build -o ordrd-group-x .
+RUN CGO_ENABLED=0 GOOS=linux go build -o ordrd-group-x main.go
 
-# Final stage using Ubuntu
+# Final stage
 FROM ubuntu:latest
 WORKDIR /app
 COPY --from=builder /app/ordrd-group-x .

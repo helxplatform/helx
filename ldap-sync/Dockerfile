@@ -23,4 +23,4 @@ WORKDIR /app
 COPY --from=builder /app/ldap-sync /app/ldap-sync
 
 EXPOSE 8080
-CMD ["/app/ldap-sync"]
+ENTRYPOINT ["/app/ldap-sync"]

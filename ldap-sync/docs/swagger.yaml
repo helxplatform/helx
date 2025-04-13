@@ -8,20 +8,21 @@ definitions:
         type: string
       id:
         type: string
+      oneshot:
+        type: boolean
       refresh:
         type: integer
-    type: object
-  main.ErrorResponse:
-    properties:
-      message:
-        type: string
     type: object
   main.HookRequest:
     properties:
       content:
         additionalProperties: true
+        description: Content is a JSON object representing LDAP attributes.
         type: object
       dn:
+        description: |-
+          DN is the distinguished name of the LDAP entry.
+          example: cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu
         type: string
     type: object
   main.HookResponse:
@@ -55,10 +56,14 @@ definitions:
     type: object
   main.SearchInfo:
     properties:
+      baseDN:
+        type: string
       filter:
         type: string
       id:
         type: string
+      oneshot:
+        type: boolean
       refresh:
         type: integer
     type: object
@@ -96,9 +101,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Receives LDAP entry payloads and returns a transformed
+      description: Process incoming LDAP hook payloads to transform data,
       parameters:
-      - description: LDAP Hook Request
+      - description: LDAP Hook Payload
         in: body
         name: payload
         required: true
@@ -114,8 +119,10 @@ paths:
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/main.ErrorResponse'
-      summary: Process LDAP hook
+            additionalProperties:
+              type: string
+            type: object
+      summary: Process LDAP hook payload
       tags:
       - hook
   /loglevel:
@@ -258,6 +265,11 @@ paths:
         in: formData
         name: baseDN
         type: string
+      - description: If set to true, the search will run in one-shot mode (hook subsystem
+          will not be engaged). Defaults to true.
+        in: formData
+        name: oneShot
+        type: boolean
       produces:
       - application/json
       responses:
@@ -322,6 +334,11 @@ paths:
         in: formData
         name: baseDN
         type: string
+      - description: If set to true, the search will run in one-shot mode (hook subsystem
+          will not be engaged). Defaults to true.
+        in: formData
+        name: oneShot
+        type: boolean
       produces:
       - application/json
       responses:

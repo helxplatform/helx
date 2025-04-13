@@ -40,7 +40,7 @@ const docTemplate = `{
         },
         "/hook": {
             "post": {
-                "description": "Receives LDAP entry payloads and returns a transformed",
+                "description": "Process incoming LDAP hook payloads to transform data,",
                 "consumes": [
                     "application/json"
                 ],
@@ -50,10 +50,10 @@ const docTemplate = `{
                 "tags": [
                     "hook"
                 ],
-                "summary": "Process LDAP hook",
+                "summary": "Process LDAP hook payload",
                 "parameters": [
                     {
-                        "description": "LDAP Hook Request",
+                        "description": "LDAP Hook Payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -72,7 +72,10 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/main.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -287,6 +290,12 @@ const docTemplate = `{
                         "description": "Optional base DN for the search; defaults to global config if omitted",
                         "name": "baseDN",
                         "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "If set to true, the search will run in one-shot mode (hook subsystem will not be engaged). Defaults to true.",
+                        "name": "oneShot",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -344,6 +353,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Optional base DN for the search; defaults to global config if omitted",
                         "name": "baseDN",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "If set to true, the search will run in one-shot mode (hook subsystem will not be engaged). Defaults to true.",
+                        "name": "oneShot",
                         "in": "formData"
                     }
                 ],
@@ -410,16 +425,11 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "oneshot": {
+                    "type": "boolean"
+                },
                 "refresh": {
                     "type": "integer"
-                }
-            }
-        },
-        "main.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
                 }
             }
         },
@@ -427,10 +437,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
+                    "description": "Content is a JSON object representing LDAP attributes.",
                     "type": "object",
                     "additionalProperties": true
                 },
                 "dn": {
+                    "description": "DN is the distinguished name of the LDAP entry.\nexample: cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu",
                     "type": "string"
                 }
             }
@@ -483,11 +495,17 @@ const docTemplate = `{
         "main.SearchInfo": {
             "type": "object",
             "properties": {
+                "baseDN": {
+                    "type": "string"
+                },
                 "filter": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
+                },
+                "oneshot": {
+                    "type": "boolean"
                 },
                 "refresh": {
                     "type": "integer"

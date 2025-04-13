@@ -1,5 +1,19 @@
-basePath: /
 definitions:
+  main.Derived:
+    properties:
+      baseDN:
+        example: ou=people,dc=unc,dc=edu
+        type: string
+      filter:
+        example: (|(pid=713272486)(pid=709909262)... )
+        type: string
+      id:
+        example: ordrd-members
+        type: string
+      refresh:
+        example: 10
+        type: integer
+    type: object
   main.ErrorResponse:
     properties:
       message:
@@ -11,54 +25,29 @@ definitions:
         additionalProperties: true
         type: object
       dn:
+        example: cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu
         type: string
     type: object
   main.HookResponse:
     properties:
       derived:
         items:
-          $ref: '#/definitions/main.SearchSpec'
+          $ref: '#/definitions/main.Derived'
         type: array
       reset:
         type: boolean
-      transformed:
-        allOf:
-        - $ref: '#/definitions/main.Transformed'
-        description: set to null if transformation fails
+      transformed: {}
     type: object
-  main.SearchSpec:
-    properties:
-      baseDN:
-        type: string
-      filter:
-        type: string
-      id:
-        type: string
-      refresh:
-        type: integer
-    type: object
-  main.Transformed:
-    properties:
-      content:
-        additionalProperties: true
-        type: object
-      dn:
-        type: string
-    type: object
-host: localhost:5001
 info:
   contact: {}
-  description: This hook service integrates with the LDAP synchronization
-  title: ordrd-group-x Hook Service
-  version: "1.0"
 paths:
   /hook:
     post:
       consumes:
       - application/json
-      description: Receives LDAP entry payloads and returns a transformed
+      description: Accepts LDAP payload and returns transformed data.
       parameters:
-      - description: LDAP Hook Request
+      - description: LDAP Payload
         in: body
         name: payload
         required: true
@@ -75,7 +64,7 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/main.ErrorResponse'
-      summary: Process LDAP hook
+      summary: Process LDAP hook payload
       tags:
       - hook
 swagger: "2.0"

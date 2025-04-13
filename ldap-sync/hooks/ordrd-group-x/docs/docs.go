@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/hook": {
             "post": {
-                "description": "Receives LDAP entry payloads and returns a transformed",
+                "description": "Accepts LDAP payload and returns transformed data.",
                 "consumes": [
                     "application/json"
                 ],
@@ -27,10 +27,10 @@ const docTemplate = `{
                 "tags": [
                     "hook"
                 ],
-                "summary": "Process LDAP hook",
+                "summary": "Process LDAP hook payload",
                 "parameters": [
                     {
-                        "description": "LDAP Hook Request",
+                        "description": "LDAP Payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -57,6 +57,27 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "main.Derived": {
+            "type": "object",
+            "properties": {
+                "baseDN": {
+                    "type": "string",
+                    "example": "ou=people,dc=unc,dc=edu"
+                },
+                "filter": {
+                    "type": "string",
+                    "example": "(|(pid=713272486)(pid=709909262)... )"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "ordrd-members"
+                },
+                "refresh": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
         "main.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -73,7 +94,8 @@ const docTemplate = `{
                     "additionalProperties": true
                 },
                 "dn": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu"
                 }
             }
         },
@@ -83,49 +105,13 @@ const docTemplate = `{
                 "derived": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.SearchSpec"
+                        "$ref": "#/definitions/main.Derived"
                     }
                 },
                 "reset": {
                     "type": "boolean"
                 },
-                "transformed": {
-                    "description": "set to null if transformation fails",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/main.Transformed"
-                        }
-                    ]
-                }
-            }
-        },
-        "main.SearchSpec": {
-            "type": "object",
-            "properties": {
-                "baseDN": {
-                    "type": "string"
-                },
-                "filter": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "refresh": {
-                    "type": "integer"
-                }
-            }
-        },
-        "main.Transformed": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "object",
-                    "additionalProperties": true
-                },
-                "dn": {
-                    "type": "string"
-                }
+                "transformed": {}
             }
         }
     }
@@ -133,12 +119,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "1.0",
-	Host:             "localhost:5001",
-	BasePath:         "/",
+	Version:          "",
+	Host:             "",
+	BasePath:         "",
 	Schemes:          []string{},
-	Title:            "ordrd-group-x Hook Service",
-	Description:      "This hook service integrates with the LDAP synchronization",
+	Title:            "",
+	Description:      "",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

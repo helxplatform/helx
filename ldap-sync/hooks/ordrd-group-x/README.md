@@ -1,68 +1,65 @@
-# ordrd-group-x Hook Service
+# ORDRD Group Hook Service
 
-This service is built with Go and the Echo framework to handle LDAP
-entry events. It exposes a POST endpoint at `/hook` that accepts a JSON
-payload with two fields: "dn" and "content".
+## Overview
+This hook service is built with Go and the Echo framework. It is
+designed to integrate with an existing LDAP synchronization system.
+The service listens for POST requests on `/hook` and applies a
+transformation to the LDAP entry payload.
 
-## Transformation Overview
+## Transformation Process
+The service accepts a JSON payload with two fields:
 
-The service inspects the incoming payload to determine its object type.
-Depending on the type, it applies a transformation and may generate derived
-search definitions. The JSON response contains:
+- **dn**: the LDAP distinguished name.
+- **content**: a JSON object of LDAP attributes.
 
-- **transformed**: The new DN and attributes after transformation.
-  - For groups, the DN is modified (e.g. from
-    `cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu` to
-    `cn=ordrd-example,ou=groups,dc=example,dc=org`). The member list is
-    transformed by mapping each member's PID to a UID from an internal map.
-- **derived**: An array of search specifications. For groups, a sample
-  specification is created using the member PIDs.
-- **reset**: A boolean indicating whether the transformation failed due to
-  missing UID mappings. If any UID is not found, `transformed` is set to null
-  and `reset` is true.
+The service inspects the object type (via the `objectClass`
+attribute) and performs the following:
 
-For UNC User entries, selected attributes are extracted and the global
-pidUidMap is updated with the mapping from PID to UID.
+- **Group Objects (UNCGroup)**:  
+  - Removes the prefix `unc:app:renci:` from the `cn` field.
+  - Rebuilds the DN as `cn={newCN},ou=groups,dc=example,dc=org`.
+  - Transforms the `member` list by mapping each `pid` to its
+    corresponding `uid`.  
+  - Builds a derived search specification using the member pids.
+  - If any `pid` is not found in the map, the transformation is set
+    to null and the `reset` directive is set to true.
+
+- **User Objects (UNCPerson)**:  
+  - Extracts the `pid` and `uid` from the content.
+  - Updates the internal pid-to-uid mapping.
+  - Constructs a simplified LDAP entry with a new DN in the format
+    `uid={uid},ou=users,dc=example,dc=org` and a trimmed attribute list.
+  - No derived searches are generated in this case.
+
+The response JSON includes three keys:
+- **transformed**: The result of applying the transformation logic.
+- **derived**: An array of additional search specifications.
+- **reset**: A boolean that indicates whether internal search results
+  should be discarded.
 
 ## Customization Instructions
+- To modify the transformation logic, update the code in the
+  `hookHandler` function in `main.go`. Look for the commented sections
+  where sample logic is provided.
+- Add further handling for different incoming object types by extending
+  the type inspection section.
+- Adjust the derived search logic by modifying how the LDAP filter and
+  search objects are constructed.
+- Ensure that the LDAP filter and DN formats meet your system's
+  requirements.
 
-- **Transformation Logic**:  
-  Locate the functions `processGroup` and `processUser` in `main.go`.
-  Replace the sample transformation code with your own logic if needed.
-
-- **Handling Different Object Types**:  
-  The handler inspects the DN and the "objectClass" attribute to decide how
-  to process the payload. Extend or modify the conditional logic in
-  `hookHandler` to add support for additional object types.
-
-- **PID to UID Mapping**:  
-  The global map `pidUidMap` stores PID to UID mappings for group transformation.
-  Adjust the data structure and error handling as required for your system.
+## Suggestions and Clarifications
+- Verify that the incoming JSON payload matches the expected format.
+- Enhance error handling and add validation where necessary.
+- Consider integrating persistent storage if the pid-to-uid mapping
+  needs to survive restarts.
+- Feel free to ask clarifying questions or extend the rules to better
+  fit your transformation needs.
 
 ## Debugging
+A processing summary is logged that includes the following fields:
+- **transformed**
+- **derived**
+- **reset**
 
-The service logs a summary of the transformation for each request.
-This summary includes the values of the "transformed", "derived", and
-"reset" keys. Check the service logs to trace the conversion process.
-
-## Building and Running
-
-- **Makefile Targets**:
-  - `docs`: Generates or updates Swagger docs using `swag init -g main.go`.
-  - `build`: Depends on `docs` and builds the Docker image (linux/amd64).
-  - `push`: Builds and pushes the Docker image. Override `REPO` and `TAG`
-    as needed.
-
-- **Dockerfile**:  
-  Uses Go 1.23 in the build stage and an Ubuntu base image in the final
-  container. The service listens on port 5001.
-
-## Clarifying Questions / Suggestions
-
-- Should additional validation be added for DN and filter formats?
-- Is thread safety required for the pidUidMap in a concurrent environment?
-- Should the transformation be extended to support more object types?
-
-Please customize the transformation logic and error handling to suit your
-specific LDAP synchronization requirements.
-
+Use these logs to troubleshoot issues during the conversion process.

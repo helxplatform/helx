@@ -1,0 +1,41 @@
+[
+  {
+    "id": "get-ordrd-group",
+    "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-example))",
+    "refresh": 10
+  },
+  {
+    "id": "ordrd-members",
+    "filter": "(|(pid=709909262)(pid=730294000)(pid=714723161)(pid=720487398)(pid=730376522)(pid=730142323)(pid=730805146)(pid=714203405)(pid=720441075)(pid=730682902)(pid=720450683)(pid=702348132)(pid=730379036)(pid=730727344))",
+    "refresh": 10
+  }
+]
+
+get ordrd-example
+{
+    "id": "x",
+    "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-example))",
+    "refresh": 0,
+    "BaseDN": "ou=groups,dc=unc,dc=edu",
+    "Oneshot": true
+}
+
+get ordrd-test
+{
+    "id": "x",
+    "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-test))",
+    "refresh": 0,
+    "BaseDN": "ou=groups,dc=unc,dc=edu",
+    "Oneshot": true
+}
+
+get posixGroups
+{
+    "id": "x",
+    "filter": "(&(objectClass=posixGroup)(gidNumber=1025))",
+    "refresh": 0,
+    "BaseDN": "ou=posixGroups,ou=systems,dc=unc,dc=ed",
+    "Oneshot": true
+}
+
+

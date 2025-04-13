@@ -1,17 +1,12 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "This hook service integrates with the LDAP synchronization",
-        "title": "ordrd-group-x Hook Service",
-        "contact": {},
-        "version": "1.0"
+        "contact": {}
     },
-    "host": "localhost:5001",
-    "basePath": "/",
     "paths": {
         "/hook": {
             "post": {
-                "description": "Receives LDAP entry payloads and returns a transformed",
+                "description": "Accepts LDAP payload and returns transformed data.",
                 "consumes": [
                     "application/json"
                 ],
@@ -21,10 +16,10 @@
                 "tags": [
                     "hook"
                 ],
-                "summary": "Process LDAP hook",
+                "summary": "Process LDAP hook payload",
                 "parameters": [
                     {
-                        "description": "LDAP Hook Request",
+                        "description": "LDAP Payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -51,6 +46,27 @@
         }
     },
     "definitions": {
+        "main.Derived": {
+            "type": "object",
+            "properties": {
+                "baseDN": {
+                    "type": "string",
+                    "example": "ou=people,dc=unc,dc=edu"
+                },
+                "filter": {
+                    "type": "string",
+                    "example": "(|(pid=713272486)(pid=709909262)... )"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "ordrd-members"
+                },
+                "refresh": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
         "main.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -67,7 +83,8 @@
                     "additionalProperties": true
                 },
                 "dn": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu"
                 }
             }
         },
@@ -77,49 +94,13 @@
                 "derived": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.SearchSpec"
+                        "$ref": "#/definitions/main.Derived"
                     }
                 },
                 "reset": {
                     "type": "boolean"
                 },
-                "transformed": {
-                    "description": "set to null if transformation fails",
-                    "allOf": [
-                        {
-                            "$ref": "#/definitions/main.Transformed"
-                        }
-                    ]
-                }
-            }
-        },
-        "main.SearchSpec": {
-            "type": "object",
-            "properties": {
-                "baseDN": {
-                    "type": "string"
-                },
-                "filter": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "refresh": {
-                    "type": "integer"
-                }
-            }
-        },
-        "main.Transformed": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "object",
-                    "additionalProperties": true
-                },
-                "dn": {
-                    "type": "string"
-                }
+                "transformed": {}
             }
         }
     }

@@ -1,70 +1,84 @@
-# ordrd-group-x
+# ordrd-group-x Hook Service
 
-This hook service integrates with an LDAP synchronization system and
-transforms incoming LDAP entry payloads to a new format.
+This service is a hook for LDAP synchronization. It listens on port 5001
+and processes incoming LDAP entries. Depending on the entry type, it
+transforms the DN and attributes, creates derived search specifications,
+and outputs a JSON response containing three keys:
+  - transformed
+  - derived
+  - reset
 
 ## Conversion Process Summary
 
-The service performs a conversion that outputs a JSON object with three
-keys:
+- **ORDRD Group (Example1):**
+  - The groupname is extracted from the DN.
+  - The DN is updated to "cn={{ groupname }},ou=groups,dc=example,dc=org".
+  - In the content, "cn" is set to the groupname and each member is
+    replaced using the pid-uid mapping.
+  - Derived search is created with a filter combining all pid values.
+  - If any uid mapping is missing, "transformed" is set to null and
+    "reset" is true.
 
-- **transformed**: The payload after applying custom transformation.
-  If required lookups (e.g. in the pidUidMap) fail, this field is set to
-  null.
-- **derived**: An array of LDAP search specifications derived from the
-  input (e.g. for membership searches).
-- **reset**: A boolean flag. When true, it instructs the driver to clear
-  its stored state for an updated run.
+- **UNC User (Example2):**
+  - The DN is built using the uid: "uid={{ uid }},ou=users,dc=example,dc=org".
+  - The content is transformed to include key attributes and uses the
+    global baseGid for "gidNumber".
+  - A derived search is created based on uidNumber.
+  - The pidUidMap is updated with the current entry mapping.
 
-## Transformation Logic
+- **Posix Group (Example3):**
+  - The DN is transformed to "cn={{ cn }},ou=groups,dc=example,dc=org".
+  - The content is adjusted by filtering out extra object classes.
+  - If a memberuid field exists, it is promoted out of the content.
+  - No derived searches are generated.
 
-The code currently handles three object types:
+## Customizing the Transformation Logic
 
-1. **UNC User (Example2):**
-   - Extracts `pid` and `uid` from the content and updates the internal
-     pidUidMap.
-   - Transforms the DN to `uid=<uid>,ou=users,dc=example,dc=org`.
-   - Substitutes `gidNumber` with the flag-provided baseGid.
-   - Generates a derived search for the user’s posix group.
-2. **ORDRD Group (Example1):**
-   - Removes the prefix `unc:app:renci:` from the group CN.
-   - Converts each member entry from a PID format to a UID format using
-     the pidUidMap.
-   - If any member UID is not found, sets **transformed** to null and
-     **reset** to true.
-   - Creates a derived search combining all member PIDs.
-3. **Posix Group (Example3):**
-   - Retains a subset of the attributes, updates the DN to
-     `cn=<cn>,ou=groups,dc=example,dc=org`, and preserves the
-     `memberuid` field.
-   - No derived search is created.
+- The transformation code is located in the functions:
+  - `processORDRDGroup`
+  - `processUNCUser`
+  - `processPosixGroup`
 
-## Customization
+- To change how a field is transformed or to add additional logic
+  (e.g. new object types), modify the corresponding function.
 
-- **Transformation Logic:**  
-  Modify the switch sections in `main.go` where the processing for
-  UNC User, ORDRD Group, and Posix Group is defined. Replace the sample
-  code with your own business logic if needed.
-
-- **Handling New Object Types:**  
-  Add additional branches to the if-else chain in the handler to process
-  new LDAP object types.
+- For example, you may wish to implement new filtering or state
+  management. Replace the sample transformation logic with your own
+  custom code where indicated by comments.
 
 ## Building and Running
 
-- **Swagger Docs:**  
-  Generate or update the API documentation by running:  
-  `make docs`
+1. **Swagger Documentation:**
+   - Run `make docs` to generate/update the Swagger docs using:
+     `swag init -g main.go`
 
-- **Docker Build:**  
-  Build the Docker image with:  
-  `make build REPOSITORY=your_repo/ordrd-group-x VERSION=1.0.1`
+2. **Docker Build:**
+   - Run `make build REPO=your-repo` to build the Docker image.
+   - The build uses Go 1.23 for compilation and an Ubuntu image to run.
 
-- **Docker Push:**  
-  Push the image using:  
-  `make push REPOSITORY=your_repo/ordrd-group-x VERSION=1.0.1`
+3. **Docker Push:**
+   - Run `make push REPO=your-repo` to push the image to your registry.
 
-The service listens on port **5001**.
+4. **Running Locally:**
+   - Execute the binary:
+     ```
+     ./ordrd-group-x -baseGid=200
+     ```
+   - Or run the Docker container:
+     ```
+     docker run -p 5001:5001 $(REPO)/ordrd-group-x:$(VERSION)
+     ```
 
-If you have any clarifying questions or suggestions for further
-customization, feel free to modify the README and source code accordingly.
+## Suggestions and Clarifications
+
+- Review the input DN format in the examples and adjust the helper
+  functions if your environment deviates from these patterns.
+- Ensure that the pidUidMap population in the UNC User handler is done
+  prior to processing groups that depend on it.
+- Validate that the LDAP filters are correct; additional error checks
+  may be added as needed.
+- If processing new object types, add similar transformation functions
+  and update the routing logic in `hookHandler`.
+
+Each line in this document is kept below 80 characters. Modify as needed
+to suit your deployment.

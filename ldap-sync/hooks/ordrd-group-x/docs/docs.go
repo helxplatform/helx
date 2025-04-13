@@ -17,20 +17,17 @@ const docTemplate = `{
     "paths": {
         "/hook": {
             "post": {
-                "description": "Accepts a JSON payload with DN and content, applies transformation",
+                "description": "Process and transform LDAP entries based on their type.",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
                     "application/json"
                 ],
-                "tags": [
-                    "hook"
-                ],
-                "summary": "Hook endpoint for LDAP synchronization",
+                "summary": "Process LDAP hook payload",
                 "parameters": [
                     {
-                        "description": "Hook Payload",
+                        "description": "LDAP Hook Payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -45,21 +42,32 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/main.HookResponse"
                         }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        }
                     }
                 }
             }
         }
     },
     "definitions": {
+        "main.DerivedSearch": {
+            "type": "object",
+            "properties": {
+                "baseDN": {
+                    "type": "string"
+                },
+                "filter": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "oneshot": {
+                    "type": "boolean"
+                },
+                "refresh": {
+                    "type": "integer"
+                }
+            }
+        },
         "main.HookRequest": {
             "type": "object",
             "properties": {
@@ -78,48 +86,13 @@ const docTemplate = `{
                 "derived": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.SearchSpec"
+                        "$ref": "#/definitions/main.DerivedSearch"
                     }
                 },
                 "reset": {
                     "type": "boolean"
                 },
-                "transformed": {
-                    "$ref": "#/definitions/main.TransformedPayload"
-                }
-            }
-        },
-        "main.SearchSpec": {
-            "type": "object",
-            "properties": {
-                "baseDN": {
-                    "type": "string"
-                },
-                "filter": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "oneshot": {
-                    "description": "Oneshot is optional; it is included when applicable.",
-                    "type": "boolean"
-                },
-                "refresh": {
-                    "type": "integer"
-                }
-            }
-        },
-        "main.TransformedPayload": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "object",
-                    "additionalProperties": true
-                },
-                "dn": {
-                    "type": "string"
-                }
+                "transformed": {}
             }
         }
     }

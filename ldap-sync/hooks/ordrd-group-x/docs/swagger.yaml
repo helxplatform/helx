@@ -1,4 +1,17 @@
 definitions:
+  main.DerivedSearch:
+    properties:
+      baseDN:
+        type: string
+      filter:
+        type: string
+      id:
+        type: string
+      oneshot:
+        type: boolean
+      refresh:
+        type: integer
+    type: object
   main.HookRequest:
     properties:
       content:
@@ -11,34 +24,11 @@ definitions:
     properties:
       derived:
         items:
-          $ref: '#/definitions/main.SearchSpec'
+          $ref: '#/definitions/main.DerivedSearch'
         type: array
       reset:
         type: boolean
-      transformed:
-        $ref: '#/definitions/main.TransformedPayload'
-    type: object
-  main.SearchSpec:
-    properties:
-      baseDN:
-        type: string
-      filter:
-        type: string
-      id:
-        type: string
-      oneshot:
-        description: Oneshot is optional; it is included when applicable.
-        type: boolean
-      refresh:
-        type: integer
-    type: object
-  main.TransformedPayload:
-    properties:
-      content:
-        additionalProperties: true
-        type: object
-      dn:
-        type: string
+      transformed: {}
     type: object
 info:
   contact: {}
@@ -47,9 +37,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Accepts a JSON payload with DN and content, applies transformation
+      description: Process and transform LDAP entries based on their type.
       parameters:
-      - description: Hook Payload
+      - description: LDAP Hook Payload
         in: body
         name: payload
         required: true
@@ -62,13 +52,5 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/main.HookResponse'
-        "400":
-          description: Bad Request
-          schema:
-            additionalProperties:
-              type: string
-            type: object
-      summary: Hook endpoint for LDAP synchronization
-      tags:
-      - hook
+      summary: Process LDAP hook payload
 swagger: "2.0"

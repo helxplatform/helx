@@ -2,6 +2,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -9,59 +10,46 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
 )
 
-// Global mapping of pid -> uid.
-// For UNC User entries, this map is populated.
-var pidUidMap = make(map[string]string)
+// Global variables for the hook service.
+var (
+	// pidUidMap maintains the mapping from pid to uid
+	pidUidMap = make(map[string]string)
 
-// Global baseGid variable. It can be set via a command line flag.
-var baseGid string
+	// baseGid is obtained from a flag and used when processing UNC Users.
+	baseGid string
+)
 
-// HookRequest represents the incoming payload for the hook.
-// It contains the distinguished name and the LDAP entry attributes.
+// HookRequest represents the input payload for the /hook endpoint.
 type HookRequest struct {
 	DN      string                 `json:"dn"`
 	Content map[string]interface{} `json:"content"`
 }
 
-// TransformedPayload represents the transformed LDAP entry.
-type TransformedPayload struct {
-	DN      string                 `json:"dn"`
-	Content map[string]interface{} `json:"content"`
-}
-
-// SearchSpec describes an additional search specification.
-type SearchSpec struct {
+// DerivedSearch represents a derived search definition.
+type DerivedSearch struct {
 	ID      string `json:"id"`
 	Filter  string `json:"filter"`
 	Refresh int    `json:"refresh"`
 	BaseDN  string `json:"baseDN"`
-	// Oneshot is optional; it is included when applicable.
-	Oneshot bool `json:"oneshot"`
+	Onesho  bool   `json:"oneshot"`
 }
 
-// HookResponse is the response JSON returned by the hook service.
+// HookResponse defines the response structure returned by the /hook endpoint.
 type HookResponse struct {
-	Transformed *TransformedPayload `json:"transformed"`
-	Derived     []SearchSpec        `json:"derived"`
-	Reset       bool                `json:"reset"`
+	Transformed interface{}     `json:"transformed"`
+	Derived     []DerivedSearch `json:"derived"`
+	Reset       bool            `json:"reset"`
 }
 
-// @Summary      Hook endpoint for LDAP synchronization
-// @Description  Accepts a JSON payload with DN and content, applies transformation
-//
-//	logic based on the object type of the LDAP entry. Returns transformed
-//	output, derived search definitions and a reset flag.
-//
-// @Tags         hook
-// @Accept       json
-// @Produce      json
-// @Param        payload  body      HookRequest  true  "Hook Payload"
-// @Success      200      {object}  HookResponse
-// @Failure      400      {object}  map[string]string
-// @Router       /hook [post]
+// @Summary Process LDAP hook payload
+// @Description Process and transform LDAP entries based on their type.
+// @Accept  json
+// @Produce  json
+// @Param   payload  body  HookRequest  true  "LDAP Hook Payload"
+// @Success 200 {object} HookResponse
+// @Router /hook [post]
 func hookHandler(c echo.Context) error {
 	var req HookRequest
 	if err := c.Bind(&req); err != nil {
@@ -69,234 +57,281 @@ func hookHandler(c echo.Context) error {
 			map[string]string{"error": "invalid request payload"})
 	}
 
-	response := HookResponse{
-		Derived: []SearchSpec{},
+	var response HookResponse
+
+	// Process based on DN pattern.
+	switch {
+	// Example1: ORDRD Group
+	case strings.HasPrefix(req.DN, "cn=unc:app:renci:"):
+		response = processORDRDGroup(req)
+	// Example2: UNC User
+	case strings.HasPrefix(req.DN, "pid="):
+		response = processUNCUser(req)
+	// Example3: Posix Group (detect via DN part "ou=PosixGroups")
+	case strings.Contains(req.DN, "ou=PosixGroups"):
+		response = processPosixGroup(req)
+	// Unknown type – no transformation applied.
+	default:
+		log.Printf("Unknown DN format: %s", req.DN)
+		response = HookResponse{
+			Transformed: nil,
+			Derived:     []DerivedSearch{},
+			Reset:       false,
+		}
 	}
 
-	// Based on DN and content, decide how to transform.
-	// ----------------------------------------------------------------------
-	// Example2: UNC User entries (dn starts with "pid=").
-	if strings.HasPrefix(req.DN, "pid=") {
-		// --- UNC User Transformation (Example2) ---
-		//
-		// Special instructions:
-		// - Extract pid and uid to update the pidUidMap.
-		// - Use the global baseGid for all gidNumber.
-		// - Build a transformed DN and content with limited fields.
-		pid, ok1 := req.Content["pid"].(string)
-		uid, ok2 := req.Content["uid"].(string)
-		if ok1 && ok2 {
-			pidUidMap[pid] = uid
-		} else {
-			return c.JSON(http.StatusBadRequest,
-				map[string]string{"error": "missing pid or uid in content"})
-		}
-		newDN := "uid=" + uid + ",ou=users,dc=example,dc=org"
-		newContent := map[string]interface{}{
-			"cn":            req.Content["cn"],
-			"displayName":   req.Content["displayName"],
-			"gidNumber":     baseGid,
-			"givenName":     req.Content["givenName"],
-			"homeDirectory": "/home/" + uid,
-			"objectClass":   []string{"top", "inetOrgPerson", "posixAccount", "helxUser"},
-			"ou":            "users",
-			"sn":            req.Content["sn"],
-			"uid":           uid,
-			"uidNumber":     req.Content["uidNumber"],
-		}
+	// Log transformation summary for debugging.
+	summary, _ := json.MarshalIndent(response, "", "  ")
+	log.Printf("Processing summary:\n%s", summary)
 
-		transformed := TransformedPayload{
-			DN:      newDN,
-			Content: newContent,
-		}
-		response.Transformed = &transformed
+	return c.JSON(http.StatusOK, response)
+}
 
-		// Create a derived search specification.
-		uidNumber := fmt.Sprintf("%v", req.Content["uidNumber"])
-		derived := SearchSpec{
-			ID:      uidNumber + "-posixGroups",
-			Filter:  "(&(objectClass=posixGroup)(memberUid=" + uidNumber + "))",
-			Refresh: 10,
-			BaseDN:  "ou=Systems,ou=PosixGroups,dc=unc,dc=edu",
-			Oneshot: false,
-		}
-		response.Derived = append(response.Derived, derived)
-		response.Reset = false
+// processORDRDGroup handles transformation for ORDRD Groups.
+// It applies the following logic:
+//   - Extract groupname from DN.
+//   - Replace the DN and content values accordingly.
+//   - Iterate over each "member" entry, extract the pid, and look up the
+//     corresponding uid from pidUidMap. If any mapping is missing, set
+//     transformed to null and reset to true.
+//   - Derived search filter is built using all member pids.
+func processORDRDGroup(req HookRequest) HookResponse {
+	// Extract the groupname from the DN.
+	groupname := extractGroupName(req.DN)
+	newDN := fmt.Sprintf("cn=%s,ou=groups,dc=example,dc=org", groupname)
 
-		log.Printf("UNC User Transformation: %+v, Derived: %+v, Reset: %v",
-			transformed, response.Derived, response.Reset)
-		return c.JSON(http.StatusOK, response)
+	// Retrieve the "member" array from the content.
+	rawMembers, ok := req.Content["member"]
+	if !ok {
+		log.Println("ORDRD Group: no member field found")
+		return HookResponse{Transformed: nil, Derived: []DerivedSearch{}, Reset: true}
 	}
 
-	// ----------------------------------------------------------------------
-	// Example1: ORDRD Group entries (DN starts with "cn=unc:app:renci:").
-	if strings.HasPrefix(req.DN, "cn=unc:app:renci:") {
-		// --- ORDRD Group Transformation (Example1) ---
-		//
-		// Special instructions:
-		// - Extract groupname from the DN.
-		// - Map each group member's pid using the global pidUidMap.
-		// - If any mapping is missing, output transformed=null and set reset=true.
-		// - Otherwise, build a new DN and transform member values.
-		parts := strings.Split(req.DN, ":")
-		groupPart := parts[len(parts)-1]
-		groupname := strings.Split(groupPart, ",")[0]
+	memberSlice, ok := rawMembers.([]interface{})
+	if !ok {
+		log.Println("ORDRD Group: invalid member field type")
+		return HookResponse{Transformed: nil, Derived: []DerivedSearch{}, Reset: true}
+	}
 
-		// Retrieve member list from content.
-		membersRaw, ok := req.Content["member"]
+	// Process members – build new member list and derive a filter.
+	newMembers := []string{}
+	filterParts := []string{}
+	mappingMissing := false
+
+	for _, m := range memberSlice {
+		memberStr, ok := m.(string)
 		if !ok {
-			return c.JSON(http.StatusBadRequest,
-				map[string]string{"error": "member attribute missing"})
+			continue
 		}
-		var members []string
-		switch v := membersRaw.(type) {
-		case []interface{}:
-			for _, m := range v {
-				if memberStr, ok := m.(string); ok {
-					members = append(members, memberStr)
-				}
-			}
-		case string:
-			members = append(members, v)
-		default:
-			return c.JSON(http.StatusBadRequest,
-				map[string]string{"error": "invalid member attribute type"})
+		parts := strings.Split(memberStr, ",")
+		if len(parts) < 1 || !strings.HasPrefix(parts[0], "pid=") {
+			continue
 		}
-
-		// Check if all pids have mapping in pidUidMap.
-		missingMapping := false
-		for _, m := range members {
-			if strings.HasPrefix(m, "pid=") {
-				pidPart := strings.TrimPrefix(m, "pid=")
-				pid := strings.Split(pidPart, ",")[0]
-				if _, exists := pidUidMap[pid]; !exists {
-					missingMapping = true
-					break
-				}
-			} else {
-				missingMapping = true
-				break
-			}
+		pid := strings.TrimPrefix(parts[0], "pid=")
+		filterParts = append(filterParts, fmt.Sprintf("(pid=%s)", pid))
+		uid, found := pidUidMap[pid]
+		if !found {
+			// Missing mapping; transformation cannot continue.
+			log.Printf("Mapping for pid %s not found", pid)
+			mappingMissing = true
+			break
 		}
+		newVal := fmt.Sprintf("uid=%s,ou=users,dc=example,dc=org", uid)
+		newMembers = append(newMembers, newVal)
+	}
 
-		if missingMapping {
-			// If any uid mapping is missing, no transformation occurs.
-			response.Transformed = nil
-			response.Reset = true
-		} else {
-			newDN := "cn=" + groupname + ",ou=groups,dc=example,dc=org"
-			transformedContent := make(map[string]interface{})
-			transformedContent["cn"] = groupname
-
-			// Transform each member value.
-			var newMembers []string
-			for _, m := range members {
-				pidPart := strings.TrimPrefix(m, "pid=")
-				pid := strings.Split(pidPart, ",")[0]
-				mappedUID := pidUidMap[pid]
-				newMember := "uid=" + mappedUID + ",ou=users,dc=example,dc=org"
-				newMembers = append(newMembers, newMember)
-			}
-			transformedContent["member"] = newMembers
-			transformedContent["objectClass"] = []string{"top", "groupOfNames"}
-
-			transformed := TransformedPayload{
-				DN:      newDN,
-				Content: transformedContent,
-			}
-			response.Transformed = &transformed
-			response.Reset = false
-		}
-
-		// Build derived search specification using all pids.
-		filter := "(|"
-		for _, m := range members {
-			if strings.HasPrefix(m, "pid=") {
-				pidPart := strings.TrimPrefix(m, "pid=")
-				pid := strings.Split(pidPart, ",")[0]
-				filter += "(pid=" + pid + ")"
-			}
-		}
-		filter += ")"
-		derived := SearchSpec{
+	// Build the derived search specification.
+	derived := []DerivedSearch{
+		{
 			ID:      "ordrd-members",
-			Filter:  filter,
+			Filter:  "(|" + strings.Join(filterParts, "") + ")",
 			Refresh: 10,
 			BaseDN:  "ou=people,dc=unc,dc=edu",
-			Oneshot: false,
-		}
-		response.Derived = append(response.Derived, derived)
-
-		log.Printf("ORDRD Group Transformation: Transformed: %+v, Derived: %+v, Reset: %v",
-			response.Transformed, response.Derived, response.Reset)
-		return c.JSON(http.StatusOK, response)
+			Onesho:  false,
+		},
 	}
 
-	// ----------------------------------------------------------------------
-	// Example3: Posix Group entries (DN contains "ou=PosixGroups").
-	if strings.Contains(req.DN, "ou=PosixGroups") {
-		// --- Posix Group Transformation (Example3) ---
-		//
-		// Transform the DN and select only specific attributes.
-		cnVal, ok := req.Content["cn"].(string)
-		if !ok {
-			return c.JSON(http.StatusBadRequest,
-				map[string]string{"error": "cn attribute missing"})
+	// If any pid did not have a mapping, return a reset directive.
+	if mappingMissing {
+		return HookResponse{
+			Transformed: nil,
+			Derived:     derived,
+			Reset:       true,
 		}
-		newDN := "cn=" + cnVal + ",ou=groups,dc=example,dc=org"
-		transformedContent := make(map[string]interface{})
-		if v, exists := req.Content["cn"]; exists {
-			transformedContent["cn"] = v
-		}
-		if v, exists := req.Content["description"]; exists {
-			transformedContent["description"] = v
-		}
-		if v, exists := req.Content["gidNumber"]; exists {
-			transformedContent["gidNumber"] = v
-		}
-		// Overwrite objectClass to only include "posixGroup".
-		transformedContent["objectClass"] = []string{"posixGroup"}
-		if v, exists := req.Content["memberuid"]; exists {
-			transformedContent["memberuid"] = v
-		}
-		transformed := TransformedPayload{
-			DN:      newDN,
-			Content: transformedContent,
-		}
-		response.Transformed = &transformed
-		response.Derived = []SearchSpec{}
-		response.Reset = false
-
-		log.Printf("Posix Group Transformation: %+v, Derived: %+v, Reset: %v",
-			transformed, response.Derived, response.Reset)
-		return c.JSON(http.StatusOK, response)
 	}
 
-	// ----------------------------------------------------------------------
-	// Unknown object type.
-	// Users may add additional handling here.
-	log.Printf("Unknown object type with DN: %s", req.DN)
-	return c.JSON(http.StatusBadRequest,
-		map[string]string{"error": "unknown object type"})
+	// Build the new content.
+	newContent := map[string]interface{}{
+		"cn":          groupname,
+		"member":      newMembers,
+		"objectClass": []string{"top", "groupOfNames"},
+	}
+
+	transformed := map[string]interface{}{
+		"dn":      newDN,
+		"content": newContent,
+	}
+
+	return HookResponse{
+		Transformed: transformed,
+		Derived:     derived,
+		Reset:       false,
+	}
+}
+
+// processUNCUser handles transformation for UNC Users.
+// It applies the following logic:
+//   - Build a DN using the uid value.
+//   - Use baseGid (obtained from flag) for all gidNumber values.
+//   - Populate the transformed content and create a derived search based
+//     on uidNumber.
+//   - Update the global pidUidMap using the user's pid and uid.
+func processUNCUser(req HookRequest) HookResponse {
+	uid, ok := req.Content["uid"].(string)
+	if !ok || uid == "" {
+		log.Println("UNC User: uid not found or invalid")
+		return HookResponse{Transformed: nil, Derived: []DerivedSearch{}, Reset: true}
+	}
+	newDN := fmt.Sprintf("uid=%s,ou=users,dc=example,dc=org", uid)
+
+	// Build the transformed content.
+	newContent := map[string]interface{}{
+		"cn":            req.Content["cn"],
+		"displayName":   req.Content["displayName"],
+		"gidNumber":     baseGid, // Use the global baseGid.
+		"givenName":     req.Content["givenName"],
+		"homeDirectory": fmt.Sprintf("/home/%s", uid),
+		"objectClass":   []string{"top", "inetOrgPerson", "posixAccount", "helxUser"},
+		"ou":            "users",
+		"sn":            req.Content["sn"],
+		"uid":           uid,
+		"uidNumber":     req.Content["uidNumber"],
+	}
+
+	transformed := map[string]interface{}{
+		"dn":      newDN,
+		"content": newContent,
+	}
+
+	uidNumberStr, _ := req.Content["uidNumber"].(string)
+	derived := []DerivedSearch{
+		{
+			ID:      fmt.Sprintf("%s-posixGroups", uidNumberStr),
+			Filter:  fmt.Sprintf("(&(objectClass=posixGroup)(memberUid=%s))", uidNumberStr),
+			Refresh: 10,
+			BaseDN:  "dc=unc,dc=edu",
+			Onesho:  false,
+		},
+	}
+
+	// Update the pidUidMap based on the user's pid.
+	if pid, ok := req.Content["pid"].(string); ok && pid != "" {
+		pidUidMap[pid] = uid
+	}
+
+	return HookResponse{
+		Transformed: transformed,
+		Derived:     derived,
+		Reset:       false,
+	}
+}
+
+// processPosixGroup handles transformation for Posix Groups.
+// It applies the following logic:
+//   - Transform the DN to the new location.
+//   - In content, remove the "UNCGroup" type and update objectClass.
+//   - If a "memberuid" field exists, promote it out of the content.
+//   - No derived searches are generated.
+func processPosixGroup(req HookRequest) HookResponse {
+	cn := extractCN(req.DN)
+	newDN := fmt.Sprintf("cn=%s,ou=groups,dc=example,dc=org", cn)
+
+	// Copy the content for safe modification.
+	newContent := copyMap(req.Content)
+
+	// Remove memberuid from content, if it exists.
+	memberUID, hasMemberUID := newContent["memberuid"]
+	delete(newContent, "memberuid")
+
+	// Modify objectClass: retain only "posixGroup".
+	if rawOC, ok := newContent["objectClass"]; ok {
+		if ocSlice, ok := rawOC.([]interface{}); ok {
+			newOC := []string{}
+			for _, v := range ocSlice {
+				if s, ok := v.(string); ok && s == "posixGroup" {
+					newOC = append(newOC, s)
+				}
+			}
+			newContent["objectClass"] = newOC
+		}
+	}
+
+	// Build the transformed object.
+	transformed := map[string]interface{}{
+		"dn":      newDN,
+		"content": newContent,
+	}
+	// Promote memberuid to the top level if it exists.
+	if hasMemberUID {
+		transformed["memberuid"] = memberUID
+	}
+
+	return HookResponse{
+		Transformed: transformed,
+		Derived:     []DerivedSearch{},
+		Reset:       false,
+	}
+}
+
+// extractGroupName extracts the groupname from a DN expected in the form:
+// "cn=unc:app:renci:{{ groupname }},ou=Groups,dc=unc,dc=edu"
+func extractGroupName(dn string) string {
+	prefix := "cn=unc:app:renci:"
+	if strings.HasPrefix(dn, prefix) {
+		remain := dn[len(prefix):]
+		parts := strings.Split(remain, ",")
+		if len(parts) > 0 {
+			return parts[0]
+		}
+	}
+	return ""
+}
+
+// extractCN extracts the common name (cn) from a DN.
+func extractCN(dn string) string {
+	if strings.HasPrefix(dn, "cn=") {
+		withoutPrefix := dn[3:]
+		parts := strings.Split(withoutPrefix, ",")
+		if len(parts) > 0 {
+			return parts[0]
+		}
+	}
+	return ""
+}
+
+// copyMap creates a shallow copy of a map.
+func copyMap(orig map[string]interface{}) map[string]interface{} {
+	newMap := make(map[string]interface{})
+	for k, v := range orig {
+		newMap[k] = v
+	}
+	return newMap
 }
 
 func main() {
-	// Set up flag to allow customization of the baseGid.
-	flag.StringVar(&baseGid, "baseGid", "300", "Base GID for POSIX groups")
+	// Accept the baseGid flag. Default value is "200" (adjust as needed).
+	flag.StringVar(&baseGid, "baseGid", "200", "Base gidNumber to use for UNC Users")
 	flag.Parse()
 
-	// Create new Echo instance.
 	e := echo.New()
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
 
-	// Register routes.
+	// Register the /hook POST endpoint.
 	e.POST("/hook", hookHandler)
 
-	// Start server on port 5001.
-	addr := ":5001"
-	log.Printf("Starting ordrd-group-x on %s...", addr)
-	if err := e.Start(addr); err != nil {
+	// The application listens on port 5001.
+	port := "5001"
+	log.Printf("Starting ordrd-group-x on port %s", port)
+	if err := e.Start(":" + port); err != nil {
 		log.Fatal(err)
 	}
 }

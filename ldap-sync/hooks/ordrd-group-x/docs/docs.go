@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/hook": {
             "post": {
-                "description": "Accepts LDAP payload and returns transformed data.",
+                "description": "Accepts a JSON payload with DN and content, applies transformation",
                 "consumes": [
                     "application/json"
                 ],
@@ -27,10 +27,10 @@ const docTemplate = `{
                 "tags": [
                     "hook"
                 ],
-                "summary": "Process LDAP hook payload",
+                "summary": "Hook endpoint for LDAP synchronization",
                 "parameters": [
                     {
-                        "description": "LDAP Payload",
+                        "description": "Hook Payload",
                         "name": "payload",
                         "in": "body",
                         "required": true,
@@ -49,7 +49,10 @@ const docTemplate = `{
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/main.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -57,35 +60,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "main.Derived": {
-            "type": "object",
-            "properties": {
-                "baseDN": {
-                    "type": "string",
-                    "example": "ou=people,dc=unc,dc=edu"
-                },
-                "filter": {
-                    "type": "string",
-                    "example": "(|(pid=713272486)(pid=709909262)... )"
-                },
-                "id": {
-                    "type": "string",
-                    "example": "ordrd-members"
-                },
-                "refresh": {
-                    "type": "integer",
-                    "example": 10
-                }
-            }
-        },
-        "main.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
         "main.HookRequest": {
             "type": "object",
             "properties": {
@@ -94,8 +68,7 @@ const docTemplate = `{
                     "additionalProperties": true
                 },
                 "dn": {
-                    "type": "string",
-                    "example": "cn=unc:app:renci:ordrd-example,ou=Groups,dc=unc,dc=edu"
+                    "type": "string"
                 }
             }
         },
@@ -105,13 +78,48 @@ const docTemplate = `{
                 "derived": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/main.Derived"
+                        "$ref": "#/definitions/main.SearchSpec"
                     }
                 },
                 "reset": {
                     "type": "boolean"
                 },
-                "transformed": {}
+                "transformed": {
+                    "$ref": "#/definitions/main.TransformedPayload"
+                }
+            }
+        },
+        "main.SearchSpec": {
+            "type": "object",
+            "properties": {
+                "baseDN": {
+                    "type": "string"
+                },
+                "filter": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "oneshot": {
+                    "description": "Oneshot is optional; it is included when applicable.",
+                    "type": "boolean"
+                },
+                "refresh": {
+                    "type": "integer"
+                }
+            }
+        },
+        "main.TransformedPayload": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "dn": {
+                    "type": "string"
+                }
             }
         }
     }

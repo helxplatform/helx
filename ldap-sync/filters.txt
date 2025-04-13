@@ -1,7 +1,7 @@
 [
   {
-    "id": "get-ordrd-group",
-    "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-example))",
+    "id": "get-ordrd-test",
+    "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-test))",
     "refresh": 10
   },
   {
@@ -11,16 +11,7 @@
   }
 ]
 
-get ordrd-example
-{
-    "id": "x",
-    "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-example))",
-    "refresh": 0,
-    "BaseDN": "ou=groups,dc=unc,dc=edu",
-    "Oneshot": true
-}
-
-get ordrd-test
+get ordrd test
 {
     "id": "x",
     "filter": "(&(objectClass=uncgroup)(cn=unc:app:renci:ordrd-test))",
@@ -29,13 +20,19 @@ get ordrd-test
     "Oneshot": true
 }
 
-get posixGroups
+get posix groups
 {
     "id": "x",
-    "filter": "(&(objectClass=posixGroup)(gidNumber=1025))",
+    "filter": "(&(objectClass=posixGroup)(gidNumber=200))",
     "refresh": 0,
-    "BaseDN": "ou=posixGroups,ou=systems,dc=unc,dc=ed",
+    "BaseDN": "ou=posixgroups,ou=systems,dc=unc,dc=edu",
     "Oneshot": true
 }
 
-
+{
+    "id": "x",
+    "filter": "(&(objectClass=PosixGroup)(MemberUid=352137))",
+    "refresh": 10,
+    "BaseDN": "ou=Systems,ou=PosixGroups,dc=unc,dc=edu",
+    "Oneshot": false
+}

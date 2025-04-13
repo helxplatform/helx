@@ -1,65 +1,70 @@
-# ORDRD Group Hook Service
+# ordrd-group-x
 
-## Overview
-This hook service is built with Go and the Echo framework. It is
-designed to integrate with an existing LDAP synchronization system.
-The service listens for POST requests on `/hook` and applies a
-transformation to the LDAP entry payload.
+This hook service integrates with an LDAP synchronization system and
+transforms incoming LDAP entry payloads to a new format.
 
-## Transformation Process
-The service accepts a JSON payload with two fields:
+## Conversion Process Summary
 
-- **dn**: the LDAP distinguished name.
-- **content**: a JSON object of LDAP attributes.
+The service performs a conversion that outputs a JSON object with three
+keys:
 
-The service inspects the object type (via the `objectClass`
-attribute) and performs the following:
+- **transformed**: The payload after applying custom transformation.
+  If required lookups (e.g. in the pidUidMap) fail, this field is set to
+  null.
+- **derived**: An array of LDAP search specifications derived from the
+  input (e.g. for membership searches).
+- **reset**: A boolean flag. When true, it instructs the driver to clear
+  its stored state for an updated run.
 
-- **Group Objects (UNCGroup)**:  
-  - Removes the prefix `unc:app:renci:` from the `cn` field.
-  - Rebuilds the DN as `cn={newCN},ou=groups,dc=example,dc=org`.
-  - Transforms the `member` list by mapping each `pid` to its
-    corresponding `uid`.  
-  - Builds a derived search specification using the member pids.
-  - If any `pid` is not found in the map, the transformation is set
-    to null and the `reset` directive is set to true.
+## Transformation Logic
 
-- **User Objects (UNCPerson)**:  
-  - Extracts the `pid` and `uid` from the content.
-  - Updates the internal pid-to-uid mapping.
-  - Constructs a simplified LDAP entry with a new DN in the format
-    `uid={uid},ou=users,dc=example,dc=org` and a trimmed attribute list.
-  - No derived searches are generated in this case.
+The code currently handles three object types:
 
-The response JSON includes three keys:
-- **transformed**: The result of applying the transformation logic.
-- **derived**: An array of additional search specifications.
-- **reset**: A boolean that indicates whether internal search results
-  should be discarded.
+1. **UNC User (Example2):**
+   - Extracts `pid` and `uid` from the content and updates the internal
+     pidUidMap.
+   - Transforms the DN to `uid=<uid>,ou=users,dc=example,dc=org`.
+   - Substitutes `gidNumber` with the flag-provided baseGid.
+   - Generates a derived search for the user’s posix group.
+2. **ORDRD Group (Example1):**
+   - Removes the prefix `unc:app:renci:` from the group CN.
+   - Converts each member entry from a PID format to a UID format using
+     the pidUidMap.
+   - If any member UID is not found, sets **transformed** to null and
+     **reset** to true.
+   - Creates a derived search combining all member PIDs.
+3. **Posix Group (Example3):**
+   - Retains a subset of the attributes, updates the DN to
+     `cn=<cn>,ou=groups,dc=example,dc=org`, and preserves the
+     `memberuid` field.
+   - No derived search is created.
 
-## Customization Instructions
-- To modify the transformation logic, update the code in the
-  `hookHandler` function in `main.go`. Look for the commented sections
-  where sample logic is provided.
-- Add further handling for different incoming object types by extending
-  the type inspection section.
-- Adjust the derived search logic by modifying how the LDAP filter and
-  search objects are constructed.
-- Ensure that the LDAP filter and DN formats meet your system's
-  requirements.
+## Customization
 
-## Suggestions and Clarifications
-- Verify that the incoming JSON payload matches the expected format.
-- Enhance error handling and add validation where necessary.
-- Consider integrating persistent storage if the pid-to-uid mapping
-  needs to survive restarts.
-- Feel free to ask clarifying questions or extend the rules to better
-  fit your transformation needs.
+- **Transformation Logic:**  
+  Modify the switch sections in `main.go` where the processing for
+  UNC User, ORDRD Group, and Posix Group is defined. Replace the sample
+  code with your own business logic if needed.
 
-## Debugging
-A processing summary is logged that includes the following fields:
-- **transformed**
-- **derived**
-- **reset**
+- **Handling New Object Types:**  
+  Add additional branches to the if-else chain in the handler to process
+  new LDAP object types.
 
-Use these logs to troubleshoot issues during the conversion process.
+## Building and Running
+
+- **Swagger Docs:**  
+  Generate or update the API documentation by running:  
+  `make docs`
+
+- **Docker Build:**  
+  Build the Docker image with:  
+  `make build REPOSITORY=your_repo/ordrd-group-x VERSION=1.0.1`
+
+- **Docker Push:**  
+  Push the image using:  
+  `make push REPOSITORY=your_repo/ordrd-group-x VERSION=1.0.1`
+
+The service listens on port **5001**.
+
+If you have any clarifying questions or suggestions for further
+customization, feel free to modify the README and source code accordingly.

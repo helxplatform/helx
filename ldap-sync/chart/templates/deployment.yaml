@@ -57,8 +57,12 @@ spec:
         - name: {{ $hook.name }}
           image: {{ $hook.image.repository }}:{{ $hook.image.tag }}
           imagePullPolicy: Always
+          {{- with $hook.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
         {{- end }}
-        {{-  end }}
+        {{- end }}
       volumes:
         - name: config-volume
           configMap:

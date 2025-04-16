@@ -68,24 +68,23 @@ def retrieve_posix_group(conn, group_name, group_base):
         return conn.entries[0]
     return None
 
-def retrieve_all_posix_groups(conn, group_base):
+def retrieve_all_posix_groups_full(conn, group_base):
     """
-    Retrieve all posixGroup entries under the specified group base.
+    Retrieve all posixGroup entries under the specified group base with full details.
     
     Args:
         conn (ldap3.Connection): An active LDAP connection.
         group_base (str): The base DN where posixGroup entries reside.
     
     Returns:
-        list: A list of posixGroup names (cn values) found under the group base.
+        list: A list of dictionaries, where each dictionary contains all attributes for a posixGroup.
     """
     if conn.search(
             search_base=group_base,
             search_filter="(objectClass=posixGroup)",
             search_scope='SUBTREE',
-            attributes=['cn']):
-        # Extract and return each group's 'cn' attribute
-        return [entry.cn.value for entry in conn.entries]
+            attributes=['*']):
+        return [entry.entry_attributes_as_dict for entry in conn.entries]
     return []
 
 class CustomIndent(yaml.Dumper):
@@ -93,11 +92,33 @@ class CustomIndent(yaml.Dumper):
         # Force indentation of sequences within mappings.
         return super(CustomIndent, self).increase_indent(flow, False)
 
+def transform_group_dict(group_dict):
+    """
+    Transform the LDAP group entry dictionary.
+      - Rename 'cn' to 'name' and flatten its list value to a single string.
+      - Flatten 'gidNumber' list into a single value.
+      
+    Args:
+        group_dict (dict): Original group attributes.
+    
+    Returns:
+        dict: Transformed group dictionary.
+    """
+    transformed = {}
+    for key, value in group_dict.items():
+        if key == "cn":
+            transformed["name"] = value[0] if isinstance(value, list) and value else value
+        elif key == "gidNumber":
+            transformed["gidNumber"] = value[0] if isinstance(value, list) and value else value
+        else:
+            transformed[key] = value
+    return transformed
+
 def main():
     parser = argparse.ArgumentParser(
         description="Retrieve posixGroup(s) from LDAP and print their contents as YAML. "
                     "If --group-name is specified, retrieves and prints that group's full details; "
-                    "otherwise, prints all posixGroup names in YAML format."
+                    "otherwise, prints the full details of all posixGroups."
     )
     parser.add_argument("--group-name", help="Common name (cn) of the posixGroup to retrieve")
     parser.add_argument("--ldap-server", help="LDAP server URL (overrides config file)", default=None)
@@ -129,15 +150,15 @@ def main():
         if args.group_name:
             group_entry = retrieve_posix_group(conn, args.group_name, ldap_config["group_base"])
             if group_entry:
-                # Convert entry to a dictionary and print as YAML.
                 group_dict = group_entry.entry_attributes_as_dict
-                print(yaml.dump(group_dict, Dumper=CustomIndent, default_flow_style=False,indent=2))
+                transformed = transform_group_dict(group_dict)
+                print(yaml.dump(transformed, Dumper=CustomIndent, default_flow_style=False, indent=2))
             else:
                 print(f"posixGroup with name '{args.group_name}' not found under base '{ldap_config['group_base']}'.")
         else:
-            group_list = retrieve_all_posix_groups(conn, ldap_config["group_base"])
-            # Wrap the list in a dictionary for YAML output clarity.
-            print(yaml.dump({"posixGroups": group_list}, default_flow_style=False))
+            groups = retrieve_all_posix_groups_full(conn, ldap_config["group_base"])
+            transformed_groups = [transform_group_dict(g) for g in groups]
+            print(yaml.dump({"posixGroups": transformed_groups}, Dumper=CustomIndent, default_flow_style=False, indent=2))
     except Exception as e:
         print("An error occurred:", e)
     finally:

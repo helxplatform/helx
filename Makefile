@@ -67,7 +67,7 @@ check-python:
 # Install dependencies (if any)
 install-deps:
 	@echo "Installing dependencies..."
-	@pip3 install pyyaml
+	@pip3 install -r requirements.txt
 
 # Clean target to remove the generated YAML file
 clean:

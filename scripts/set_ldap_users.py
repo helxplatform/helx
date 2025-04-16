@@ -165,9 +165,8 @@ def create_or_update_user(conn, user_dn, attrs):
                     int_val = int(val)
                     valid_groups.append(int_val)
                 except ValueError:
-                    # Handle the case where the value cannot be converted to an integer
                     print(f"Invalid supplementalGroup value: {val}")
-                    pass  # You can choose to skip invalid values or handle them differently
+                    pass  # Optionally handle invalid values differently
             if valid_groups:
                 attrs['supplementalGroups'] = valid_groups
             else:
@@ -181,11 +180,12 @@ def create_or_update_user(conn, user_dn, attrs):
         # Compare and update attributes
         for attr, new_value in attrs.items():
             existing_value = existing_attrs.get(attr, [])
-            
+
             if new_value is None:
-                # If new value is None, mark the attribute for deletion if it exists in LDAP
-                if existing_value:
-                    print("deleting ",attr)
+                # Instead of checking the truthiness of existing_value,
+                # check if the attribute is present in the LDAP entry.
+                if attr in existing_attrs:
+                    print("deleting ", attr)
                     modifications[attr] = [(MODIFY_DELETE, [])]
             else:
                 if isinstance(new_value, list):

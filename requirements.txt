@@ -1,3 +1,4 @@
+python-ldap
 ldap3
 ldif3
 pyyaml

@@ -1,4 +1,4 @@
-Django==4.2
+Django==4.2.23
 django-allauth==0.61.1
 django-cors-headers==4.3.1
 django-crispy-forms==2.1
@@ -22,9 +22,6 @@ psycopg2-binary
 python-irodsclient==1.1.5
 deepmerge==1.0.1
 flasgger==0.9.5
-Flask==2.0.3
-flask_cors==3.0.10
-flask_restful==0.3.9
 GitPython==3.1.11
 Jinja2==3.0.3
 jsonschema==3.2.0

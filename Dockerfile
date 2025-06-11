@@ -15,8 +15,7 @@ RUN adduser --disabled-login --home $HOME --shell /bin/bash --uid $UID $USER && 
    chown -R $UID:$UID $HOME
 
 RUN set -x && apt-get update && \
-	chown -R $UID:$UID $APP_HOME && \
-	apt-get install -y gcc
+	chown -R $UID:$UID $APP_HOME
 
 # Removing but leaving commented in case Tycho needs this for swagger.
 # Version 3.3.1 currently, if not complaints v3.3.3 this can be 

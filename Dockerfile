@@ -14,9 +14,9 @@ RUN mkdir $APP_HOME
 RUN adduser --disabled-login --home $HOME --shell /bin/bash --uid $UID $USER && \
    chown -R $UID:$UID $HOME
 
-RUN set -x && apt-get update && \
-	chown -R $UID:$UID $APP_HOME && \
-	apt-get install -y build-essential git xmlsec1 libpq5 gcc
+# RUN set -x && apt-get update && \
+# 	chown -R $UID:$UID $APP_HOME && \
+# 	apt-get install -y build-essential git xmlsec1 libpq5 gcc
 
 # Removing but leaving commented in case Tycho needs this for swagger.
 # Version 3.3.1 currently, if not complaints v3.3.3 this can be 

@@ -16,7 +16,6 @@ requests==2.31.0
 requests-oauthlib==1.4.0
 selenium==3.141.0
 webdriver-manager==3.2.1
-sqlparse==0.4.4
 asgiref==3.7.2
 psycopg2-binary
 python-irodsclient==1.1.5

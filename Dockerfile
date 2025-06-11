@@ -29,7 +29,7 @@ COPY . .
 
 RUN if [ -d whl -a "$(ls -A whl/*.whl)" ]; then pip install whl/*.whl; fi
 RUN export SET_BUILD_ENV_FROM_FILE=false \
-    && make install \
+    # && make install \
     && unset SET_BUILD_ENV_FROM_FILE
 
 RUN chown -R 1000:0 /usr/src/inst-mgmt

@@ -21,8 +21,7 @@ asgiref==3.7.2
 psycopg2-binary
 python-irodsclient==1.1.5
 deepmerge==1.0.1
-flasgger==0.9.5
-GitPython==3.1.11
+GitPython==3.1.44
 Jinja2==3.0.3
 jsonschema==3.2.0
 kubernetes==25.3.0

@@ -15,6 +15,7 @@ RUN adduser --disabled-login --home $HOME --shell /bin/bash --uid $UID $USER && 
    chown -R $UID:$UID $HOME
 
 RUN set -x && apt-get update && \
+    apt-get -y install make \
 	chown -R $UID:$UID $APP_HOME
 
 # Removing but leaving commented in case Tycho needs this for swagger.
@@ -28,7 +29,7 @@ COPY . .
 
 RUN if [ -d whl -a "$(ls -A whl/*.whl)" ]; then pip install whl/*.whl; fi
 RUN export SET_BUILD_ENV_FROM_FILE=false \
-    # && make install \
+    && make install \
     && unset SET_BUILD_ENV_FROM_FILE
 
 RUN chown -R 1000:0 /usr/src/inst-mgmt

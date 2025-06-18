@@ -86,20 +86,6 @@ class TemplateUtils:
     def trunc (a_string, max_len=80):
         return (a_string[:max_len] + '..') if len(a_string) > max_len else a_string
 
-class NetworkUtils:
-    @staticmethod
-    def get_client_ip (request, debug=False):
-        """ Get the IP address of the client. Account for requests from proxies. 
-        In debug mode, ignore loopback and try to get an IP from a n interface."""
-        ip_addr = request.remote_addr
-        if request.headers.getlist("X-Forwarded-For"):
-            ip_addr = request.headers.getlist("X-Forwarded-For")[0]
-        if debug:
-            interface = netifaces.ifaddresses ('en0')
-            ip_addr = interface[2][0]['addr']
-        logger.debug (f"(debug mode ip addr:)--> {ip_addr}")
-        return ip_addr
-
 class Resource:
     @staticmethod
     def get_resource_path(resource_name):

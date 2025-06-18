@@ -1,7 +1,6 @@
 import datetime
 import json
 import logging
-import netifaces
 import os
 import string
 import traceback

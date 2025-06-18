@@ -11,12 +11,13 @@ ENV UID=1000
 
 RUN mkdir $APP_HOME
 
-RUN adduser --disabled-login --home $HOME --shell /bin/bash --uid $UID $USER && \
-   chown -R $UID:$UID $HOME
-
-RUN set -x && apt-get update && \
-    apt-get install -y make git xmlsec1 && \
-	chown -R $UID:$UID $APP_HOME
+# RUN set -x && apt-get update && \
+#     apt-get install -y make git xmlsec1 && \
+# 	chown -R $UID:$UID $APP_HOME
+RUN set -x && \
+    apk add --no-cache make git bash xmlsec libxml2-dev && \
+    adduser -D -s /bin/bash -h $HOME -u $UID $USER && \
+    chown -R $UID:$UID $HOME
 
 # Removing but leaving commented in case Tycho needs this for swagger.
 # Version 3.3.1 currently, if not complaints v3.3.3 this can be 

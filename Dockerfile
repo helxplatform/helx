@@ -23,7 +23,7 @@ RUN set -x && \
 # RUN apt-get install -y nodejs
 
 WORKDIR $APP_HOME
-COPY --chown $UID:$UID . .
+COPY --chown=$UID:$UID . .
 
 USER $USER
 

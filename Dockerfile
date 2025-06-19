@@ -23,7 +23,9 @@ RUN set -x && \
 # RUN apt-get install -y nodejs
 
 WORKDIR $APP_HOME
-COPY . .
+COPY --chown $UID:$UID . .
+
+USER $USER
 
 RUN if [ -d whl -a "$(ls -A whl/*.whl)" ]; then pip install whl/*.whl; fi
 RUN export SET_BUILD_ENV_FROM_FILE=false \

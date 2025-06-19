@@ -15,7 +15,7 @@ RUN mkdir $APP_HOME
 #     apt-get install -y make git xmlsec1 && \
 # 	chown -R $UID:$UID $APP_HOME
 RUN set -x && \
-    apk add --no-cache make git bash build-base xmlsec libxml2-dev linux-headers && \
+    apk add --no-cache make git bash build-base xmlsec libxml2-dev linux-headers openssl && \
     adduser -D -s /bin/bash -h $HOME -u $UID $USER && \
     chown -R $UID:$UID $HOME
 

@@ -8,8 +8,6 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-print(os.environ)
-
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "appstore.settings")
 
 application = get_wsgi_application()

@@ -11,13 +11,10 @@ ENV UID=1000
 
 RUN mkdir $APP_HOME
 
-# RUN set -x && apt-get update && \
-#     apt-get install -y make git xmlsec1 && \
-# 	chown -R $UID:$UID $APP_HOME
 RUN set -x && \
     apk add --no-cache make git bash build-base xmlsec libxml2-dev linux-headers openssl && \
     adduser -D -s /bin/bash -h $HOME -u $UID $USER && \
-    chown -R $UID:$UID $HOME
+    chown -R $UID:$UID $APP_HOME
 
 # Removing but leaving commented in case Tycho needs this for swagger.
 # Version 3.3.1 currently, if not complaints v3.3.3 this can be 
@@ -26,7 +23,7 @@ RUN set -x && \
 # RUN apt-get install -y nodejs
 
 WORKDIR $APP_HOME
-COPY --chown=$USER:$USER . .
+COPY . .
 
 RUN if [ -d whl -a "$(ls -A whl/*.whl)" ]; then pip install whl/*.whl; fi
 RUN export SET_BUILD_ENV_FROM_FILE=false \

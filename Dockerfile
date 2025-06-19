@@ -25,6 +25,9 @@ RUN set -x && \
 WORKDIR $APP_HOME
 COPY --chown=$UID:$UID . .
 
+RUN chown -R $USER:0 $APP_HOME && \
+    chmod -R g+w $APP_HOME
+
 USER $USER
 
 RUN if [ -d whl -a "$(ls -A whl/*.whl)" ]; then pip install whl/*.whl; fi
@@ -33,9 +36,6 @@ RUN export SET_BUILD_ENV_FROM_FILE=false \
     && pip install "pyyaml==5.4.1" --no-build-isolation \
     && make install \
     && unset SET_BUILD_ENV_FROM_FILE
-
-RUN chown -R 1000:0 /usr/src/inst-mgmt
-RUN chmod -R g+w /usr/src/inst-mgmt
 
 EXPOSE 8000
 CMD ["make","start"]

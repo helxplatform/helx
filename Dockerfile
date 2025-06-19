@@ -27,7 +27,6 @@ RUN set -x && \
 
 WORKDIR $APP_HOME
 COPY --chown=$USER:$USER . .
-USER $USER
 
 RUN if [ -d whl -a "$(ls -A whl/*.whl)" ]; then pip install whl/*.whl; fi
 RUN export SET_BUILD_ENV_FROM_FILE=false \
@@ -36,10 +35,8 @@ RUN export SET_BUILD_ENV_FROM_FILE=false \
     && make install \
     && unset SET_BUILD_ENV_FROM_FILE
 
-USER root
-
-RUN chown -R $USER:0 $APP_HOME && \
-    chmod -R g+w $APP_HOME
+RUN chown -R 1000:0 /usr/src/inst-mgmt
+RUN chmod -R g+w /usr/src/inst-mgmt
 
 EXPOSE 8000
 CMD ["make","start"]

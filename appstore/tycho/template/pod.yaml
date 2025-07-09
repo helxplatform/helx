@@ -74,6 +74,9 @@ spec:
         mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh &&
         echo -e "Host {{ system.gitea_host }}\n     Hostname {{ system.gitea_service_name }}\n     User {{ system.gitea_user }}\n     IdentityFile ~/.ssh/id_gitea" > {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh/config &&
         {% endif %}
+        if [ -d /shared ]; then
+          ln -sfn /shared {{ system.parent_dir }}/{{ system.subpath_dir }}/shared;
+        fi &&
         ls -aln {{ system.parent_dir }} &&
         echo OK
     volumeMounts:

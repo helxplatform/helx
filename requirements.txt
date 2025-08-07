@@ -27,4 +27,5 @@ PyYAML==5.4.1
 requests==2.32.4
 docker-compose==1.29.2
 requests_cache==1.2.1
+ldap3
 urllib3==2.5.0

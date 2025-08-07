@@ -3,14 +3,12 @@ import ipaddress
 import json
 import jsonschema
 import logging
-import netifaces
 import os
 import requests
 import sys
 import traceback
 import yaml
 from tycho.core import Tycho
-from tycho.tycho_utils import NetworkUtils
 
 """
 Provides actions for creating, monitoring, and deleting distributed systems of cloud native

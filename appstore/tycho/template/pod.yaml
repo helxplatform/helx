@@ -21,6 +21,7 @@ metadata:
     tycho-guid: {{ system.identifier }}
     tycho-app-id: {{ system.app_id }}
 spec:
+  enableServiceLinks: false
 {% if system.serviceaccount %}
   serviceAccountName: {{system.serviceaccount}}
 {% endif %}

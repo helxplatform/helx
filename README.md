@@ -118,6 +118,13 @@ each in an application specific subfolder. Along with the docker compose, a `.en
 file specifies environment variables for the application. If a file called icon.png
 is provided, that is used as the application's icon.
 
+### App Deployment features
+
+1. Follows docker-compose as a baseline description
+2. Best practices in constructing deployment definitions
+  a. disables service env file generation to avoid information leak
+
+
 ## Development Environment
 
 ### Prerequisites

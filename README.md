@@ -67,6 +67,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | global.ambassador_id | string | `nil` | specify the id of the ambassador for Tycho-launched services. |
 | global.ambassador_mapping_name | string | `"appstore-mapping"` | specify the mapping name for ambassador |
 | global.ambassador_service_name | string | `"ambassador"` | specify the service name for ambassador |
+| global.imageRegistry | string | `"containers.renci.org"` | container image registry to use for Bitnami images |
+| global.security.allowInsecureImages | bool | `true` | load container images from non-Bitnami container registry servers |
 | global.stdnfsPvc | string | `"stdnfs"` | the name of the PVC to use for user's files |
 | graderApiUrl | string | `""` |  |
 | gunicorn.workers | int | `5` | Set the number of gunicorn workers.  (2*CPU)+1 is recommended. |

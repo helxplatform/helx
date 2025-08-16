@@ -322,6 +322,11 @@ tycho:
   externalAppRegistryAppSpecsDir: "app-specs"
 
 global:
+  # -- container image registry to use for Bitnami images
+  imageRegistry: "containers.renci.org"
+  security:
+    # -- load container images from non-Bitnami container registry servers
+    allowInsecureImages: true
   # -- the name of the PVC to use for user's files
   stdnfsPvc: stdnfs
   # -- specify the id of the ambassador for Tycho-launched services.

@@ -15,11 +15,11 @@ image:
 
 imagePostgresql:
   # -- repository where postgresql image is located
-  repository: docker.io/bitnami/postgresql
+  repository: containers.renci.org/bitnami/postgresql
   # -- pull policy
   pullPolicy: IfNotPresent
   # -- Image tag for postgresql, coordinate this with postgresql dependency.
-  tag: 11
+  tag: 17.6.0-debian-12-r0
 
 fetcherImage:
   # -- repository where image is located

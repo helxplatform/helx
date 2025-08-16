@@ -76,8 +76,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | image.repository | string | `"containers.renci.org/helxplatform/appstore"` | repository where image is located |
 | image.tag | string | `nil` | Overrides the image tag whose default is the chart appVersion. Set to "" before release! |
 | imagePostgresql.pullPolicy | string | `"IfNotPresent"` | pull policy |
-| imagePostgresql.repository | string | `"docker.io/bitnami/postgresql"` | repository where postgresql image is located |
-| imagePostgresql.tag | int | `11` | Image tag for postgresql, coordinate this with postgresql dependency. |
+| imagePostgresql.repository | string | `"containers.renci.org/bitnami/postgresql"` | repository where postgresql image is located |
+| imagePostgresql.tag | string | `"17.6.0-debian-12-r0"` | Image tag for postgresql, coordinate this with postgresql dependency. |
 | imagePullSecrets | list | `[]` | credentials for a private repo |
 | imagej.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for ImageJ |
 | irods.BRAINI_RODS | string | `""` |  |

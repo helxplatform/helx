@@ -1,9 +1,11 @@
+import logging
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 
 from django.conf import settings
 from django.forms import ValidationError
 
+logger = logging.getLogger(__file__)
 
 class RestrictEmailAdapter(DefaultAccountAdapter):
     def clean_email(self, email):
@@ -56,3 +58,14 @@ class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
         if request.session.get("helx_frontend"):
             del request.session["helx_frontend"]
         return url
+    
+class SocialAccountAdapter(DefaultSocialAccountAdapter):
+    def on_authentication_error(self, request, provider, error=None, exception=None, extra_context=None):
+        provider_id = provider.id if provider else "unknown"
+        error_code = error.name if error else "unknown"
+        exception_str = str(exception) if exception else "No exception details"
+
+        logger.info(f"User failed to login using allauth:\nprovider id: { provider_id}\nerror code: { error_code }\nexception: { exception_str }")
+        
+        # Note: this is a no-op, since this hook is unimplemented in the default (super) adapter class.
+        return super().on_authentication_error(request, provider, error, exception, extra_context)

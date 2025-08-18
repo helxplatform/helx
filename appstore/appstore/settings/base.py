@@ -159,6 +159,7 @@ OIDC_SESSION_MANAGEMENT_ENABLE = True
 SAML_URL = "/accounts/saml"
 SAML_ACS_URL = "/saml2_auth/acs/"
 #SAML_ACS_URL = "/sso/acs/"
+SOCIALACCOUNT_ADAPATER = "appstore.adapter.SocialAccountAdapter"
 SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_PROVIDERS = {
@@ -322,6 +323,12 @@ LOGGING = {
             "level": LOG_LEVEL,
             "propagate": False,
         },
+        "django.request": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+            "filters": ["skip_superfluous_endpoint_logs"]
+        },
         "django.template": {
             "handlers": ["console"],
             "level": LOG_LEVEL,
@@ -336,15 +343,21 @@ LOGGING = {
             "handlers": ["console"],
             "level": LOG_LEVEL,
         },
-        "tycho.client": {
+        "tycho": {
             "handlers": ["console"],
-            "level": LOG_LEVEL,
+            "level": "WARNING",
         },
-        "tycho.kube": {
+        # Info logs coming from xmlschema are generally irrelevant and crowd the logs
+        "xmlschema": {
             "handlers": ["console"],
-            "level": LOG_LEVEL,
-        },
+            "level": "WARNING"
+        }
     },
+    "filters": {
+        "skip_superfluous_endpoint_logs": {
+            "()": "appstore.logging.SuperfluousEndpointLogFilter"
+        }
+    }
 }
 
 csrf_strings = os.environ.get("CSRF_DOMAINS", "")

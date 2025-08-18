@@ -186,8 +186,8 @@ class TychoClient:
             :param request: A request formatted as above.
             :type request: JSON
         """
-        logger.error (f"-- delete: {json.dumps(request, indent=2)}")
-        print (f"-- delete: {json.dumps(request, indent=2)}")
+        logger.info (f"-- delete: {json.dumps(request, indent=2)}")
+        # print (f"-- delete: {json.dumps(request, indent=2)}")
         return self.request ("delete", request)
     
     def status (self, request): 

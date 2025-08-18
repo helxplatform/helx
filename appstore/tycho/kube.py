@@ -336,7 +336,7 @@ class KubernetesCompute(Compute):
                 "deployment"  : self.extensions_api.delete_collection_namespaced_deployment,
                 "replica_set" : self.extensions_api.delete_collection_namespaced_replica_set,
                 "pod"         : self.api.delete_collection_namespaced_pod,
-                "persistentvolumeclaim" : self.api.delete_collection_namespaced_persistent_volume_claim,
+                # "persistentvolumeclaim" : self.api.delete_collection_namespaced_persistent_volume_claim,
                 #"networkpolicy" : self.networking_api.delete_collection_namespaced_network_policy
             }
             for object_type, finalizer in finalizers.items ():

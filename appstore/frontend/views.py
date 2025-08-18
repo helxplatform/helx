@@ -10,6 +10,7 @@ from django.urls import reverse_lazy
 from django.shortcuts import redirect
 from django.views.generic.base import TemplateView
 from rest_framework.test import APIRequestFactory
+from django.contrib.sites.models import Site
 
 """
 #######
@@ -124,16 +125,24 @@ class HelxSpaLoaderView(TemplateView):
 
 
 class LoginWhitelistView(TemplateView):
-
     template_name = "frontend/whitelist.html"
-    brand_context = get_brand_details()
-    brand = brand_context["brand"]
-    full_brand = brand_context["title"]
-    brand_logo = brand_context["logo_url"]
 
-    def get_context_data(self, *args, **kwargs):
-        context = super(LoginWhitelistView, self).get_context_data(*args, **kwargs)
-        context["brand"] = self.brand
-        context["full_brand"] = self.full_brand
-        context["brand_logo"] = self.brand_logo
-        return context
+    brand_context = get_brand_details()
+    brand         = brand_context["brand"]
+    full_brand    = brand_context["title"]
+    brand_logo    = brand_context["logo_url"]
+    brand_links   = brand_context["links"]          # NEW
+    color_scheme  = brand_context.get("color_scheme")  # optional
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        current_site = Site.objects.get_current(request=self.request)
+        ctx.update(
+            brand=self.brand,
+            full_brand=self.full_brand,
+            brand_logo=self.brand_logo,
+            brand_links=self.brand_links,
+            brand_color_scheme=self.color_scheme,
+            site=current_site,               # ← add this
+        )
+        return ctx

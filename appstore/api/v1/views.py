@@ -1,9 +1,10 @@
 import functools
 import logging
-from dataclasses import asdict
 import time
 import os
 import re
+from typing import Optional
+from dataclasses import asdict
 
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
@@ -358,7 +359,7 @@ class AppViewSet(viewsets.GenericViewSet):
         # TODO change this to serializer.data after discovery on nested object data
         return Response(apps)
 
-    def retrieve(self, request, app_id=None):
+    def retrieve(self, request, app_id: Optional[str]=None):
         """
         Provide app details.
         """
@@ -604,7 +605,7 @@ class InstanceViewSet(viewsets.GenericViewSet):
         host = get_host(request)
         system = tycho.start(principal, app_id, resource_request.resources, host, env)
 
-        identity_token.consumer_id = identity_token.compute_app_consumer_id(app_id, system.identifier)
+        identity_token.consumer_id = identity_token.compute_app_consumer_id(system.identifier)
         identity_token.save()
 
         s = InstanceSpec(
@@ -623,10 +624,12 @@ class InstanceViewSet(viewsets.GenericViewSet):
             serializer = InstanceSpecSerializer(data=asdict(s))
             try:
                 serializer.is_valid(raise_exception=True)
+                logger.info(f"Launched app { app_id }-{ system.identifier } for user { username }")
                 return Response(serializer.validated_data)
-            except serializers.ValidationError:
+            except serializers.ValidationError as e:
                 # Delete invalid instance configuration that we won't be tracking
                 # for the user.
+                logger.error(f"Failed to launch app { app_id } for user { username }; exception: { str(e) }")
                 tycho.delete({"name": system.services[0].identifier})
                 return Response(
                     serializer.errors, status=drf_status.HTTP_400_BAD_REQUEST
@@ -634,6 +637,7 @@ class InstanceViewSet(viewsets.GenericViewSet):
         else:
             # Failed to construct a tracked instance, attempt to remove
             # potentially created instance rather than leaving it hanging.
+            logger.error(f"Failed to launch app { app_id } for user { username }; null instance spec")
             tycho.delete({"name": system.services[0].identifier})
             identity_token.delete()
             return Response(
@@ -682,15 +686,15 @@ class InstanceViewSet(viewsets.GenericViewSet):
         """
         serializer = self.get_serializer(data={"sid": sid})
         serializer.is_valid(raise_exception=True)
-        logger.debug(f"\nDeleting: {sid}")
         status = tycho.status({"name": serializer.validated_data["sid"]})
         if status.services != None and len(status.services) == 1:
-            logger.info("service username: " + str(status.services[0].username))
-            logger.info("request username: " + str(request.user.username))
+            logger.debug("service username: " + str(status.services[0].username))
+            logger.debug("request username: " + str(request.user.username))
             if status.services[0].username == request.user.username:
+                logger.info(f"Terminating app id { sid } for user { request.user.username }")
                 response = tycho.delete({"name": serializer.validated_data["sid"]})
                 # Delete all the tokens the user had associated with that app
-                consumer_id = UserIdentityToken.compute_app_consumer_id(serializer.validated_data["aid"], serializer.validated_data["sid"])
+                consumer_id = UserIdentityToken.compute_app_consumer_id(serializer.validated_data["sid"])
                 tokens = UserIdentityToken.objects.filter(user=request.user, consumer_id=consumer_id)
                 tokens.delete()
                 # TODO How can we avoid this sleep? Do we need an immediate response beyond
@@ -698,7 +702,9 @@ class InstanceViewSet(viewsets.GenericViewSet):
                 # to the front end?
                 time.sleep(2)
                 return Response(response)
-            else: return Response(status=drf_status.HTTP_403_FORBIDDEN)
+            else:
+                logger.warning(f"User { request.user.username } attempted to terminate app id { sid } owned by user { status.services[0].username }")
+                return Response(status=drf_status.HTTP_403_FORBIDDEN)
         else: return Response(status=drf_status.HTTP_404_NOT_FOUND)
 
     def partial_update(self, request, sid=None):
@@ -790,7 +796,9 @@ class UsersViewSet(viewsets.GenericViewSet):
         if request.session.get("Authorization", None):
             return request.session["Authorization"].split(" ")[1]
         else:
-            logger.error(f"Authorization not set for {request.user.username}")
+            # This is not necessarily an error, since authorization (access token)
+            # may or may not be used, i.e., with authentication via sessionid.
+            logger.debug(f"Authorization not set for {request.user.username}")
             return None
 
     def list(self, request):

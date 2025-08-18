@@ -3,14 +3,12 @@ import ipaddress
 import json
 import jsonschema
 import logging
-import netifaces
 import os
 import requests
 import sys
 import traceback
 import yaml
 from tycho.core import Tycho
-from tycho.tycho_utils import NetworkUtils
 
 """
 Provides actions for creating, monitoring, and deleting distributed systems of cloud native
@@ -130,7 +128,7 @@ class StatusSystemResource(TychoResource):
             response = self.create_response(
                 exception=e,
                 message=f"Failed to get system status.")
-        print(json.dumps(response, indent=2))
+        # print(json.dumps(response, indent=2))
         return response
 
 

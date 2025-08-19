@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 4.2.1](https://img.shields.io/badge/Version-4.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.3.0](https://img.shields.io/badge/AppVersion-4.3.0-informational?style=flat-square)
+![Version: 5.0.0](https://img.shields.io/badge/Version-5.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.3.0](https://img.shields.io/badge/AppVersion-4.3.0-informational?style=flat-square)
 
 ## CI/CD
 
@@ -67,6 +67,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | global.ambassador_id | string | `nil` | specify the id of the ambassador for Tycho-launched services. |
 | global.ambassador_mapping_name | string | `"appstore-mapping"` | specify the mapping name for ambassador |
 | global.ambassador_service_name | string | `"ambassador"` | specify the service name for ambassador |
+| global.imageRegistry | string | `"containers.renci.org"` | container image registry to use for Bitnami images |
+| global.security.allowInsecureImages | bool | `true` | load container images from non-Bitnami container registry servers |
 | global.stdnfsPvc | string | `"stdnfs"` | the name of the PVC to use for user's files |
 | graderApiUrl | string | `""` |  |
 | gunicorn.workers | int | `5` | Set the number of gunicorn workers.  (2*CPU)+1 is recommended. |
@@ -74,8 +76,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | image.repository | string | `"containers.renci.org/helxplatform/appstore"` | repository where image is located |
 | image.tag | string | `nil` | Overrides the image tag whose default is the chart appVersion. Set to "" before release! |
 | imagePostgresql.pullPolicy | string | `"IfNotPresent"` | pull policy |
-| imagePostgresql.repository | string | `"docker.io/bitnami/postgresql"` | repository where postgresql image is located |
-| imagePostgresql.tag | int | `11` | Image tag for postgresql, coordinate this with postgresql dependency. |
+| imagePostgresql.repository | string | `"containers.renci.org/bitnami/postgresql"` | repository where postgresql image is located |
+| imagePostgresql.tag | string | `"17.6.0-debian-12-r0"` | Image tag for postgresql, coordinate this with postgresql dependency. |
 | imagePullSecrets | list | `[]` | credentials for a private repo |
 | imagej.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for ImageJ |
 | irods.BRAINI_RODS | string | `""` |  |

@@ -13,11 +13,11 @@ image:
 
 imagePostgresql:
   # -- repository where postgresql image is located
-  repository: docker.io/bitnami/postgresql
+  repository: containers.renci.org/bitnami/postgresql
   # -- pull policy
   pullPolicy: IfNotPresent
   # -- Image tag for postgresql, coordinate this with postgresql dependency.
-  tag: 11
+  tag: 17.6.0-debian-12-r0
 
 # An empty string equates to false, anything else is true.  If debug is true the logLevel is also set to DEBUG.
 debug: ""
@@ -329,6 +329,11 @@ tycho:
   externalAppRegistryAppSpecsDir: "app-specs"
 
 global:
+  # -- container image registry to use for Bitnami images
+  imageRegistry: "containers.renci.org"
+  security:
+    # -- load container images from non-Bitnami container registry servers
+    allowInsecureImages: true
   # -- the name of the PVC to use for user's files
   stdnfsPvc: stdnfs
   # -- specify the id of the ambassador for Tycho-launched services.

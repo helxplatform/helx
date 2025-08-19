@@ -151,6 +151,23 @@ spec:
             configMapKeyRef:
               key: NRC_PORT
               name: {{ include "appstore.fullname" . }}-env
+        {{- if .Values.ldap.enabled }}
+        - name: LDAP_URI
+          valueFrom:
+            configMapKeyRef:
+              key: LDAP_URI
+              name: {{ include "appstore.fullname" . }}-env
+        - name: LDAP_GROUP_DN
+          valueFrom:
+            configMapKeyRef:
+              key: LDAP_GROUP_DN
+              name: {{ include "appstore.fullname" . }}-env
+        - name: LDAP_SEARCH_BASE
+          valueFrom:
+            configMapKeyRef:
+              key: LDAP_SEARCH_BASE
+              name: {{ include "appstore.fullname" . }}-env
+        {{- end }}
         - name: SECRET_KEY
           valueFrom:
             secretKeyRef:
@@ -166,28 +183,28 @@ spec:
             secretKeyRef:
               key: APPSTORE_DJANGO_PASSWORD
               name: {{ include "appstore.fullname" . }}
-        {{ if .Values.global.ambassador_id }}
+        {{- if .Values.global.ambassador_id }}
         - name: AMBASSADOR_ID
           valueFrom:
             secretKeyRef:
               key: AMBASSADOR_ID
               name: {{ include "appstore.fullname" . }}
         {{- end }}
-        {{ if .Values.django.DOCKSTORE_APPS_BRANCH }}
+        {{- if .Values.django.DOCKSTORE_APPS_BRANCH }}
         - name: DOCKSTORE_APPS_BRANCH
           valueFrom:
             secretKeyRef:
               key: DOCKSTORE_APPS_BRANCH
               name: {{ include "appstore.fullname" . }}
         {{- end }}
-        {{ if .Values.django.REMOVE_AUTHORIZED_USERS }}
+        {{- if .Values.django.REMOVE_AUTHORIZED_USERS }}
         - name: REMOVE_AUTHORIZED_USERS
           valueFrom:
             secretKeyRef:
               key: REMOVE_AUTHORIZED_USERS
               name: {{ include "appstore.fullname" . }}
         {{- end }}
-        {{ if .Values.django.AUTHORIZED_USERS }}
+        {{- if .Values.django.AUTHORIZED_USERS }}
         - name: AUTHORIZED_USERS
           valueFrom:
             secretKeyRef:
@@ -204,7 +221,7 @@ spec:
             secretKeyRef:
               key: OAUTH_PROVIDERS
               name: {{ include "appstore.fullname" . }}
-        {{ if .Values.oauth.GITHUB_NAME }}
+        {{- if .Values.oauth.GITHUB_NAME }}
         - name: GITHUB_NAME
           valueFrom:
             secretKeyRef:
@@ -220,14 +237,14 @@ spec:
             secretKeyRef:
               key: GITHUB_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{ if .Values.oauth.GITHUB_KEY }}
+        {{- if .Values.oauth.GITHUB_KEY }}
         - name: GITHUB_KEY
           valueFrom:
             secretKeyRef:
               key: GITHUB_KEY
               name: {{ include "appstore.fullname" . }}
         {{- end }}
-        {{ if .Values.oauth.GITHUB_SITES }}
+        {{- if .Values.oauth.GITHUB_SITES }}
         - name: GITHUB_SITES
           valueFrom:
             secretKeyRef:
@@ -235,7 +252,7 @@ spec:
               name: {{ include "appstore.fullname" . }}
         {{- end }}
         {{- end }}
-        {{ if .Values.oauth.GOOGLE_NAME }}
+        {{- if .Values.oauth.GOOGLE_NAME }}
         - name: GOOGLE_NAME
           valueFrom:
             secretKeyRef:
@@ -251,14 +268,14 @@ spec:
             secretKeyRef:
               key: GOOGLE_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{ if .Values.oauth.GOOGLE_KEY }}
+        {{- if .Values.oauth.GOOGLE_KEY }}
         - name: GOOGLE_KEY
           valueFrom:
             secretKeyRef:
               key: GOOGLE_KEY
               name: {{ include "appstore.fullname" . }}
         {{- end }}
-        {{ if .Values.oauth.GOOGLE_SITES }}
+        {{- if .Values.oauth.GOOGLE_SITES }}
         - name: GOOGLE_SITES
           valueFrom:
             secretKeyRef:

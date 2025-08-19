@@ -2,8 +2,6 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-replicaCount: 1
-
 image:
   # -- repository where image is located
   repository: containers.renci.org/helxplatform/appstore
@@ -15,11 +13,14 @@ image:
 
 imagePostgresql:
   # -- repository where postgresql image is located
-  repository: docker.io/bitnami/postgresql
+  repository: containers.renci.org/bitnami/postgresql
   # -- pull policy
   pullPolicy: IfNotPresent
   # -- Image tag for postgresql, coordinate this with postgresql dependency.
-  tag: 11
+  tag: 17.6.0-debian-12-r0
+
+# An empty string equates to false, anything else is true.  If debug is true the logLevel is also set to DEBUG.
+debug: ""
 
 fetcherImage:
   # -- repository where image is located
@@ -38,10 +39,14 @@ networkPolicyLabels: {"role": "appstore"}
 
 podAnnotations: {}
 
-# An empty string equates to false, anything else is true.  If debug is true the logLevel is also set to DEBUG.
-debug: ""
 # -- Set the log level for the application.  (DEBUG INFO WARNING ERROR CRITICAL)
 logLevel: "WARNING"
+
+ldap:
+  enabled: false
+  uri: "ldap://openldap"
+  groupDN: "cn=users,ou=groups,dc=example,dc=org"
+  searchBase: "ou=users,dc=example,dc=org"
 
 updateStrategy:
   # -- 'RollingUpdate' or 'Recreate'. Must use Recreate if mounting PVCs due to multi-attach errors.
@@ -233,6 +238,8 @@ apps:
   PGADMIN_DISABLE_POSTFIX: "true"
   PGADMIN_LISTEN_PORT: "80"
 
+replicaCount: 1
+
 # -- Settings for django sqlite3 db file persistence, if postgresql is not enabled (postgresql.enabled: false).
 sqliteStorage:
   # -- If a claim name is not specified, it defaults to appstore-oauth-pvc.
@@ -322,6 +329,11 @@ tycho:
   externalAppRegistryAppSpecsDir: "app-specs"
 
 global:
+  # -- container image registry to use for Bitnami images
+  imageRegistry: "containers.renci.org"
+  security:
+    # -- load container images from non-Bitnami container registry servers
+    allowInsecureImages: true
   # -- the name of the PVC to use for user's files
   stdnfsPvc: stdnfs
   # -- specify the id of the ambassador for Tycho-launched services.

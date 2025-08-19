@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 4.1.9](https://img.shields.io/badge/Version-4.1.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.2.0](https://img.shields.io/badge/AppVersion-4.2.0-informational?style=flat-square)
+![Version: 4.2.1](https://img.shields.io/badge/Version-4.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.3.0](https://img.shields.io/badge/AppVersion-4.3.0-informational?style=flat-square)
 
 ## CI/CD
 
@@ -93,6 +93,10 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | irodsUnbranded.RODS_PASSWORD | string | `""` |  |
 | irodsUnbranded.RODS_USERNAME | string | `""` |  |
 | irodsUnbranded.enabled | bool | `false` |  |
+| ldap.enabled | bool | `false` |  |
+| ldap.groupDN | string | `"cn=users,ou=groups,dc=example,dc=org"` |  |
+| ldap.searchBase | string | `"ou=users,dc=example,dc=org"` |  |
+| ldap.uri | string | `"ldap://openldap"` |  |
 | logLevel | string | `"WARNING"` | Set the log level for the application.  (DEBUG INFO WARNING ERROR CRITICAL) |
 | logsStorageAppstore | object | `{"claimName":null,"createPVC":false,"existingClaim":false,"storageClass":null,"storageSize":"2Gi"}` | Settings for django logs persistence. |
 | logsStorageAppstore.claimName | string | `nil` | Specify the claim name if it pre-exists or it defaults to appstore-logs-pvc. |

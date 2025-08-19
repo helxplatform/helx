@@ -34,6 +34,11 @@ data:
   {{- else if .Values.saml.AUTHORITY_URL }}
   SAML_METADATA_SOURCE: {{ .Values.saml.AUTHORITY_URL }}
   {{- end }}
+  {{- if .Values.ldap.enabled }}
+  LDAP_URI: {{ .Values.ldap.uri }}
+  LDAP_GROUP_DN: {{ .Values.ldap.groupDN }}
+  LDAP_SEARCH_BASE: {{ .Values.ldap.searchBase }}
+  {{- end }}
   SAML_FETCH_URL: "{{ .Values.saml.AUTHORITY_URL }}"
   SAML_FETCH_FILE: "{{ .Values.saml.cache.FETCH_FILE }}"
   SAML_FETCH_INTERVAL: "{{ .Values.saml.cache.FETCH_INTERVAL }}"

@@ -9,13 +9,13 @@ def load_ldap_config(config_file="helx_ldap_config.yaml"):
 
 def generate_helm_values(config):
     """Generate Helm openldap_values.yaml for OpenLDAP based on the LDAP config."""
-    admin_password = config['ldap']['admin']['password']
+    admin_password  = config['ldap']['admin']['password']
     config_password = config['ldap']['config']['password']
 
     helm_values = {
         'replicaCount': 1,
         'global': {
-            'adminPassword': admin_password,
+            'adminPassword':  admin_password,
             'configPassword': config_password
         },
         'persistence': {
@@ -32,6 +32,17 @@ def generate_helm_values(config):
         },
         'env': {
             'LDAP_ALLOW_ANON_BINDING': 'yes'
+        },
+        # resource requests & limits updated per user request
+        'resources': {
+            'requests': {
+                'cpu':    '500m',
+                'memory': '500M'
+            },
+            'limits': {
+                'cpu':    '1',
+                'memory': '500M'
+            }
         }
     }
 

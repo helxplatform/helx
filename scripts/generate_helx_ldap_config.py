@@ -5,7 +5,7 @@ import random
 import string
 from getpass import getpass
 
-def generate_random_password(length=10):
+def generate_random_password(length=20):
     """Generates a random password of given length without punctuation."""
     characters = string.ascii_letters + string.digits  # No punctuation
     return ''.join(random.choice(characters) for i in range(length))

@@ -46,8 +46,8 @@ spec:
     fsGroup: {{ system.security_context.fs_group }}
     {% endif %}
   {% endif %}
-{% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
   initContainers:
+  {% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
   - name: volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     {% if system.init_security_context.run_as_user or system.init_security_context.run_as_group %}
@@ -84,7 +84,105 @@ spec:
     volumeMounts:
     - name: {{ system.stdnfs_pvc }}
       mountPath: {{ system.parent_dir }}
-{% endif %}
+  {% endif %}
+  - name: setup-trash
+    image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
+    securityContext:
+      runAsUser: 65534
+      runAsGroup: 65534
+    resources:
+      requests:
+        memory: {{ system.init_memory }}
+        cpu: {{ system.init_cpus }}
+      limits:
+        memory: {{ system.init_memory }}
+        cpu: {{ system.init_cpus }}
+    command: [ 'bash', '-c' ]
+    args: |
+      REALHOME="{{ system.parent_dir }}/{{ system.subpath_dir }}"
+      HOME_TRASH="${XDG_DATA_HOME:-$REALHOME/.local/share}/Trash"
+      TRASH_AGGREGATE="$REALHOME/Trash"
+
+      mkdir -p $HOME_TRASH
+      mkdir -p $TRASH_AGGREGATE
+
+      TRASH_DIRS="$HOME_TRASH"
+
+      # Find/create top-level trash directories for valid mounts.
+      while read -r line; do
+        # extract filesystem type and mount point
+        fs=$(echo "$line" | awk '{print $5}')
+        mp=$(echo "$line" | awk '{print $3}')
+
+        owner=$(stat -c '%u' "$mp")
+        group=$(stat -c '%g' "$mp")
+
+        # Skip pseudo-filesystems
+        case "$fs" in
+          proc|sysfs|devtmpfs|tmpfs|cgroup|overlay|aufs)
+            continue
+            ;;
+        esac
+
+        # skip well-known system paths
+        case "$mp" in
+          /proc*|/sys*|/dev*|/run*|/etc*)
+            continue
+            ;;
+        esac
+
+        # Skip non-directory mounts
+        if [ ! -d "$mp" ]; then
+          continue
+        fi
+        # Skip non-readable mounts
+        if [ ! -r "$mp" ]; then
+          continue
+        fi
+        # Skip user's home mount (this is created manually under TRASH_AGGREGATE)
+        if [ "$mp" = "$REALHOME" ]; then
+          continue
+        fi
+
+        TRASH_DIR="$mp/.Trash"
+        if [ ! -d "$TRASH_DIR" ]; then
+          echo "Creating trash directory: $TRASH_DIR"
+          mkdir -p "$TRASH_DIR"
+          chmod 1777 "$TRASH_DIR"
+        fi
+        if [ -d "$TRASH_DIR"]; then
+          TRASH_DIRS="$TRASH_DIRS $TRASH_DIR"
+        fi
+      done <<EOF
+      $(mount)
+      EOF
+
+      # Create symlinks to trash bins inside trash aggregate directory
+      for dir in $TRASH_DIRS; do
+        if [ "$dir" = "$HOME_TRASH" ]; then
+          link_name="{{ system.subpath_dir }}-Trash"
+        else
+          mount_point=$(dirname "$dir")
+          link_name=$(echo "$mount_point" | sed 's|^/||; s|/|_|g')-Trash
+        fi
+        ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
+      done
+      
+    volumeMounts:
+    {% if system.irods_enabled == True %}
+    - name: nfs
+      mountPath: "/home/nfs"
+    {% endif %}
+    {% if container.volumes %}
+    {% for volume in system.volumes %}
+      {% if container.name == volume['container_name'] %}
+        - name: {{ volume["volume_name"] }}
+          mountPath: {{ volume["path"] }}
+          subPath: {{ volume["subpath"] }}
+          readOnly: false
+    {% endif %}
+    {% endfor %}
+    {% endif %}
 {% endfor %}
   containers:
 {% for container in system.containers %}    

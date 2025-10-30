@@ -69,7 +69,8 @@ spec:
         cpu: {{ system.init_cpus }}
     command: [ 'sh', '-c' ]
     args:
-      - mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }} &&
+      - |
+        mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }} &&
         mkdir -p {{ system.parent_dir }}/{{ system.shared_dir }} &&
         {% if system.gitea_integration == True %}
         mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh &&
@@ -98,73 +99,73 @@ spec:
         memory: {{ system.init_memory }}
         cpu: {{ system.init_cpus }}
     command: [ 'bash', '-c' ]
-    args: |
-      REALHOME="{{ system.parent_dir }}/{{ system.subpath_dir }}"
-      HOME_TRASH="${XDG_DATA_HOME:-$REALHOME/.local/share}/Trash"
-      TRASH_AGGREGATE="$REALHOME/Trash"
+    args:
+      - |
+        REALHOME="{{ system.parent_dir }}/{{ system.subpath_dir }}"
+        HOME_TRASH="${XDG_DATA_HOME:-$REALHOME/.local/share}/Trash"
+        TRASH_AGGREGATE="$REALHOME/Trash"
 
-      mkdir -p $HOME_TRASH
-      mkdir -p $TRASH_AGGREGATE
+        mkdir -p $HOME_TRASH
+        mkdir -p $TRASH_AGGREGATE
 
-      TRASH_DIRS="$HOME_TRASH"
+        TRASH_DIRS="$HOME_TRASH"
 
-      # Find/create top-level trash directories for valid mounts.
-      while read -r line; do
-        # extract filesystem type and mount point
-        fs=$(echo "$line" | awk '{print $5}')
-        mp=$(echo "$line" | awk '{print $3}')
+        # Find/create top-level trash directories for valid mounts.
+        while read -r line; do
+          # extract filesystem type and mount point
+          fs=$(echo "$line" | awk '{print $5}')
+          mp=$(echo "$line" | awk '{print $3}')
 
-        # Skip pseudo-filesystems
-        case "$fs" in
-          proc|sysfs|devtmpfs|tmpfs|cgroup|overlay|aufs)
+          # Skip pseudo-filesystems
+          case "$fs" in
+            proc|sysfs|devtmpfs|tmpfs|cgroup|overlay|aufs)
+              continue
+              ;;
+          esac
+
+          # skip well-known system paths
+          case "$mp" in
+            /proc*|/sys*|/dev*|/run*|/etc*)
+              continue
+              ;;
+          esac
+
+          # Skip non-directory mounts
+          if [ ! -d "$mp" ]; then
             continue
-            ;;
-        esac
-
-        # skip well-known system paths
-        case "$mp" in
-          /proc*|/sys*|/dev*|/run*|/etc*)
+          fi
+          # Skip non-readable mounts
+          if [ ! -r "$mp" ]; then
             continue
-            ;;
-        esac
+          fi
+          # Skip user's home mount (this is created manually under TRASH_AGGREGATE)
+          if [ "$mp" = "$REALHOME" ]; then
+            continue
+          fi
 
-        # Skip non-directory mounts
-        if [ ! -d "$mp" ]; then
-          continue
-        fi
-        # Skip non-readable mounts
-        if [ ! -r "$mp" ]; then
-          continue
-        fi
-        # Skip user's home mount (this is created manually under TRASH_AGGREGATE)
-        if [ "$mp" = "$REALHOME" ]; then
-          continue
-        fi
+          TRASH_DIR="$mp/.Trash"
+          if [ ! -d "$TRASH_DIR" ]; then
+            echo "Creating trash directory: $TRASH_DIR"
+            mkdir -p "$TRASH_DIR"
+            chmod 1777 "$TRASH_DIR"
+          fi
+          if [ -d "$TRASH_DIR" ]; then
+            TRASH_DIRS="$TRASH_DIRS $TRASH_DIR"
+          fi
+        done <<EOF
+        $(mount)
+        EOF
 
-        TRASH_DIR="$mp/.Trash"
-        if [ ! -d "$TRASH_DIR" ]; then
-          echo "Creating trash directory: $TRASH_DIR"
-          mkdir -p "$TRASH_DIR"
-          chmod 1777 "$TRASH_DIR"
-        fi
-        if [ -d "$TRASH_DIR" ]; then
-          TRASH_DIRS="$TRASH_DIRS $TRASH_DIR"
-        fi
-      done <<EOF
-      $(mount)
-      EOF
-
-      # Create symlinks to trash bins inside trash aggregate directory
-      for dir in $TRASH_DIRS; do
-        if [ "$dir" = "$HOME_TRASH" ]; then
-          link_name="{{ system.subpath_dir }}-Trash"
-        else
-          mount_point=$(dirname "$dir")
-          link_name=$(echo "$mount_point" | sed 's|^/||; s|/|_|g')-Trash
-        fi
-        ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
-      done
-      
+        # Create symlinks to trash bins inside trash aggregate directory
+        for dir in $TRASH_DIRS; do
+          if [ "$dir" = "$HOME_TRASH" ]; then
+            link_name="{{ system.subpath_dir }}-Trash"
+          else
+            mount_point=$(dirname "$dir")
+            link_name=$(echo "$mount_point" | sed 's|^/||; s|/|_|g')-Trash
+          fi
+          ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
+        done
     volumeMounts:
     {% if system.irods_enabled == True %}
     - name: nfs

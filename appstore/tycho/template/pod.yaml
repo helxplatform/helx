@@ -70,47 +70,36 @@ spec:
     command: [ 'sh', '-c' ]
     args:
       - |
-        mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }} &&
-        mkdir -p {{ system.parent_dir }}/{{ system.shared_dir }} &&
+        HOME_PATH="{{ system.parent_dir }}/{{ system.subpath_dir }}"
+        SHARED_OLD_PATH="{{ system.parent_dir }}/{{ system.shared_dir }}"
+        
         {% if system.gitea_integration == True %}
-        mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh &&
-        echo -e "Host {{ system.gitea_host }}\n     Hostname {{ system.gitea_service_name }}\n     User {{ system.gitea_user }}\n     IdentityFile ~/.ssh/id_gitea" > {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh/config &&
+        mkdir -p "$HOME_PATH/.ssh"
+        echo -e "Host {{ system.gitea_host }}\n     Hostname {{ system.gitea_service_name }}\n     User {{ system.gitea_user }}\n     IdentityFile ~/.ssh/id_gitea" > $HOME_PATH/.ssh/config
         {% endif %}
-        if [ -d /shared ]; then
-          ln -sfn /shared {{ system.parent_dir }}/{{ system.subpath_dir }}/shared;
-          echo "WARNING: The directory '/home/shared' is deprecated.\nPlease use '{{ system.parent_dir }}/{{ system.subpath_dir }}/shared' instead." > {{ system.parent_dir }}/{{ system.shared_dir }}/DEPRECATION_NOTICE.txt;
-        fi &&
-        ls -aln {{ system.parent_dir }} &&
-        echo OK
-    volumeMounts:
-    - name: {{ system.stdnfs_pvc }}
-      mountPath: {{ system.parent_dir }}
-  {% endif %}
-  - name: setup-trash
-    image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
-    securityContext:
-      runAsUser: 65534
-      runAsGroup: 65534
-    resources:
-      requests:
-        memory: {{ system.init_memory }}
-        cpu: {{ system.init_cpus }}
-      limits:
-        memory: {{ system.init_memory }}
-        cpu: {{ system.init_cpus }}
-    command: [ 'bash', '-c' ]
-    args:
-      - |
-        REALHOME="{{ system.parent_dir }}/{{ system.subpath_dir }}"
-        HOME_TRASH="${XDG_DATA_HOME:-$REALHOME/.local/share}/Trash"
-        TRASH_AGGREGATE="$REALHOME/Trash"
 
-        mkdir -p $HOME_TRASH
-        mkdir -p $TRASH_AGGREGATE
+        # Create shared symlink.
+        if [ -d "/shared" ]; then
+          ln -sfn "/shared" "$HOME_PATH/shared"
+          # On newer deployments using user-mutator, ownership of the old shared directory is given to whoever creates it first.
+          # Therefore, the only way to create this deprecation notice is if this initContainer is running as the owner of the dir.
+          if [ -w "$SHARED_OLD_PATH" ]; then 
+            echo "WARNING: The directory '$SHARED_OLD_PATH' is deprecated.\nPlease use the new shared directory located in your home: '~/shared'" > "$SHARED_OLD_PATH/DEPRECATION_NOTICE.txt"
+          else
+            echo "Unable to write deprecation notice to '$SHARED_OLD_PATH', proceeding..."
+          fi
+        fi
+
+        {% if system.enable_trash_cli == "true" %}
+        HOME_TRASH="${XDG_DATA_HOME:-$HOME_PATH/.local/share}/Trash"
+        TRASH_AGGREGATE="$HOME_PATH/Trash Bins"
+
+        mkdir -p "$HOME_TRASH"
+        mkdir -p "$TRASH_AGGREGATE"
 
         TRASH_DIRS="$HOME_TRASH"
 
-        # Find/create top-level trash directories for valid mounts.
+        # Find and link trash bins into TRASH_AGGREGATE
         while read -r line; do
           # extract filesystem type and mount point
           fs=$(echo "$line" | awk '{print $5}')
@@ -122,14 +111,12 @@ spec:
               continue
               ;;
           esac
-
-          # skip well-known system paths
+          # Skip well-known system paths
           case "$mp" in
             /proc*|/sys*|/dev*|/run*|/etc*)
               continue
               ;;
           esac
-
           # Skip non-directory mounts
           if [ ! -d "$mp" ]; then
             continue
@@ -138,17 +125,12 @@ spec:
           if [ ! -r "$mp" ]; then
             continue
           fi
-          # Skip user's home mount (this is created manually under TRASH_AGGREGATE)
-          if [ "$mp" = "$REALHOME" ]; then
+          # Skip user's home mount. This mount is a special case that is stored under XDG_DATA_HOME.
+          if [ "$mp" = "$HOME_PATH" ]; then
             continue
           fi
 
           TRASH_DIR="$mp/.Trash"
-          if [ ! -d "$TRASH_DIR" ]; then
-            echo "Creating trash directory: $TRASH_DIR"
-            mkdir -p "$TRASH_DIR"
-            chmod 1777 "$TRASH_DIR"
-          fi
           if [ -d "$TRASH_DIR" ]; then
             TRASH_DIRS="$TRASH_DIRS $TRASH_DIR"
           fi
@@ -166,6 +148,10 @@ spec:
           fi
           ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
         done
+        {% endif %}
+
+        ls -aln {{ system.parent_dir }}
+        echo OK
     volumeMounts:
     {% if system.irods_enabled == True %}
     - name: nfs
@@ -181,6 +167,7 @@ spec:
     {% endif %}
     {% endfor %}
     {% endif %}
+  {% endif %}
 {% endfor %}
   containers:
 {% for container in system.containers %}    

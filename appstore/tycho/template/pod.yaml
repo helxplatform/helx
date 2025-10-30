@@ -78,7 +78,7 @@ spec:
         {% endif %}
         if [ -d /shared ]; then
           ln -sfn /shared {{ system.parent_dir }}/{{ system.subpath_dir }}/shared;
-          echo "WARNING: The directory '/home/shared' is deprecated.\nPlease use '{{ system.parent_dir }}/{{ system.subpath_dir }}/shared' instead." > {{ system.parent_dir }}/{{ system.subpath_dir }}/shared/DEPRECATION_NOTICE.txt;
+          echo "WARNING: The directory '/home/shared' is deprecated.\nPlease use '{{ system.parent_dir }}/{{ system.subpath_dir }}/shared' instead." > {{ system.parent_dir }}/{{ system.shared_dir }}/DEPRECATION_NOTICE.txt;
         fi &&
         ls -aln {{ system.parent_dir }} &&
         echo OK

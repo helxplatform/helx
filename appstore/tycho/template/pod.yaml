@@ -114,9 +114,6 @@ spec:
         fs=$(echo "$line" | awk '{print $5}')
         mp=$(echo "$line" | awk '{print $3}')
 
-        owner=$(stat -c '%u' "$mp")
-        group=$(stat -c '%g' "$mp")
-
         # Skip pseudo-filesystems
         case "$fs" in
           proc|sysfs|devtmpfs|tmpfs|cgroup|overlay|aufs)
@@ -150,7 +147,7 @@ spec:
           mkdir -p "$TRASH_DIR"
           chmod 1777 "$TRASH_DIR"
         fi
-        if [ -d "$TRASH_DIR"]; then
+        if [ -d "$TRASH_DIR" ]; then
           TRASH_DIRS="$TRASH_DIRS $TRASH_DIR"
         fi
       done <<EOF

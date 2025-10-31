@@ -140,11 +140,13 @@ spec:
 
         # Create symlinks to trash bins inside trash aggregate directory
         for dir in $TRASH_DIRS; do
+          dir_parent=$(dirname "$dir")
           if [ "$dir" = "$HOME_TRASH" ]; then
-            link_name="{{ system.subpath_dir }}-Trash"
+            link_name="{{ system.subpath_dir }}_trash"
+          elif [ "$dir_parent" = "$SHARED_OLD_PATH" ] && [ -d "/shared" ]; then
+            link_name="old_shared_trash"
           else
-            mount_point=$(dirname "$dir")
-            link_name=$(echo "$mount_point" | sed 's|^/||; s|/|_|g')-Trash
+            link_name=$(echo "$dir_parent" | sed 's|^/||; s|/|_|g')_trash
           fi
           ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
         done

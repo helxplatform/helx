@@ -46,8 +46,8 @@ spec:
     fsGroup: {{ system.security_context.fs_group }}
     {% endif %}
   {% endif %}
-  initContainers:
   {% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
+  initContainers:
   - name: volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     {% if system.init_security_context.run_as_user or system.init_security_context.run_as_group %}
@@ -138,7 +138,7 @@ spec:
         if [ -n "$TRASH_DIRS" ]; then
           mkdir -p "$HOME_TRASH"
           mkdir -p "$TRASH_AGGREGATE"
-          
+
           TRASH_DIRS="$TRASH_DIRS $HOME_TRASH"
 
           # Create symlinks to trash bins inside trash aggregate directory

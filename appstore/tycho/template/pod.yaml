@@ -90,14 +90,10 @@ spec:
           fi
         fi
 
-        {% if system.enable_trash_cli == "true" %}
         HOME_TRASH="${XDG_DATA_HOME:-$HOME_PATH/.local/share}/Trash"
         TRASH_AGGREGATE="$HOME_PATH/Trash Bins"
 
-        mkdir -p "$HOME_TRASH"
-        mkdir -p "$TRASH_AGGREGATE"
-
-        TRASH_DIRS="$HOME_TRASH"
+        TRASH_DIRS=""
 
         # Find and link trash bins into TRASH_AGGREGATE
         while read -r line; do
@@ -138,19 +134,26 @@ spec:
         $(mount)
         EOF
 
-        # Create symlinks to trash bins inside trash aggregate directory
-        for dir in $TRASH_DIRS; do
-          dir_parent=$(dirname "$dir")
-          if [ "$dir" = "$HOME_TRASH" ]; then
-            link_name="{{ system.subpath_dir }}_trash"
-          elif [ "$dir_parent" = "$SHARED_OLD_PATH" ] && [ -d "/shared" ]; then
-            link_name="old_shared_trash"
-          else
-            link_name=$(echo "$dir_parent" | sed 's|^/||; s|/|_|g')_trash
-          fi
-          ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
-        done
-        {% endif %}
+        # If any trash directories exist on the system, trash-cli has been enabled.
+        if [ -n "$TRASH_DIRS" ]; then
+          mkdir -p "$HOME_TRASH"
+          mkdir -p "$TRASH_AGGREGATE"
+          
+          TRASH_DIRS="$TRASH_DIRS $HOME_TRASH"
+
+          # Create symlinks to trash bins inside trash aggregate directory
+          for dir in $TRASH_DIRS; do
+            dir_parent=$(dirname "$dir")
+            if [ "$dir" = "$HOME_TRASH" ]; then
+              link_name="{{ system.subpath_dir }}_trash"
+            elif [ "$dir_parent" = "$SHARED_OLD_PATH" ] && [ -d "/shared" ]; then
+              link_name="old_shared_trash"
+            else
+              link_name=$(echo "$dir_parent" | sed 's|^/||; s|/|_|g')_trash
+            fi
+            ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
+          done
+        fi
 
         ls -aln {{ system.parent_dir }}
         echo OK

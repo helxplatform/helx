@@ -214,7 +214,6 @@ class System:
         self.namespace = "default"
         self.serviceaccount = service_account
         self.enable_init_container = os.environ.get("TYCHO_APP_ENABLE_INIT_CONTAINER", "true")
-        self.enable_trash_cli = os.environ.get("TYCHO_APP_ENABLE_TRASH_CLI", "true").lower()
         self.conn_string = conn_string
         """PVC flags and other variables for default volumes"""
         self.create_home_dirs = os.environ.get("CREATE_HOME_DIRS", "false").lower()

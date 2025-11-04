@@ -72,6 +72,8 @@ spec:
       - |
         HOME_PATH="{{ system.parent_dir }}/{{ system.subpath_dir }}"
         SHARED_OLD_PATH="{{ system.parent_dir }}/{{ system.shared_dir }}"
+
+        mkdir -p "$SHARED_OLD_PATH"
         
         {% if system.gitea_integration == True %}
         mkdir -p "$HOME_PATH/.ssh"

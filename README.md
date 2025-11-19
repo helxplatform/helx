@@ -75,28 +75,31 @@ concerns are:
 
 During development, environment variables can be set to control execution:
 
-| Variable                                    | Description                                                       |
-| :-------------------------------------      | :---------------------------------------------------------------- |
-| BRAND=[braini, cat, heal, restartr, scidas, eduhelx] | Product context configuration for the appstore.                   |
-| DJANGO_SETTINGS_MODULE=[appstore.settings.<brand>_settings] | Product settings module configuration for the appstore.                   |
-| DEV_PHASE=[stub, local, dev, val, prod]     | In stub, does not require a Tycho service.                        |
-| ALLOW_DJANGO_LOGIN=[TRUE, FALSE]            | When true, presents username and password authentication options. |
-| SECRET_KEY                                  | Key for securing the application.                                 |
-| OAUTH_PROVIDERS                             | Contains all the providers(google, github).                       |
-| GOOGLE_CLIENT_ID                            | Contains the client_id of the provider.                           |
-| GOOGLE_SECRET                               | Contains the secret key for provider.                             |
-| GOOGLE_NAME                                 | Sets the name for the provider.                                   |
-| GITHUB_CLIENT_ID                            | Contains the client_id of the provider.                           |
-| GITHUB_SECRET                               | Contains the secret key of the provider.                          |
-| GITHUB_NAME                                 | Sets the name for the provider.                                   |
-| APPSTORE_DJANGO_USERNAME                    | Holds superuser username credentials.                             |
-| APPSTORE_DJANGO_PASSWORD                    | Holds superuser password credentials.                             |
-| TYCHO_URL                                   | Contains the url of the running tycho host.                       |
-| OAUTH_DB_DIR                                | Contains the path for the database directory.                     |
-| OAUTH_DB_FILE                               | Contains the path for the database file.                          |
-| APPSTORE_DEFAULT_FROM_EMAIL                 | Default email address for appstore.                               |
-| APPSTORE_DEFAULT_SUPPORT_EMAIL              | Default support email for appstore.                               |
-| ACCOUNT_DEFAULT_HTTP_PROTOCOL               | Allows to switch between http and https protocol.                 |
+| Variable                                                     | Description                                                       |
+|:-------------------------------------------------------------|:------------------------------------------------------------------|
+| BRAND=[braini, cat, heal, restartr, scidas, eduhelx]         | Product context configuration for the appstore.                   |
+| DJANGO_SETTINGS_MODULE=[appstore.settings.<brand>_settings]  | Product settings module configuration for the appstore.           |
+| DEV_PHASE=[stub, local, dev, val, prod]                      | In stub, does not require a Tycho service.                        |
+| ALLOW_DJANGO_LOGIN=[TRUE, FALSE]                             | When true, presents username and password authentication options. |
+| SECRET_KEY                                                   | Key for securing the application.                                 |
+| OAUTH_PROVIDERS                                              | Contains all the providers(google, github, cilogon).              |
+| CILOGON_CLIENT_ID                                            | Contains the client_id of the provider.                           |
+| CILOGON_SECRET                                               | Contains the secret key for provider.                             |
+| CILOGON_NAME                                                 | Sets the name for the provider.                                   |
+| GOOGLE_CLIENT_ID                                             | Contains the client_id of the provider.                           |
+| GOOGLE_SECRET                                                | Contains the secret key for provider.                             |
+| GOOGLE_NAME                                                  | Sets the name for the provider.                                   |
+| GITHUB_CLIENT_ID                                             | Contains the client_id of the provider.                           |
+| GITHUB_SECRET                                                | Contains the secret key of the provider.                          |
+| GITHUB_NAME                                                  | Sets the name for the provider.                                   |
+| APPSTORE_DJANGO_USERNAME                                     | Holds superuser username credentials.                             |
+| APPSTORE_DJANGO_PASSWORD                                     | Holds superuser password credentials.                             |
+| TYCHO_URL                                                    | Contains the url of the running tycho host.                       |
+| OAUTH_DB_DIR                                                 | Contains the path for the database directory.                     |
+| OAUTH_DB_FILE                                                | Contains the path for the database file.                          |
+| APPSTORE_DEFAULT_FROM_EMAIL                                  | Default email address for appstore.                               |
+| APPSTORE_DEFAULT_SUPPORT_EMAIL                               | Default support email for appstore.                               |
+| ACCOUNT_DEFAULT_HTTP_PROTOCOL                                | Allows to switch between http and https protocol.                 |
 
 The provided .env.sample contains a starter that you can update and source for
 development.
@@ -527,13 +530,17 @@ appstore:
     EMAIL_HOST_PASSWORD: <secret>
     DOCKSTORE_APPS_BRANCH: <appstore branch>
     oauth:
-      OAUTH_PROVIDERS: "github,google"
+      OAUTH_PROVIDERS: "github,google,cilogon"
       GITHUB_NAME: <github name>
       GITHUB_CLIENT_ID: <github id>
       GITHUB_SECRET: <github secret>
       GOOGLE_NAME: <google name>
       GOOGLE_CLIENT_ID: <google client id>
-      GOOGLE_SECRET: <google client secret>
+      GOOGLE_SECRET: <CILogon client secret>
+      CILOGON_NAME: <cilogon name>
+      CILOGON_CLIENT_ID: <CILogon client id>
+      CILOGON_SECRET: <CILogon client secret>
+
   ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
   appstoreEntrypointArgs: "make start"
   userStorage:
@@ -558,6 +565,9 @@ As part of user configuration, system administration will obtain the following
   - GOOGLE_NAME
   - GOOGLE_CLIENT_ID
   - GOOGLE_SECRET
+  - CILOGON_NAME
+  - CILOGON_CLIENT_ID
+  - CILOGON_SECRET
   - serverName
   - IP
   - nginxTLSSecret

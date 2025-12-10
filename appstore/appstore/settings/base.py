@@ -106,8 +106,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     "crispy_forms",
     "rest_framework",
-    "drf_spectacular",
-    "allauth.socialaccount.providers.openid_connect"
+    "drf_spectacular"
 ]
 
 ##  Setting to allow for a seamless login that was breaking at django-allauth 0.47.
@@ -127,6 +126,7 @@ OAUTH_PROVIDERS = os.environ.get("OAUTH_PROVIDERS", "").split(",")
 for PROVIDER in OAUTH_PROVIDERS:
     if PROVIDER != '':
         THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
+THIRD_PARTY_APPS.append("allauth.socialaccount.providers.openid_connect")
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 

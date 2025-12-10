@@ -114,8 +114,8 @@ spec:
   - name: userless-volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     securityContext:
-      runAsUser: 524288
-      runAsGroup: 524288
+      runAsUser: {{ system.init_nobody_uid }}
+      runAsGroup: {{ system.init_nobody_gid }}
     # Fixed resources
     resources:
       requests:

@@ -107,6 +107,7 @@ THIRD_PARTY_APPS = [
     "crispy_forms",
     "rest_framework",
     "drf_spectacular",
+    "allauth.socialaccount.providers.openid_connect"
 ]
 
 ##  Setting to allow for a seamless login that was breaking at django-allauth 0.47.
@@ -178,7 +179,20 @@ SOCIALACCOUNT_ADAPTER = "appstore.adapter.SocialAccountAdapter"
 SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_PROVIDERS = {
-    "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}}
+    "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}},
+    "openid_connect": {
+        "APPS": [
+            {
+                "provider_id": "dex",
+                "name": "Dex IDP",
+                "client_id": "django",
+                "secret": "xL4QMryQ_6TrIzYBbpnZt864vFJtD_dkOFQJZmrYIZbV5Gz5LfNdzbFpCYk6aki3dOwrIqnuRhGKmU8WXz757Q",
+                "settings": {
+                    "server_url": "https://helx-dex-server.apps.renci.org/dex"
+                },
+            }
+        ]
+    }
 }
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 

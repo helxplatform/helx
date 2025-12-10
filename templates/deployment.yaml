@@ -454,6 +454,10 @@ spec:
           value: "{{- .Values.tycho.runAsUser }}"
         - name: TYCHO_APP_RUN_AS_GROUP
           value: "{{- .Values.tycho.runAsGroup }}"
+        - name: TYCHO_APP_INIT_NOBODY_UID
+          value: "{{- .Values.tycho.initRunAsNobodyUser }}"
+        - name: TYCHO_APP_INIT_NOBODY_GID
+          value: "{{- .Values.tycho.initRunAsNobodyGroup }}"
         - name: TYCHO_APP_FS_GROUP
           value: "{{- .Values.tycho.fsGroup }}"
         - name: EXTERNAL_TYCHO_APP_REGISTRY_ENABLED
@@ -480,6 +484,8 @@ spec:
           value: "{{- .Values.tycho.initRunAsGroup }}"
         - name: TYCHO_APP_ENABLE_INIT_CONTAINER
           value: "{{- .Values.tycho.enableInitContainer }}"
+        - name: TYCHO_APP_ENABLE_TRASH_CLI
+          value: "{{- .Values.tycho.enableTrashCli }}"
         - name: CREATE_HOME_DIRS
           value: "{{- .Values.tycho.createHomeDirs }}"
         - name: PARENT_DIR

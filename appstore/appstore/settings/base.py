@@ -125,7 +125,10 @@ LOCAL_APPS = [
 OAUTH_PROVIDERS = os.environ.get("OAUTH_PROVIDERS", "").split(",")
 for PROVIDER in OAUTH_PROVIDERS:
     if PROVIDER != '':
-        THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
+        if PROVIDER != 'dex':
+            THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
+        else:
+            THIRD_PARTY_APPS.append("allauth.socialaccount.providers.openid_connect")
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -178,7 +181,21 @@ SOCIALACCOUNT_ADAPTER = "appstore.adapter.SocialAccountAdapter"
 SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_PROVIDERS = {
-    "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}}
+    "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}},
+    "openid_connect": {
+        "EMAIL_VERIFIED": False,
+        "SERVERS": {
+            "dex": {
+                "ISSUER": "https://helx-dex-server.apps.renci.org/dex",
+                "CLIENT_ID": "django",       # matches Dex static client id
+                "SECRET": "xL4QMryQ_6TrIzYBbpnZt864vFJtD_dkOFQJZmrYIZbV5Gz5LfNdzbFpCYk6aki3dOwrIqnuRhGKmU8WXz757Q",
+                "AUTHORIZATION_ENDPOINT": "https://helx-dex-server.apps.renci.org/dex/auth",
+                "TOKEN_ENDPOINT": "https://helx-dex-server.apps.renci.org/dex/token",
+                "USERINFO_ENDPOINT": "https://helx-dex-server.apps.renci.org/dex/userinfo",
+                "SCOPES": ["openid", "email", "profile"],
+            }
+        }
+    }
 }
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 

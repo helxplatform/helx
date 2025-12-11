@@ -213,10 +213,6 @@ spec:
 
         echo OK
     volumeMounts:
-    {% if system.irods_enabled == True %}
-    - name: nfs
-      mountPath: "/home/nfs"
-    {% endif %}
     {% if container.volumes %}
     {% for volume in system.volumes %}
       {% if container.name == volume['container_name'] %}

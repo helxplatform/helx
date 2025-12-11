@@ -170,7 +170,7 @@ ACCOUNT_RATE_LIMITS= {'login_failed':10}
 ACCOUNT_LOGOUT_REDIRECT_URL = "/helx"
 LOGIN_REDIRECT_URL = "/helx/workspaces/login/success"
 LOGIN_URL = "/accounts/login"
-LOGIN_WHITELIST_URL = "/login_whitelist/"
+LOGIN_WHITELIST_URL = "/helx/workspaces/login?whitelist_required=true"
 OIDC_SESSION_MANAGEMENT_ENABLE = True
 SAML_URL = "/accounts/saml"
 SAML_ACS_URL = "/saml2_auth/acs/"

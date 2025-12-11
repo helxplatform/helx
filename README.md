@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 5.0.0](https://img.shields.io/badge/Version-5.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.3.0](https://img.shields.io/badge/AppVersion-4.3.0-informational?style=flat-square)
+![Version: 5.0.1](https://img.shields.io/badge/Version-5.0.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.3.0](https://img.shields.io/badge/AppVersion-4.3.0-informational?style=flat-square)
 
 ## CI/CD
 
@@ -155,6 +155,7 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | tycho.GPUResourceName | string | `"nvidia.com/gpu"` | The GPU resource name that a container can utilize.  Typically this is "nvidia.com/gpu", but other types exist, such as "nvidia.com/mig-1g.5gb" and other manufacturers have their own types. |
 | tycho.createHomeDirs | bool | `true` | Create Home and shared directories for users. |
 | tycho.enableInitContainer | bool | `true` | Start the init container to take care of any needed tasks before the main container is started.  This can be to create certain directories or set file permissions. |
+| tycho.enableTrashCli | bool | `false` | Enable trash-cli functionality in tycho-launched apps |
 | tycho.externalAppRegistryAppSpecsDir | string | `"app-specs"` |  |
 | tycho.externalAppRegistryBranch | string | `nil` | The branch that would be appended to 'externalAppRegistryRepo' to retrieve the app registry and defaults files.  The full URL, if using the externalAppRegistryRepo example for the app registry file would be  'https://github.com/helxplatform/helx-apps/raw/master/app-registry.yaml'. The default value is the AppVersion of this chart prefixed with a 'v' (ex. v2.0.0). |
 | tycho.externalAppRegistryEnabled | bool | `false` | Enable/disable the external app registry file for Tycho.  Set 'django.DOCKSTORE_APPS_BRANCH' to an empty string when when using an external app registry. |
@@ -164,6 +165,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | tycho.initImageRepository | string | `"busybox"` | The image repository to use for HeLx app init containers. |
 | tycho.initImageTag | string | `"latest"` | The image tag to use for HeLx app init containers. |
 | tycho.initRunAsGroup | int | `0` | Init processes will have this group permissions. |
+| tycho.initRunAsNobodyGroup | int | `524288` | "Userless" init processes will have these group permissions. |
+| tycho.initRunAsNobodyUser | int | `524288` | "Userless" init processes will run as this user. |
 | tycho.initRunAsUser | int | `0` | Init processes will run as this user. |
 | tycho.parent_dir | string | `"/home"` | directory that will be used to mount user's home directories in |
 | tycho.runAsGroup | int | `0` | Application processes launched will have this group permissions. |

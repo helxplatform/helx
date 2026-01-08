@@ -37,3 +37,8 @@ class ProductSettings:
     color_scheme: ProductColorScheme = ProductColorScheme()
     capabilities: List[str] = field(default_factory=lambda: ['app', 'search'])
 
+    def __post_init__(self):
+        from appstore.settings.base import GITEA_BASE_URL
+        if GITEA_BASE_URL:
+            if self.links is None: self.links = []
+            self.links.append(ProductLink("Gitea", GITEA_BASE_URL))

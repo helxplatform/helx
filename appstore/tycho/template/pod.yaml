@@ -77,11 +77,6 @@ spec:
 
         mkdir -p "$HOME_PATH"
         mkdir -p "$SHARED_OLD_PATH"
-        
-        {% if system.gitea_integration == True %}
-        mkdir -p "$HOME_PATH/.ssh"
-        echo -e "Host {{ system.gitea_host }}\n     Hostname {{ system.gitea_service_name }}\n     User {{ system.gitea_user }}\n     IdentityFile ~/.ssh/id_gitea" > $HOME_PATH/.ssh/config
-        {% endif %}
 
         {% if system.enable_trash_cli == "true" %}
         HOME_TRASH="${XDG_DATA_HOME:-$HOME_PATH/.local/share}/Trash"
@@ -341,12 +336,6 @@ spec:
     - name: nfs
       mountPath: "/home/nfs"
     {% endif %}
-    {% if system.gitea_integration == True %}
-    - name: {{ system.username_all_hyphens }}-id-gitea
-      mountPath: {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh/id_gitea
-      subPath: id_gitea
-      readOnly: true
-    {% endif %}
 {% if container.volumes %}
 {% for volume in system.volumes %}
   {% if container.name == volume['container_name'] %}
@@ -430,12 +419,6 @@ spec:
     nfs:
       server: {{ system.nfsrods_host }}
       path: /
-  {% endif %}
-  {% if system.gitea_integration == True %}
-  - name: {{ system.username_all_hyphens }}-id-gitea
-    secret:
-      secretName: {{ system.username_all_hyphens }}-id-gitea
-      defaultMode: 0600
   {% endif %}
 # Changes
 {% for container in system.containers %}

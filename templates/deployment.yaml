@@ -53,12 +53,8 @@ spec:
           {{- toYaml .Values.resources | nindent 10 }}
         env:
         {{- if .Values.gitea.enabled }}
-        - name: GITEA_HOST
-          value: {{ .Values.gitea.host }}
-        - name: GITEA_USER
-          value: {{ .Values.gitea.user }}
-        - name: GITEA_SERVICE_NAME
-          value: {{ .Values.gitea.serviceName }}
+        - name: GITEA_BASE_URL
+          value: {{ .Values.gitea.baseUrl }}
         {{- end }} 
         {{- if .Values.graderApiUrl }}
         - name: GRADER_API_URL

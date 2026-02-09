@@ -11,27 +11,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# SECURITY WARNING: don't run with debug turned on in production!
-# Empty quotes equates to false in kubernetes env.
-DEBUG_STRING = os.environ.get("DEBUG", "")
-if DEBUG_STRING.lower() == "false":
-    DEBUG_STRING = ""
-
-DEBUG = bool(DEBUG_STRING)
-
-if DEBUG:
-    from product.configuration import ProductSettings, ProductColorScheme
-
-    APPLICATION_BRAND = os.environ.get("BRAND", "")
-
-    PRODUCT_SETTINGS = ProductSettings(
-        brand=APPLICATION_BRAND,
-        title=APPLICATION_BRAND,
-        logo_url=f"/static/images/{APPLICATION_BRAND}/logo.png",
-        color_scheme=ProductColorScheme("#191348", "#0079bc"),
-        links=None,
-    )
-
 APPSTORE_NESTED_SETTINGS_DIR = Path(__file__).parent.resolve(strict=True)
 APPSTORE_CONFIG_DIR = APPSTORE_NESTED_SETTINGS_DIR.parent
 DJANGO_PROJECT_ROOT_DIR = APPSTORE_CONFIG_DIR.parent
@@ -56,6 +35,12 @@ USE_TZ = True
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ["SECRET_KEY"]
+# SECURITY WARNING: don't run with debug turned on in production!
+# Empty quotes equates to false in kubernetes env.
+DEBUG_STRING = os.environ.get("DEBUG", "")
+if DEBUG_STRING.lower() == "false":
+    DEBUG_STRING = ""
+DEBUG = bool(DEBUG_STRING)
 
 # stub, local, dev, val, prod.
 DEV_PHASE = os.environ.get("DEV_PHASE", "local")

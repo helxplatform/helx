@@ -108,10 +108,13 @@ LOCAL_APPS = [
 ]
 
 OAUTH_PROVIDERS = os.environ.get("OAUTH_PROVIDERS", "").split(",")
+
+# Notes: there are currently 4 types of providers that can be specified:
+# ensure openid_connect is selected if the helx deploy is to use Dex
+# github,google,openid_connect,cilogon
 for PROVIDER in OAUTH_PROVIDERS:
     if PROVIDER != '':
         THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
-THIRD_PARTY_APPS.append("allauth.socialaccount.providers.openid_connect")
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -165,20 +168,26 @@ SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
 SOCIALACCOUNT_PROVIDERS = {
     "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}},
-    "openid_connect": {
-        "APPS": [
-            {
-                "provider_id": "dex",
-                "name": "Dex IDP",
-                "client_id": "django",
-                "secret": "xL4QMryQ_6TrIzYBbpnZt864vFJtD_dkOFQJZmrYIZbV5Gz5LfNdzbFpCYk6aki3dOwrIqnuRhGKmU8WXz757Q",
-                "settings": {
-                    "server_url": "https://helx-dex-server.apps.renci.org/dex"
-                },
-            }
-        ]
-    }
 }
+
+# TODO: some values need to be parameterized
+if 'openid_connect' in OAUTH_PROVIDERS:
+    SOCIALACCOUNT_PROVIDERS.update(
+        {
+            "openid_connect": {
+                "APPS": [
+                    {
+                        "provider_id": "dex",
+                        "name": "Dex",
+                        "client_id": "django",
+                        "secret": "xL4QMryQ_6TrIzYBbpnZt864vFJtD_dkOFQJZmrYIZbV5Gz5LfNdzbFpCYk6aki3dOwrIqnuRhGKmU8WXz757Q",
+                        "settings": { "server_url": "https://helx-dex-server.apps.renci.org/dex" }
+                    }
+                ]
+            }
+        }
+    )
+
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 TEMPLATES = [
@@ -388,10 +397,10 @@ if DEBUG and DEV_PHASE in ("local", "stub", "dev"):
     ]
 
     CSRF_TRUSTED_ORIGINS += [
-        "https://localhost:3000",
-        "https://127.0.0.1:3000",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
+        "https://localhost",
+        "https://127.0.0.1",
+        "http://localhost",
+        "http://127.0.0.1",
     ]
 
     CORS_ALLOWED_ORIGINS = [

@@ -106,6 +106,11 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | nameOverride | string | `""` |  |
 | networkPolicyLabels.role | string | `"appstore"` |  |
 | nodeSelector | object | `{}` |  |
+| oauth.CILOGON_CLIENT_ID | string | `""` |  |
+| oauth.CILOGON_KEY | string | `""` |  |
+| oauth.CILOGON_NAME | string | `""` |  |
+| oauth.CILOGON_SECRET | string | `""` |  |
+| oauth.CILOGON_SITES | string | `""` |  |
 | oauth.GITHUB_CLIENT_ID | string | `""` |  |
 | oauth.GITHUB_KEY | string | `""` |  |
 | oauth.GITHUB_NAME | string | `""` |  |
@@ -117,6 +122,10 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | oauth.GOOGLE_SECRET | string | `""` |  |
 | oauth.GOOGLE_SITES | string | `""` |  |
 | oauth.OAUTH_PROVIDERS | string | `""` | oauth providers separated by commas (google, github) |
+| oauth.OIDC_CLIENT_ID | string | `""` |  |
+| oauth.OIDC_NAME | string | `""` |  |
+| oauth.OIDC_SECRET | string | `""` |  |
+| oauth.OIDC_SERVER_URL | string | `""` |  |
 | octave.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for Octave |
 | pgadmin.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for PgAdmin |
 | podAnnotations | object | `{}` |  |

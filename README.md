@@ -107,20 +107,14 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | networkPolicyLabels.role | string | `"appstore"` |  |
 | nodeSelector | object | `{}` |  |
 | oauth.CILOGON_CLIENT_ID | string | `""` |  |
-| oauth.CILOGON_KEY | string | `""` |  |
 | oauth.CILOGON_NAME | string | `""` |  |
 | oauth.CILOGON_SECRET | string | `""` |  |
-| oauth.CILOGON_SITES | string | `""` |  |
 | oauth.GITHUB_CLIENT_ID | string | `""` |  |
-| oauth.GITHUB_KEY | string | `""` |  |
 | oauth.GITHUB_NAME | string | `""` |  |
 | oauth.GITHUB_SECRET | string | `""` |  |
-| oauth.GITHUB_SITES | string | `""` |  |
 | oauth.GOOGLE_CLIENT_ID | string | `""` |  |
-| oauth.GOOGLE_KEY | string | `""` |  |
 | oauth.GOOGLE_NAME | string | `""` |  |
 | oauth.GOOGLE_SECRET | string | `""` |  |
-| oauth.GOOGLE_SITES | string | `""` |  |
 | oauth.OAUTH_PROVIDERS | string | `""` | oauth providers separated by commas (google, github) |
 | oauth.OIDC_CLIENT_ID | string | `""` |  |
 | oauth.OIDC_NAME | string | `""` |  |

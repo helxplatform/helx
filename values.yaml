@@ -163,6 +163,15 @@ oauth:
   GOOGLE_SITES: ""
   GOOGLE_CLIENT_ID: ""
   GOOGLE_SECRET: ""
+  CILOGON_NAME: ""
+  CILOGON_KEY: ""
+  CILOGON_SITES: ""
+  CILOGON_CLIENT_ID: ""
+  CILOGON_SECRET: ""
+  OIDC_NAME: ""
+  OIDC_CLIENT_ID: ""
+  OIDC_SECRET: ""
+  OIDC_SERVER_URL: ""
 
 saml:
   cache:

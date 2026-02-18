@@ -237,20 +237,6 @@ spec:
             secretKeyRef:
               key: GITHUB_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{- if .Values.oauth.GITHUB_KEY }}
-        - name: GITHUB_KEY
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_KEY
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.oauth.GITHUB_SITES }}
-        - name: GITHUB_SITES
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_SITES
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
         {{- end }}
 
         {{- if .Values.oauth.GOOGLE_NAME }}
@@ -269,20 +255,6 @@ spec:
             secretKeyRef:
               key: GOOGLE_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{- if .Values.oauth.GOOGLE_KEY }}
-        - name: GOOGLE_KEY
-          valueFrom:
-            secretKeyRef:
-              key: GOOGLE_KEY
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.oauth.GOOGLE_SITES }}
-        - name: GOOGLE_SITES
-          valueFrom:
-            secretKeyRef:
-              key: GOOGLE_SITES
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
         {{- end }}
 
         {{- if .Values.oauth.CILOGON_NAME }}
@@ -301,20 +273,6 @@ spec:
             secretKeyRef:
               key: CILOGON_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{- if .Values.oauth.CILOGON_KEY }}
-        - name: CILOGON_KEY
-          valueFrom:
-            secretKeyRef:
-              key: CILOGON_KEY
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.oauth.CILOGON_SITES }}
-        - name: CILOGON_SITES
-          valueFrom:
-            secretKeyRef:
-              key: CILOGON_SITES
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
         {{- end }}
 
         {{- if .Values.oauth.OIDC_NAME }}

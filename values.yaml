@@ -290,6 +290,8 @@ tycho:
   runAsGroup: 0
   # -- Application processes launched will also be part of this supplimentary group.
   fsGroup: 0
+  # -- Enable trash-cli functionality in tycho-launched apps
+  enableTrashCli: false
   # -- Start the init container to take care of any needed tasks before the
   # main container is started.  This can be to create certain directories or
   # set file permissions.
@@ -302,6 +304,10 @@ tycho:
   initRunAsUser: 0
   # -- Init processes will have this group permissions.
   initRunAsGroup: 0
+  # -- "Userless" init processes will run as this user.
+  initRunAsNobodyUser: 524288
+  # -- "Userless" init processes will have these group permissions.
+  initRunAsNobodyGroup: 524288
   # -- Create Home and shared directories for users.
   createHomeDirs: true
   # -- directory that will be used to mount user's home directories in

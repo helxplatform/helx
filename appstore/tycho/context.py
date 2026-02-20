@@ -157,7 +157,7 @@ class TychoContext:
                 if not repo_url.startswith("http"):
                     # Assume it is a directory within the same repo as the app registry file.
                     if self.tycho_config_url == "":
-                        logging.error("tycho_config_url is empty string")
+                        logger.error("tycho_config_url is empty string")
                         raise ValueError(f"-- tycho_config_url is empty string, can't load app registry file")
                     repo_url = urljoin(self.tycho_config_url, repo_url)
                 # ToDo: Remove the next four lines if we deprecate DOCKSTORE_APPS_BRANCH.

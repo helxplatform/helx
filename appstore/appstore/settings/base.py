@@ -126,6 +126,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.contrib.auth.middleware.PersistentRemoteUserMiddleware",
+    "middleware.request_logging_middleware.RequestLoggingMiddleware",
     "middleware.filter_whitelist_middleware.AllowWhiteListedUserOnly",
     "middleware.session_idle_timeout.SessionIdleTimeout",
     "allauth.account.middleware.AccountMiddleware"
@@ -289,13 +290,16 @@ LOGGING = {
         "timestampthread": {
             "format": "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(name)-25.25s  ]  %(message)s",
         },
+        "json": {
+            "()": "appstore.json_formatter.JSONFormatter",
+        },
     },
     "handlers": {
         "syslog": {
             "level": "WARNING",
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOG_DIR / "system_warnings.log",
-            "formatter": "timestampthread",
+            "formatter": "json",
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },
@@ -308,7 +312,7 @@ LOGGING = {
             "level": LOG_LEVEL,
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOG_DIR / "django_debug.log",
-            "formatter": "timestampthread",
+            "formatter": "json",
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },
@@ -316,16 +320,21 @@ LOGGING = {
             "level": LOG_LEVEL,
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOG_DIR / "app_store.log",
-            "formatter": "timestampthread",
+            "formatter": "json",
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },
     },
     "loggers": {
         "": {
-            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "propagate": False,
             "level": LOG_LEVEL
+        },
+        "appstore": {
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "level": LOG_LEVEL,
+            "propagate": False,
         },
         "django": {
             "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
@@ -333,7 +342,7 @@ LOGGING = {
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
             "filters": ["skip_superfluous_endpoint_logs"]
@@ -353,8 +362,8 @@ LOGGING = {
             "level": LOG_LEVEL,
         },
         "tycho": {
-            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
-            "level": "WARNING",
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "level": LOG_LEVEL,
         },
         # Info logs coming from xmlschema are generally irrelevant and crowd the logs
         "xmlschema": {

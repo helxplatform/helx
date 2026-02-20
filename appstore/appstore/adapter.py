@@ -5,7 +5,7 @@ from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.conf import settings
 from django.forms import ValidationError
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 class RestrictEmailAdapter(DefaultAccountAdapter):
     def clean_email(self, email):
@@ -51,7 +51,10 @@ class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
         return self._login_url(request)
 
     def get_logout_redirect_url(self, request):
+        username = request.user.username if request.user.is_authenticated else "anonymous"
+        frontend = request.session.get("helx_frontend", "unknown")
         url = self._logout_url(request)
+        logger.info(f"User {username} logging out from {frontend} frontend, redirecting to {url}")
         # Unset and let the frontend set it again on landing
         # Using get incase the session is cleared between login and logout to prevent
         # an error and returning of the route
@@ -65,7 +68,17 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         error_code = error.name if error else "unknown"
         exception_str = str(exception) if exception else "No exception details"
 
-        logger.info(f"User failed to login using allauth:\nprovider id: { provider_id}\nerror code: { error_code }\nexception: { exception_str }")
-        
+        # Extract IP address for security tracking
+        x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+        if x_forwarded_for:
+            ip_address = x_forwarded_for.split(',')[0].strip()
+        else:
+            ip_address = request.META.get('REMOTE_ADDR', 'unknown')
+
+        logger.warning(
+            f"Social login failed: provider={provider_id} error={error_code} "
+            f"ip={ip_address} exception={exception_str}"
+        )
+
         # Note: this is a no-op, since this hook is unimplemented in the default (super) adapter class.
         return super().on_authentication_error(request, provider, error, exception, extra_context)

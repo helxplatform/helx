@@ -74,6 +74,11 @@ spec:
             configMapKeyRef:
               key: LOG_LEVEL
               name: {{ include "appstore.fullname" . }}-env
+        - name: USE_LOG_FILE
+          valueFrom:
+            configMapKeyRef:
+              key: USE_LOG_FILE
+              name: {{ include "appstore.fullname" . }}-env
         - name: DEBUG
           valueFrom:
             configMapKeyRef:

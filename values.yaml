@@ -259,7 +259,7 @@ logsStorageAppstore:
 userStorage:
   # -- Create a PVC for user's files.  If false then the PVC needs to be created
   # outside of the appstore chart.
-  createPVC: true
+  createPVC: false
   retain: true
   storageSize: 10Gi
   storageClass:

@@ -261,6 +261,15 @@ DEFAULT_SUPPORT_EMAIL = os.environ.get(
 # Logging
 MIN_LOG_LEVEL = "INFO"
 LOG_LEVEL = "DEBUG" if DEBUG else os.environ.get("LOG_LEVEL", MIN_LOG_LEVEL)
+
+# check the env param to enable the file loggers
+# note this this is set when the log pvc is to be created.
+USE_LOG_FILE = os.environ.get("USE_LOG_FILE", "")
+
+# confirm the state, empty string will not enable file loggers below
+if USE_LOG_FILE.lower() == "false":
+    USE_LOG_FILE = ""
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,  # keep Django's default loggers
@@ -314,37 +323,37 @@ LOGGING = {
     },
     "loggers": {
         "": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
             "propagate": False,
             "level": LOG_LEVEL
         },
         "django": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
             "filters": ["skip_superfluous_endpoint_logs"]
         },
         "django.template": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": True,
         },
         "django.db.backends": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "admin": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
         },
         "tycho": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "level": "WARNING",
         },
         # Info logs coming from xmlschema are generally irrelevant and crowd the logs

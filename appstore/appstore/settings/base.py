@@ -46,11 +46,11 @@ DEBUG = bool(DEBUG_STRING)
 DEV_PHASE = os.environ.get("DEV_PHASE", "local")
 TYCHO_MODE = os.environ.get("TYCHO_MODE", "null" if DEV_PHASE == "stub" else "live")
 
-# Needs to be JSON-encoded since expressions can contain basically any character that would be used as a delimiter. 
+# Needs to be JSON-encoded since expressions can contain basically any character that would be used as a delimiter.
 AUTO_WHITELIST_PATTERNS = json.loads(os.environ.get("AUTO_WHITELIST_PATTERNS", "[]"))
 
 # Variables used for an external Tycho app registry.
-# ToDo: Consider setting the default value of TYCHO_APP_REGISTRY_REPO to 
+# ToDo: Consider setting the default value of TYCHO_APP_REGISTRY_REPO to
 # "https://github.com/helxplatform/helx-apps/raw" and remove any other similar
 # variable.  Maybe don't set and raise a fatal error if not set (still remove
 # other similar variables).
@@ -264,7 +264,7 @@ MIN_LOG_LEVEL = "INFO"
 LOG_LEVEL = "DEBUG" if DEBUG else os.environ.get("LOG_LEVEL", MIN_LOG_LEVEL)
 
 # check the env param to enable the file loggers
-# note this this is set when the log pvc is to be created.
+# note this is set when the log pvc is to be created.
 USE_LOG_FILE = os.environ.get("USE_LOG_FILE", "")
 
 # confirm the state, empty string will not enable file loggers below

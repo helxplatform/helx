@@ -242,21 +242,8 @@ spec:
             secretKeyRef:
               key: GITHUB_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{- if .Values.oauth.GITHUB_KEY }}
-        - name: GITHUB_KEY
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_KEY
-              name: {{ include "appstore.fullname" . }}
         {{- end }}
-        {{- if .Values.oauth.GITHUB_SITES }}
-        - name: GITHUB_SITES
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_SITES
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- end }}
+
         {{- if .Values.oauth.GOOGLE_NAME }}
         - name: GOOGLE_NAME
           valueFrom:
@@ -273,21 +260,49 @@ spec:
             secretKeyRef:
               key: GOOGLE_SECRET
               name: {{ include "appstore.fullname" . }}
-        {{- if .Values.oauth.GOOGLE_KEY }}
-        - name: GOOGLE_KEY
+        {{- end }}
+
+        {{- if .Values.oauth.CILOGON_NAME }}
+        - name: CILOGON_NAME
           valueFrom:
             secretKeyRef:
-              key: GOOGLE_KEY
+              key: CILOGON_NAME
               name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.oauth.GOOGLE_SITES }}
-        - name: GOOGLE_SITES
+        - name: CILOGON_CLIENT_ID
           valueFrom:
             secretKeyRef:
-              key: GOOGLE_SITES
+              key: CILOGON_CLIENT_ID
+              name: {{ include "appstore.fullname" . }}
+        - name: CILOGON_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: CILOGON_SECRET
               name: {{ include "appstore.fullname" . }}
         {{- end }}
+
+        {{- if .Values.oauth.OIDC_NAME }}
+        - name: OIDC_NAME
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_NAME
+              name: {{ include "appstore.fullname" . }}
+        - name: OIDC_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_CLIENT_ID
+              name: {{ include "appstore.fullname" . }}
+        - name: OIDC_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_SECRET
+              name: {{ include "appstore.fullname" . }}
+        - name: OIDC_SERVER_URL
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_SERVER_URL
+              name: {{ include "appstore.fullname" . }}
         {{- end }}
+
         {{- if .Values.irods.enabled }}
         - name: BRAINI_RODS
           valueFrom:

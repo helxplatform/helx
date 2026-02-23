@@ -289,17 +289,14 @@ LOGGING = {
         },
         "timestampthread": {
             "format": "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(name)-25.25s  ]  %(message)s",
-        },
-        "json": {
-            "()": "appstore.json_formatter.JSONFormatter",
-        },
+        }
     },
     "handlers": {
         "syslog": {
             "level": "WARNING",
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOG_DIR / "system_warnings.log",
-            "formatter": "json",
+            "formatter": "timestampthread",
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },
@@ -312,7 +309,7 @@ LOGGING = {
             "level": LOG_LEVEL,
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOG_DIR / "django_debug.log",
-            "formatter": "json",
+            "formatter": "timestampthread",
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },
@@ -320,7 +317,7 @@ LOGGING = {
             "level": LOG_LEVEL,
             "class": "logging.handlers.RotatingFileHandler",
             "filename": LOG_DIR / "app_store.log",
-            "formatter": "json",
+            "formatter": "timestampthread",
             "maxBytes": 1024 * 1024 * 15,  # 15MB
             "backupCount": 10,
         },

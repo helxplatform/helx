@@ -289,7 +289,10 @@ LOGGING = {
         },
         "timestampthread": {
             "format": "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(name)-25.25s  ]  %(message)s",
-        }
+        },
+        "json": {
+            "()": "appstore.json_formatter.JSONFormatter",
+        },
     },
     "handlers": {
         "syslog": {

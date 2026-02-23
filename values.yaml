@@ -154,15 +154,18 @@ oauth:
   # -- oauth providers separated by commas (google, github)
   OAUTH_PROVIDERS: ""
   GITHUB_NAME: ""
-  GITHUB_KEY: ""
-  GITHUB_SITES: ""
   GITHUB_CLIENT_ID: ""
   GITHUB_SECRET: ""
   GOOGLE_NAME: ""
-  GOOGLE_KEY: ""
-  GOOGLE_SITES: ""
   GOOGLE_CLIENT_ID: ""
   GOOGLE_SECRET: ""
+  CILOGON_NAME: ""
+  CILOGON_CLIENT_ID: ""
+  CILOGON_SECRET: ""
+  OIDC_NAME: ""
+  OIDC_CLIENT_ID: ""
+  OIDC_SECRET: ""
+  OIDC_SERVER_URL: ""
 
 saml:
   cache:

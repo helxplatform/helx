@@ -16,7 +16,6 @@ class RestrictEmailAdapter(DefaultAccountAdapter):
             )
         return email
 
-
 class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
     """
     For regular form login redirect the user to the correct
@@ -60,6 +59,13 @@ class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
         return url
     
 class SocialAccountAdapter(DefaultSocialAccountAdapter):
+
+    # debug commenting out for now.
+    # def populate_user(self, request, sociallogin, data):
+    #     user = super().populate_user(request, sociallogin, data)
+    #     print('sociallogin.account.extra_data:', sociallogin.account.extra_data)
+    #     return user
+
     def on_authentication_error(self, request, provider, error=None, exception=None, extra_context=None):
         provider_id = provider.id if provider else "unknown"
         error_code = error.name if error else "unknown"

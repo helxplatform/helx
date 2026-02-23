@@ -25,4 +25,4 @@ class Command(BaseCommand):
 
     if not Group.objects.filter(name='whitelisted'):
         Group.objects.create(name='whitelisted')
-    print("Successfully added social applications GitHub and Google and whitelisted to the Group!")
+    print("Successfully added social applications and whitelisted them into the Group!")

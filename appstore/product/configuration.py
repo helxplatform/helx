@@ -34,6 +34,6 @@ class ProductSettings:
     brand: str = "CommonsShare"
     title: str = "CommonsShare"
     logo_url: str = "/static/images/commonsshare/logo-lg.png"
-    color_scheme: ProductColorScheme = ProductColorScheme()
+    color_scheme: ProductColorScheme = field(default_factory=lambda: ProductColorScheme())
     capabilities: List[str] = field(default_factory=lambda: ['app', 'search'])
 

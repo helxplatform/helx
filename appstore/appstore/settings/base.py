@@ -167,6 +167,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.contrib.auth.middleware.PersistentRemoteUserMiddleware",
+    "middleware.request_logging_middleware.RequestLoggingMiddleware",
     "middleware.filter_whitelist_middleware.AllowWhiteListedUserOnly",
     "middleware.session_idle_timeout.SessionIdleTimeout",
     "allauth.account.middleware.AccountMiddleware"
@@ -296,6 +297,15 @@ DEFAULT_SUPPORT_EMAIL = os.environ.get(
 # Logging
 MIN_LOG_LEVEL = "INFO"
 LOG_LEVEL = "DEBUG" if DEBUG else os.environ.get("LOG_LEVEL", MIN_LOG_LEVEL)
+
+# check the env param to enable the file loggers
+# note this is set when the log pvc is to be created.
+USE_LOG_FILE = os.environ.get("USE_LOG_FILE", "")
+
+# confirm the state, empty string will not enable file loggers below
+if USE_LOG_FILE.lower() == "false":
+    USE_LOG_FILE = ""
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,  # keep Django's default loggers
@@ -314,6 +324,9 @@ LOGGING = {
         },
         "timestampthread": {
             "format": "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(name)-25.25s  ]  %(message)s",
+        },
+        "json": {
+            "()": "appstore.json_formatter.JSONFormatter",
         },
     },
     "handlers": {
@@ -349,38 +362,43 @@ LOGGING = {
     },
     "loggers": {
         "": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "propagate": False,
             "level": LOG_LEVEL
         },
+        "appstore": {
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
         "django": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
             "filters": ["skip_superfluous_endpoint_logs"]
         },
         "django.template": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": True,
         },
         "django.db.backends": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "admin": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
         },
         "tycho": {
-            "handlers": ["console"],
-            "level": "WARNING",
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "level": LOG_LEVEL,
         },
         # Info logs coming from xmlschema are generally irrelevant and crowd the logs
         "xmlschema": {

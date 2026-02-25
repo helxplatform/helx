@@ -117,7 +117,7 @@ class StatusSystemResource(TychoResource):
     def post(self, request):
         response = {}
         try:
-            logging.debug(f"list-request: {request}")
+            logger.debug(f"list-request: {request}")
             self.validate(request, component="StatusRequest")
             system_name = request.get('name', None)
             system_username = request.get('username', None)
@@ -137,7 +137,7 @@ class ModifySystemResource(TychoResource):
 
     def post(self, request):
         try:
-            logging.debug(f"System specs to modify: {request}")
+            logger.debug(f"System specs to modify: {request}")
             system_modify = tycho().parse_modify(request)
             response = self.create_response(
                 result=tycho().get_compute().modify(system_modify),

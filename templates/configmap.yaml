@@ -11,6 +11,7 @@ data:
   # Default is always "True" on the server. Change to "False" in prod.
   DEBUG: "{{ .Values.debug }}"
   LOG_LEVEL: "{{ upper .Values.logLevel }}"
+  USE_LOG_FILE: "{{ .Values.logsStorageAppstore.createPVC | toString }}"
   OAUTH_DB_DIR: /var/lib/sqlite3
   OAUTH_DB_FILE: DATABASE.sqlite3
   ACCOUNT_DEFAULT_HTTP_PROTOCOL: "{{ .Values.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}"

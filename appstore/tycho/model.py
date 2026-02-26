@@ -160,7 +160,7 @@ class Container:
 class System:
     """ Distributed system of interacting containerized software. """
     def __init__(self, config, name, principal, service_account, conn_string, proxy_rewrite, containers, identifier,
-                 gitea_integration, services={}, security_context={}, init_security_context={}):
+                 services={}, security_context={}, init_security_context={}):
         """ Construct a new abstract model of a system given a name and set of containers.
         
             Serves as context for the generation of compute cluster specific artifacts.
@@ -250,11 +250,6 @@ class System:
             self.nfsrods_host = os.environ.get('NFSRODS_HOST', '')
         else:
             logger.info("Irods host not enabled")
-        """gitea settings"""
-        self.gitea_integration = gitea_integration
-        self.gitea_host = os.environ.get("GITEA_HOST", " ")
-        self.gitea_user = os.environ.get("GITEA_USER", " ")
-        self.gitea_service_name = os.environ.get("GITEA_SERVICE_NAME", " ")
         self.ambassador_service_name = os.environ.get("AMBASSADOR_SVC_NAME", "")
 
     @staticmethod
@@ -456,7 +451,6 @@ class System:
             "proxy_rewrite": spec.get("proxy_rewrite", { 'target':None, 'enabled':False }),
             "containers": containers,
             "identifier": identifier,
-            "gitea_integration": spec.get("gitea_integration", False),
             "services": services,
             "security_context": security_context,
             "init_security_context": init_security_context

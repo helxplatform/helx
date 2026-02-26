@@ -73,6 +73,8 @@ IMAGE_DOWNLOAD_URL = os.environ.get(
     "IMAGE_DOWNLOAD_URL", "https://braini-metalnx.renci.org/metalnx"
 )
 
+GITEA_BASE_URL = os.environ.get("GITEA_BASE_URL")
+
 DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.contenttypes",

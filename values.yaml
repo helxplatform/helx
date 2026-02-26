@@ -388,11 +388,6 @@ postgresql:
 
 # -- gitea settings
 gitea:
-  # -- set whether a gitea connection is enabled
   enabled: false
-  # -- the hostname of the gitea server
-  host: eduhelx-git.apps.renci.org
-  # -- the default user that gets populated in the gitea ssh config file
-  user: git
-  # -- the name of service in Kubernetes to connect to gitea
-  serviceName: gitea-ssh
+  # -- specify to display a link to the gitea instance in the UI navbar
+  baseUrl: ""

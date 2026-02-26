@@ -54,4 +54,4 @@ tycho:
 
 gitea:
   enabled: true
-  host: helx-test-git.apps.renci.org
+  baseUrl: https://helx-test-git.apps.renci.org

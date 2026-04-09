@@ -1,0 +1,38 @@
+# -- App registry (source of the image list via the tycho API)
+appRegistry:
+  repo: ""
+  branch: ""
+  brand: ""
+
+# -- Controller (CronJob that fetches images and patches the DaemonSet)
+controller:
+  image:
+    repository: containers.renci.org/helxplatform/appstore-prepuller
+    tag: latest
+    pullPolicy: IfNotPresent
+  # CronJob schedule (default: every 5 minutes)
+  schedule: "*/5 * * * *"
+  successfulJobsHistoryLimit: 0
+  failedJobsHistoryLimit: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# -- DaemonSet that actually pre-pulls images (managed by the controller)
+daemonset:
+  nodeSelector:
+    kubernetes.azure.com/mode: user
+  tolerations:
+    - operator: "Exists"
+  pauseImage: registry.k8s.io/pause:3.9
+  resources:
+    requests:
+      cpu: 10m
+      memory: 10Mi
+    limits:
+      cpu: 50m
+      memory: 20Mi

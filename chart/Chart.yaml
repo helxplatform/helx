@@ -1,0 +1,6 @@
+apiVersion: v2
+name: appstore-prepuller
+description: Automatically pre-pulls app images on every node so first launches are fast.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

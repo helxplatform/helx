@@ -153,7 +153,7 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
     def is_authorized(user):
         logger.debug("[AUTHZ] Testing %s / %s", user.username, user.email)
 
-        if AuthorizedUser.objects.filter(email=user.email).exists():
+        if user.email and AuthorizedUser.objects.filter(email=user.email).exists():
             logger.debug("[AUTHZ] email match in AuthorizedUser")
             return True
 

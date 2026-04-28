@@ -22,6 +22,12 @@ var (
 
 	// baseGroup is obtained from a flag and used for the shared posixGroup.
 	baseGroup string
+
+	// userObjectClasses is the objectClass list written to user entries in the
+	// target LDAP. Configurable via --userObjectClasses so the hook can run
+	// against targets that don't have the helxUser schema loaded.
+	userObjectClassesFlag string
+	userObjectClasses     []string
 )
 
 // HookRequest represents the input payload for the /hook endpoint.
@@ -146,6 +152,7 @@ func processORDRDGroup(req HookRequest) HookResponse {
 	newMembers := []string{}
 	filterParts := []string{}
 	dependencies := []string{}
+	memberPids := []string{} // track pids so we can patch each member's groups attribute
 
 	for _, m := range memberSlice {
 		memberStr, ok := m.(string)
@@ -157,6 +164,7 @@ func processORDRDGroup(req HookRequest) HookResponse {
 			continue
 		}
 		pid := strings.TrimPrefix(parts[0], "pid=")
+		memberPids = append(memberPids, pid)
 		filterParts = append(filterParts, fmt.Sprintf("(pid=%s)", pid))
 		dnTemplate := fmt.Sprintf("uid=$pidUidMap.%s,ou=users,dc=example,dc=org", pid)
 		newMembers = append(newMembers, dnTemplate)
@@ -190,8 +198,22 @@ func processORDRDGroup(req HookRequest) HookResponse {
 		"content": newContent,
 	}
 
+	// Emit one extra transformed entry per member that patches their groups attribute.
+	// Because groups is a merge attribute in the main service, these accumulate correctly
+	// (e.g. a user in both "users" and "eagle" ends up with groups: [users, eagle]).
+	transformedEntries := []map[string]interface{}{transformed}
+	for _, pid := range memberPids {
+		userGroupPatch := map[string]interface{}{
+			"dn": fmt.Sprintf("uid=$pidUidMap.%s,ou=users,dc=example,dc=org", pid),
+			"content": map[string]interface{}{
+				"groups": []interface{}{groupname},
+			},
+		}
+		transformedEntries = append(transformedEntries, userGroupPatch)
+	}
+
 	return HookResponse{
-		Transformed:  []map[string]interface{}{transformed},
+		Transformed:  transformedEntries,
 		Derived:      derived,
 		Dependencies: dependencies,
 		Bindings:     map[string]*string{},
@@ -236,11 +258,11 @@ func processUNCUser(req HookRequest) HookResponse {
 		"displayName":        req.Content["displayName"],
 		"gidNumber":          baseGid, // Use the global baseGid.
 		"givenName":          req.Content["givenName"],
+		"groups":             []interface{}{baseGroup}, // every user belongs to the base group
 		"homeDirectory":      fmt.Sprintf("/home/%s", uid),
-		"objectClass":        []string{"top", "inetOrgPerson", "posixAccount", "helxUser"},
+		"objectClass":        userObjectClasses,
 		"ou":                 "users",
 		"sn":                 req.Content["sn"],
-		"supplementalGroups": []interface{}{"0"},
 		"uid":                uid,
 		"uidNumber":          req.Content["uidNumber"],
 	}
@@ -388,7 +410,16 @@ func main() {
 	// Accept the baseGid flag. Default value is "200" (adjust as needed).
 	flag.StringVar(&baseGid, "baseGid", "200", "Base gidNumber to use for UNC Users")
 	flag.StringVar(&baseGroup, "baseGroup", "users", "Base posixGroup CN for all UNC Users")
+	flag.StringVar(&userObjectClassesFlag, "userObjectClasses",
+		"top,inetOrgPerson,posixAccount,helxUser",
+		"Comma-separated objectClass list to assign to synced user entries")
 	flag.Parse()
+
+	for _, oc := range strings.Split(userObjectClassesFlag, ",") {
+		if oc = strings.TrimSpace(oc); oc != "" {
+			userObjectClasses = append(userObjectClasses, oc)
+		}
+	}
 
 	e := echo.New()
 

@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	_ "main/docs" // Replace with your actual module path.
+	_ "ldap-sync/docs"
 
 	"github.com/go-ldap/ldap/v3"
 	"github.com/labstack/echo/v4"
@@ -135,6 +135,7 @@ var searchResultsMu sync.RWMutex
 var dependencyTracker = newDependencyState()
 var mergeAttributes = map[string]struct{}{
 	"memberuid": {},
+	"groups":    {}, // merged so per-group patches accumulate rather than overwrite
 }
 var dnLocks sync.Map
 var bindings = make(map[string]string)
@@ -142,6 +143,16 @@ var nullBindings = make(map[string]struct{})
 var bindingsMu sync.RWMutex
 var bindingPattern = regexp.MustCompile(`\$[A-Za-z0-9_.]+`)
 var db *sql.DB
+
+// ldapStore is the function used to write a transformed entry to the destination
+// LDAP. It is a variable so tests can replace it with a mock without a live server.
+var ldapStore func(*TransformedEntry) error
+
+// handleEntryWindowHook is called in handleEntry between the first lock release
+// and the second lock acquisition — the exact window where the two-phase race
+// can occur. It is nil in production; tests set it to a barrier function that
+// holds both goroutines in the window simultaneously, making the race deterministic.
+var handleEntryWindowHook func()
 
 type pendingEntry struct {
 	entry   *TransformedEntry
@@ -639,6 +650,11 @@ func (d *dependencyState) handleEntry(entry *TransformedEntry, deps []string) {
 	}
 	d.mu.Unlock()
 
+	// Allow tests to stall goroutines here so the two-phase race fires deterministically.
+	if handleEntryWindowHook != nil {
+		handleEntryWindowHook()
+	}
+
 	bindingsSnapshot, nullSnapshot := getBindingsSnapshot()
 	resolvedEntry, entryMissing := resolveEntryTemplates(entry, bindingsSnapshot, nullSnapshot)
 	resolvedDeps, depsMissing := resolveDependencies(rawDeps, bindingsSnapshot, nullSnapshot)
@@ -682,12 +698,35 @@ func (d *dependencyState) handleEntry(entry *TransformedEntry, deps []string) {
 
 	if len(missing) == 0 && !entryMissing && !depsMissing {
 		d.mu.Unlock()
-		if err := storeDestinationLDAP(resolvedEntry); err != nil {
+		if err := ldapStore(resolvedEntry); err != nil {
 			logger.Error("Error storing entry in destination LDAP", "DN", resolvedEntry.DN, "Err", err)
 			return
 		}
 		d.markSyncedAndRelease(resolvedEntry.DN)
 		return
+	}
+
+	// Another goroutine may have stored a pending entry for the same DN while we
+	// were resolving templates (between the first and second lock acquisitions).
+	// Merge with it now so neither goroutine's content (e.g. groups patches) is lost.
+	if conflicting, ok := d.pending[parentKey]; ok && conflicting.entry != nil {
+		entry.Content = mergeEntryContent(conflicting.entry.Content, entry.Content)
+		rawDeps = append(rawDeps, conflicting.rawDeps...)
+		for depKey := range conflicting.deps {
+			if _, ok := d.synced[depKey]; !ok {
+				missing[depKey] = struct{}{}
+			}
+		}
+		// Remove conflicting entry's reverse-map registrations before overwriting.
+		for depKey := range conflicting.deps {
+			if parents := d.reverse[depKey]; parents != nil {
+				delete(parents, parentKey)
+				if len(parents) == 0 {
+					delete(d.reverse, depKey)
+				}
+			}
+		}
+		logger.Debug("Merged conflicting pending entry in second lock phase", "DN", entry.DN)
 	}
 
 	d.pending[parentKey] = &pendingEntry{
@@ -853,7 +892,7 @@ func (d *dependencyState) markSyncedAndRelease(dn string) {
 				d.handleEntry(pending.entry, pending.rawDeps)
 				continue
 			}
-			if err := storeDestinationLDAP(resolvedEntry); err != nil {
+			if err := ldapStore(resolvedEntry); err != nil {
 				logger.Error("Error storing deferred entry in destination LDAP", "DN", resolvedEntry.DN, "Err", err)
 				continue
 			}
@@ -1140,11 +1179,12 @@ func processHookResponse(hookResp HookResponse) {
 
 	// Process each derived search provided.
 	for _, ds := range hookResp.Derived {
-		searchesMu.RLock()
+		searchesMu.Lock()
 		spec, exists := searches[ds.ID]
-		searchesMu.RUnlock()
 		if exists {
-			// Update existing search.
+			// Update existing search. Hold the write lock while mutating struct
+			// fields so concurrent readers (e.g. getSearchHandler) see a
+			// consistent snapshot and not a partial write.
 			close(spec.Stop)
 			stopChan := make(chan struct{})
 			spec.Filter = ds.Filter
@@ -1152,10 +1192,11 @@ func processHookResponse(hookResp HookResponse) {
 			spec.BaseDN = ds.BaseDN
 			spec.Oneshot = ds.Oneshot
 			spec.Stop = stopChan
+			searchesMu.Unlock()
 			go ldapSearchAndSync(ds.ID, ds.Filter, ds.BaseDN, ds.Refresh, ds.Oneshot, stopChan)
 			logger.Info("Derived search updated", "SearchId", ds.ID)
 		} else {
-			// Create a new search.
+			// Create a new search. The outer searchesMu.Lock() is still held.
 			stopChan := make(chan struct{})
 			spec := &SearchSpec{
 				Filter:  ds.Filter,
@@ -1164,7 +1205,6 @@ func processHookResponse(hookResp HookResponse) {
 				Oneshot: ds.Oneshot,
 				Stop:    stopChan,
 			}
-			searchesMu.Lock()
 			searches[ds.ID] = spec
 			searchesMu.Unlock()
 			// Initialize the structured results store for this search id.
@@ -1372,12 +1412,6 @@ func createSearchHandler(c echo.Context) error {
 	if id == "" || filter == "" || refreshStr == "" {
 		return c.String(http.StatusBadRequest, "Missing required parameters (id, filter, refresh)")
 	}
-	searchesMu.RLock()
-	_, exists := searches[id]
-	searchesMu.RUnlock()
-	if exists {
-		return c.String(http.StatusBadRequest, "Search with this id already exists")
-	}
 	refresh, err := strconv.Atoi(refreshStr)
 	if err != nil {
 		return c.String(http.StatusBadRequest, "Invalid refresh parameter")
@@ -1402,7 +1436,13 @@ func createSearchHandler(c echo.Context) error {
 		BaseDN:  baseDN,
 		Oneshot: oneshot,
 	}
+	// Hold write lock for the entire check-and-insert to close the TOCTOU window
+	// between the existence check and the map write.
 	searchesMu.Lock()
+	if _, exists := searches[id]; exists {
+		searchesMu.Unlock()
+		return c.String(http.StatusBadRequest, "Search with this id already exists")
+	}
 	searches[id] = spec
 	searchesMu.Unlock()
 	// Initialize the structured results store for this search id.
@@ -1697,6 +1737,7 @@ func main() {
 	flag.StringVar(&loglevel, "loglevel", "", "Set the log level (debug, info, warn, error)")
 	flag.Parse()
 	initLogger(loglevel)
+	ldapStore = storeDestinationLDAP
 
 	// Load configuration from /etc/ldap-sync/config.yaml.
 	if err := loadConfig("/etc/ldap-sync/config.yaml"); err != nil {

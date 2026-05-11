@@ -250,6 +250,8 @@ spec:
       value: {{ system.username }}
     - name: ACCESS_TOKEN
       value: {{ system.access_token }}
+    - name: PGAPPNAME
+      value: {{ system.name }}
     {% for key, value in system.extra_container_env.items() %}
     - name: {{ key }}
       value: {{ value }}

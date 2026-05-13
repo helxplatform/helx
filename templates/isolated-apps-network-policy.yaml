@@ -9,9 +9,39 @@ spec:
       executor: tycho
   policyTypes:
   - Ingress
+  - Egress
   ingress:
   - from:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: ambassador
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow all traffic except to Ambassador pods.
+  # The first peer matches everything outside the cluster pod CIDR
+  # (kubelet probes, external internet, node-local services).
+  # The second peer matches in-cluster pods that are NOT Ambassador.
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    - namespaceSelector: {}
+      podSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: NotIn
+          values: [ambassador]
 {{- end }}

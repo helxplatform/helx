@@ -76,6 +76,23 @@ resources:
 
 security:
   isolatedApps: true
+  # In-namespace pods that app pods are allowed to egress to. Each entry is a
+  # map of pod labels (AND-matched within an entry, OR-matched across entries).
+  # Empty by default, so apps are fully isolated from other in-namespace pods.
+  # External egress and DNS remain allowed regardless.
+  # Example: allow apps to reach a postgres database:
+  #   appEgressAllowedPods:
+  #     - app.kubernetes.io/name: my-postgres
+  appEgressAllowedPods: []
+  # Labels identifying the cluster DNS pods, used to permit DNS egress from
+  # app pods. When set, egress is allowed to any pod carrying these labels
+  # on any port. When empty, falls back to permitting egress on common DNS
+  # ports (53, 5353, 1053) to any destination — works out of the box on most
+  # clusters but is broader than a label-based rule.
+  # Examples:
+  #   Stock Kubernetes / CoreDNS:  {k8s-app: kube-dns}
+  #   OpenShift:                   {dns.operator.openshift.io/daemonset-dns: default}
+  dnsPodSelector: {}
 
 # -- Choose http or https for the protocol that is used by external users to access
 # the appstore web service.

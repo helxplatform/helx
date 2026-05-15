@@ -10,27 +10,39 @@ spec:
   policyTypes:
   - Ingress
   - Egress
+  # More permissive policy elsewhere in the namespace may override
+  # this ambassador-only restriction.
   ingress:
   - from:
     - podSelector:
         matchLabels:
           app.kubernetes.io/name: ambassador
   egress:
-  # Allow DNS
+  {{- if .Values.security.dnsPodSelector }}
+  # Allow DNS to pods matching the configured selector.
   - to:
     - namespaceSelector: {}
       podSelector:
         matchLabels:
-          k8s-app: kube-dns
-    ports:
+          {{- toYaml .Values.security.dnsPodSelector | nindent 10 }}
+  {{- else }}
+  # Allow DNS on common ports to any destination. Used when no DNS pod
+  # selector is configured — works on most clusters without tuning.
+  - ports:
     - protocol: UDP
       port: 53
     - protocol: TCP
       port: 53
-  # Allow all traffic except to Ambassador pods.
-  # The first peer matches everything outside the cluster pod CIDR
-  # (kubelet probes, external internet, node-local services).
-  # The second peer matches in-cluster pods that are NOT Ambassador.
+    - protocol: UDP
+      port: 5353
+    - protocol: TCP
+      port: 5353
+    - protocol: UDP
+      port: 1053
+    - protocol: TCP
+      port: 1053
+  {{- end }}
+  # Allow external (non-cluster) egress.
   - to:
     - ipBlock:
         cidr: 0.0.0.0/0
@@ -38,10 +50,13 @@ spec:
         - 10.0.0.0/8
         - 172.16.0.0/12
         - 192.168.0.0/16
-    - namespaceSelector: {}
-      podSelector:
-        matchExpressions:
-        - key: app.kubernetes.io/name
-          operator: NotIn
-          values: [ambassador]
+  {{- with .Values.security.appEgressAllowedPods }}
+  # Explicitly allowlisted in-cluster destinations.
+  - to:
+    {{- range . }}
+    - podSelector:
+        matchLabels:
+          {{- toYaml . | nindent 10 }}
+    {{- end }}
+  {{- end }}
 {{- end }}

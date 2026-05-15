@@ -143,6 +143,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | saml.cache.enabled | bool | `false` |  |
 | saml.cache.storageClass | string | `""` |  |
 | saml.cache.storageSize | string | `"20M"` |  |
+| security.appEgressAllowedPods | list | `[]` |  |
+| security.dnsPodSelector | object | `{}` |  |
 | security.isolatedApps | bool | `true` |  |
 | service.name | string | `"http"` |  |
 | service.port | int | `80` |  |

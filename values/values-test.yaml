@@ -51,7 +51,3 @@ tycho:
   externalAppRegistryEnabled: true
   externalAppRegistryRepo: "https://github.com/helxplatform/helx-apps/raw"
   externalAppRegistryBranch: "eduhelx-dev_brand"
-
-gitea:
-  enabled: true
-  baseUrl: https://helx-test-git.apps.renci.org

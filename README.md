@@ -50,6 +50,7 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | django.EMAIL_PORT | string | `""` | Email Server port ie 25 or other. |
 | django.EMAIL_USE_TLS | bool | `false` | Does the Email Server require TLS connection or not? Boolean (true | false) |
 | django.IMAGE_DOWNLOAD_URL | string | `""` | Specify URL to use for the "Image Download" link on the top part of website. |
+| django.PRODUCT_LINKS | list | `[]` |  |
 | django.RECIPIENT_EMAILS | string | `""` | list of appstore registration emails |
 | django.REMOVE_AUTHORIZED_USERS | string | `""` | user emails to remove from an already-existing database |
 | django.SESSION_IDLE_TIMEOUT | string | `"2592000"` | idle timeout for user web session |
@@ -59,8 +60,6 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | fetcherImage.repository | string | `"helxplatform/url-fetch"` | repository where image is located |
 | fetcherImage.tag | string | `"latest"` |  |
 | fullnameOverride | string | `""` |  |
-| gitea | object | `{"baseUrl":"","enabled":false}` | gitea settings |
-| gitea.baseUrl | string | `""` | specify to display a link to the gitea instance in the UI navbar |
 | global.ambassador_id | string | `nil` | specify the id of the ambassador for Tycho-launched services. |
 | global.ambassador_mapping_name | string | `"appstore-mapping"` | specify the mapping name for ambassador |
 | global.ambassador_service_name | string | `"ambassador"` | specify the service name for ambassador |

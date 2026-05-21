@@ -52,10 +52,6 @@ spec:
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
         env:
-        {{- if .Values.gitea.enabled }}
-        - name: GITEA_BASE_URL
-          value: {{ .Values.gitea.baseUrl }}
-        {{- end }} 
         {{- if .Values.graderApiUrl }}
         - name: GRADER_API_URL
           value: {{ .Values.graderApiUrl }}
@@ -136,6 +132,11 @@ spec:
           valueFrom:
             configMapKeyRef:
               key: AUTO_WHITELIST_PATTERNS
+              name: {{ include "appstore.fullname" . }}-env
+        - name: PRODUCT_LINKS
+          valueFrom:
+            configMapKeyRef:
+              key: PRODUCT_LINKS
               name: {{ include "appstore.fullname" . }}-env
         - name: DEV_PHASE
           valueFrom:

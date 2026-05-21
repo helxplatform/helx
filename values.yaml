@@ -132,6 +132,10 @@ django:
   # ex. Whitelist CS dept. (grad./prof.) UNC emails - "^[A-Za-z0-9._%+-]+@cs\\.unc\\.edu$"
   AUTO_WHITELIST_PATTERNS: []
 
+  # Add arbitrary product links that appear in the UI header navbar.
+  # Ex: [{"name": "Gitea", "url": "https://gitea.com"}]
+  PRODUCT_LINKS: []
+
   # -- user emails for oauth providers
   AUTHORIZED_USERS: ""
   # -- user emails to remove from an already-existing database
@@ -402,9 +406,3 @@ postgresql:
     enabled: true
   # -- enable/disable postgresql network policy, allows traffic to and from appstore pod only.
   networkPolicyEnabled: true
-
-# -- gitea settings
-gitea:
-  enabled: false
-  # -- specify to display a link to the gitea instance in the UI navbar
-  baseUrl: ""

@@ -34,6 +34,12 @@ class ProductSettings:
     brand: str = "CommonsShare"
     title: str = "CommonsShare"
     logo_url: str = "/static/images/commonsshare/logo-lg.png"
-    color_scheme: ProductColorScheme = ProductColorScheme()
+    color_scheme: ProductColorScheme = field(default_factory=lambda: ProductColorScheme())
     capabilities: List[str] = field(default_factory=lambda: ['app', 'search'])
 
+    def __post_init__(self):
+        from appstore.settings.base import PRODUCT_LINKS
+        if PRODUCT_LINKS:
+            if self.links is None: self.links = []
+            for link in PRODUCT_LINKS:
+                self.links.append(ProductLink(link["name"], link["url"]))

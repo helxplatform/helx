@@ -20,6 +20,8 @@ metadata:
     executor: tycho
     tycho-guid: {{ system.identifier }}
     tycho-app-id: {{ system.app_id }}
+  annotations:
+    helx.renci.org/identity-exempt-containers: userless-volume-tasks
 spec:
   enableServiceLinks: false
 {% if system.serviceaccount %}
@@ -46,7 +48,7 @@ spec:
     fsGroup: {{ system.security_context.fs_group }}
     {% endif %}
   {% endif %}
-{% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
+  {% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
   initContainers:
   - name: volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
@@ -69,21 +71,154 @@ spec:
         cpu: {{ system.init_cpus }}
     command: [ 'sh', '-c' ]
     args:
-      - mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }} &&
-        mkdir -p {{ system.parent_dir }}/{{ system.shared_dir }} &&
-        {% if system.gitea_integration == True %}
-        mkdir -p {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh &&
-        echo -e "Host {{ system.gitea_host }}\n     Hostname {{ system.gitea_service_name }}\n     User {{ system.gitea_user }}\n     IdentityFile ~/.ssh/id_gitea" > {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh/config &&
+      - |
+        HOME_PATH="{{ system.parent_dir }}/{{ system.subpath_dir }}"
+        SHARED_OLD_PATH="{{ system.parent_dir }}/{{ system.shared_dir }}"
+
+        mkdir -p "$HOME_PATH"
+        mkdir -p "$SHARED_OLD_PATH"
+
+        {% if system.enable_trash_cli == "true" %}
+        HOME_TRASH="${XDG_DATA_HOME:-$HOME_PATH/.local/share}/Trash"
+        TRASH_AGGREGATE="$HOME_PATH/Trash Bins"
+
+        mkdir -p "$HOME_TRASH"
+        mkdir -p "$TRASH_AGGREGATE"
+        # Ensure that symlinks can be created by userless init container
+        # (symlinking could also be done here but would require a lot of repetition in locating the trash dirs)
+        chmod 777 "$TRASH_AGGREGATE"
         {% endif %}
-        if [ -d /shared ]; then
-          ln -sfn /shared {{ system.parent_dir }}/{{ system.subpath_dir }}/shared;
-        fi &&
-        ls -aln {{ system.parent_dir }} &&
+
+        ls -aln {{ system.parent_dir }}
         echo OK
     volumeMounts:
-    - name: {{ system.stdnfs_pvc }}
-      mountPath: {{ system.parent_dir }}
-{% endif %}
+    {% if system.irods_enabled == True %}
+    - name: nfs
+      mountPath: "/home/nfs"
+    {% endif %}
+    {% if container.volumes %}
+    {% for volume in system.volumes %}
+      {% if container.name == volume['container_name'] %}
+        - name: {{ volume["volume_name"] }}
+          mountPath: {{ volume["path"] }}
+          subPath: {{ volume["subpath"] }}
+          readOnly: false
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+  - name: userless-volume-tasks
+    image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
+    securityContext:
+      runAsUser: {{ system.init_nobody_uid }}
+      runAsGroup: {{ system.init_nobody_gid }}
+    # Fixed resources
+    resources:
+      requests:
+        memory: {{ system.init_memory }}
+        cpu: {{ system.init_cpus }}
+      limits:
+        memory: {{ system.init_memory }}
+        cpu: {{ system.init_cpus }}
+    command: [ 'sh', '-c' ]
+    args:
+      - |
+        HOME_PATH="{{ system.parent_dir }}/{{ system.subpath_dir }}"
+        SHARED_OLD_PATH="{{ system.parent_dir }}/{{ system.shared_dir }}"
+
+        # Create shared symlink.
+        if [ -d "/shared" ]; then
+          ln -sfn "/shared" "$HOME_PATH/shared"
+          # On newer deployments using user-mutator, ownership of the old shared directory is given to whoever creates it first.
+          # Therefore, the only way to create this deprecation notice is if this initContainer is running as the owner of the dir.
+          if [ -w "$SHARED_OLD_PATH" ]; then 
+            echo "WARNING: The directory '$SHARED_OLD_PATH' is deprecated.\nPlease use the new shared directory located in your home: '~/shared'" > "$SHARED_OLD_PATH/DEPRECATION_NOTICE.txt"
+          else
+            echo "Unable to write deprecation notice to '$SHARED_OLD_PATH', proceeding..."
+          fi
+        fi
+
+        {% if system.enable_trash_cli == "true" %}
+        HOME_TRASH="${XDG_DATA_HOME:-$HOME_PATH/.local/share}/Trash"
+        TRASH_AGGREGATE="$HOME_PATH/Trash Bins"
+
+        TRASH_DIRS="$HOME_TRASH"
+
+        # Find mounts and initialize mount trash dirs.
+        while read -r line; do
+          # extract filesystem type and mount point
+          fs=$(echo "$line" | awk '{print $5}')
+          mp=$(echo "$line" | awk '{print $3}')
+
+          # Skip pseudo-filesystems
+          case "$fs" in
+            proc|sysfs|devtmpfs|tmpfs|cgroup|overlay|aufs)
+              continue
+              ;;
+          esac
+          # Skip well-known system paths
+          case "$mp" in
+            /proc*|/sys*|/dev*|/run*|/etc*)
+              continue
+              ;;
+          esac
+          # Skip non-directory mounts
+          if [ ! -d "$mp" ]; then
+            continue
+          fi
+          # Skip non-readable mounts
+          if [ ! -r "$mp" ]; then
+            continue
+          fi
+          # Skip user's home mount. This mount is a special case that is stored under XDG_DATA_HOME.
+          if [ "$mp" = "$HOME_PATH" ]; then
+            continue
+          fi
+
+          TRASH_DIR="$mp/.Trash"
+          if [ ! -d "$TRASH_DIR" ]; then
+            echo "Creating trash directory: $TRASH_DIR"
+            mkdir -p "$TRASH_DIR"
+            mkdir -p "$TRASH_DIR/files"
+            mkdir -p "$TRASH_DIR/info"
+            chmod 1777 "$TRASH_DIR"
+            chmod 777 "$TRASH_DIR/files"
+            chmod 777 "$TRASH_DIR/info"
+          fi
+          if [ -d "$TRASH_DIR" ]; then
+            TRASH_DIRS="$TRASH_DIRS $TRASH_DIR"
+          fi
+        done <<EOF
+        $(mount)
+        EOF
+
+        # Create symlinks to trash bins inside trash aggregate directory
+        for dir in $TRASH_DIRS; do
+          dir_parent=$(dirname "$dir")
+          if [ "$dir" = "$HOME_TRASH" ]; then
+            link_name="{{ system.subpath_dir }}_trash"
+          elif [ "$dir_parent" = "$SHARED_OLD_PATH" ] && [ -d "/shared" ]; then
+            link_name="old_shared_trash"
+          else
+            link_name=$(echo "$dir_parent" | sed 's|^/||; s|/|_|g')_trash
+          fi
+          ln -sfn "$dir" "$TRASH_AGGREGATE/$link_name"
+        done
+
+        {% endif %}
+
+        echo OK
+    volumeMounts:
+    {% if container.volumes %}
+    {% for volume in system.volumes %}
+      {% if container.name == volume['container_name'] %}
+        - name: {{ volume["volume_name"] }}
+          mountPath: {{ volume["path"] }}
+          subPath: {{ volume["subpath"] }}
+          readOnly: false
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+  {% endif %}
 {% endfor %}
   containers:
 {% for container in system.containers %}    
@@ -115,6 +250,8 @@ spec:
       value: {{ system.username }}
     - name: ACCESS_TOKEN
       value: {{ system.access_token }}
+    - name: PGAPPNAME
+      value: {{ system.name }}
     {% for key, value in system.extra_container_env.items() %}
     - name: {{ key }}
       value: {{ value }}
@@ -201,12 +338,6 @@ spec:
     - name: nfs
       mountPath: "/home/nfs"
     {% endif %}
-    {% if system.gitea_integration == True %}
-    - name: {{ system.username_all_hyphens }}-id-gitea
-      mountPath: {{ system.parent_dir }}/{{ system.subpath_dir }}/.ssh/id_gitea
-      subPath: id_gitea
-      readOnly: true
-    {% endif %}
 {% if container.volumes %}
 {% for volume in system.volumes %}
   {% if container.name == volume['container_name'] %}
@@ -290,12 +421,6 @@ spec:
     nfs:
       server: {{ system.nfsrods_host }}
       path: /
-  {% endif %}
-  {% if system.gitea_integration == True %}
-  - name: {{ system.username_all_hyphens }}-id-gitea
-    secret:
-      secretName: {{ system.username_all_hyphens }}-id-gitea
-      defaultMode: 0600
   {% endif %}
 # Changes
 {% for container in system.containers %}

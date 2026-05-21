@@ -127,50 +127,77 @@ def search_for_gpu_reservation(reservations):
     # we are providing minimum reservations to the front end from the spec.
     return 0
 
-def validate_request_resources(request_cpu, request_gpu, request_memory, request_ephemeral, minimum_resources, maximum_resources):
+def validate_request_resources(request_cpu, request_gpu, request_memory, request_ephemeral, minimum_resources, maximum_resources, username=None, app_id=None):
+    """
+    Validate requested resources against minimum and maximum limits.
+
+    Logs validation failures with user and app context for monitoring.
+    """
+    # Helper to log validation failures
+    def log_validation_failure(resource_type, requested, limit, limit_type, reason):
+        context = []
+        if username:
+            context.append(f"user={username}")
+        if app_id:
+            context.append(f"app_id={app_id}")
+        context.append(f"resource={resource_type}")
+        context.append(f"requested={requested}")
+        context.append(f"{limit_type}={limit}")
+        context.append(f"reason={reason}")
+
+        logger.warning(f"Resource validation failed: {' '.join(context)}")
+
     if request_cpu is not None and request_cpu < float(minimum_resources.cpus):
+        log_validation_failure("cpu", request_cpu, minimum_resources.cpus, "minimum", "below_minimum")
         return Response(
             f"Invalid resources requested. Cannot allocate more than {minimum_resources.cpus} cpus.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
-    
+
     if request_cpu is not None and request_cpu > float(maximum_resources.cpus):
+        log_validation_failure("cpu", request_cpu, maximum_resources.cpus, "maximum", "exceeds_maximum")
         return Response(
             f"Invalid resources requested. Cannot allocate more than {maximum_resources.cpus} cpus.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
 
     if request_gpu is not None and request_gpu < int(minimum_resources.gpus):
+        log_validation_failure("gpu", request_gpu, minimum_resources.gpus, "minimum", "below_minimum")
         return Response(
             f"Invalid resources requested. Cannot allocate less than {minimum_resources.gpus} gpus.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
-    
+
     if request_gpu is not None and request_gpu > int(maximum_resources.gpus):
+        log_validation_failure("gpu", request_gpu, maximum_resources.gpus, "maximum", "exceeds_maximum")
         return Response(
             f"Invalid resources requested. Cannot allocate more than {maximum_resources.gpus} gpus.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
 
     if request_memory is not None and to_bytes(request_memory) < to_bytes(minimum_resources.memory):
+        log_validation_failure("memory", request_memory, minimum_resources.memory, "minimum", "below_minimum")
         return Response(
             f"Invalid resources requested. Cannot allocate less than {minimum_resources.memory} memory.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
 
     if request_memory is not None and to_bytes(request_memory) > to_bytes(maximum_resources.memory):
+        log_validation_failure("memory", request_memory, maximum_resources.memory, "maximum", "exceeds_maximum")
         return Response(
             f"Invalid resources requested. Cannot allocate more than {maximum_resources.memory} memory.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
-    
+
     if request_ephemeral is not None and to_bytes(request_ephemeral) < to_bytes(minimum_resources.ephemeralStorage):
+        log_validation_failure("ephemeral_storage", request_ephemeral, minimum_resources.ephemeralStorage, "minimum", "below_minimum")
         return Response(
             f"Invalid resources requested. Cannot allocate less than {minimum_resources.ephemeralStorage} ephemeral storage.",
             status=drf_status.HTTP_400_BAD_REQUEST
         )
 
     if request_ephemeral is not None and to_bytes(request_ephemeral) > to_bytes(maximum_resources.ephemeralStorage):
+        log_validation_failure("ephemeral_storage", request_ephemeral, maximum_resources.ephemeralStorage, "maximum", "exceeds_maximum")
         return Response(
             f"Invalid resources requested. Cannot allocate more than {maximum_resources.ephemeralStorage} ephemeral storage.",
             status=drf_status.HTTP_400_BAD_REQUEST
@@ -348,7 +375,7 @@ class AppViewSet(viewsets.GenericViewSet):
                 continue
 
         apps = {key: value for key, value in sorted(apps.items())}
-        logging.debug(f"apps:\n${apps}")
+        logger.debug(f"apps:\n${apps}")
         serializer = self.get_serializer(data=apps)
         serializer.is_valid()
         if serializer.errors:
@@ -395,7 +422,7 @@ class AppViewSet(viewsets.GenericViewSet):
                 )
             )
         )
-        logging.debug(f"app:\n${app}")
+        logger.debug(f"app:\n${app}")
 
         serializer = self.get_serializer(data=asdict(app))
         serializer.is_valid()
@@ -552,11 +579,11 @@ class InstanceViewSet(viewsets.GenericViewSet):
         username = request.user.get_username()
 
         serializer = self.get_serializer(data=request.data)
-        logging.debug("checking if request is valid")
+        logger.debug("checking if request is valid")
         serializer.is_valid(raise_exception=True)
-        logging.debug("creating resource_request")
+        logger.debug("creating resource_request")
         resource_request = serializer.create(serializer.validated_data)
-        logging.debug(f"resource_request: {resource_request}")
+        logger.debug(f"resource_request: {resource_request}")
         irods_enabled = os.environ.get("IROD_HOST",'').strip()
         # TODO update social query to fetch user.
 
@@ -566,7 +593,15 @@ class InstanceViewSet(viewsets.GenericViewSet):
             os.environ["NFSRODS_UID"] = str(nfs_id)
 
         # We will update this later once a system id for the app exists
-        identity_token = UserIdentityToken.objects.create(user=request.user)
+        try:
+            identity_token = UserIdentityToken.objects.create(user=request.user)
+            logger.debug(f"Created identity token for user {username}")
+        except Exception as e:
+            logger.error(f"Failed to create identity token for user {username}: {type(e).__name__}: {str(e)}")
+            return Response(
+                {"message": "Failed to create authentication token"},
+                status=drf_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         principal = Principal(username, identity_token.token, None)
 
         app_id = serializer.data["app_id"]
@@ -594,7 +629,11 @@ class InstanceViewSet(viewsets.GenericViewSet):
         request_memory = to_bytes(resource_request.memory)
         request_ephemeral = to_bytes(resource_request.ephemeralStorage)
 
-        validation_response = validate_request_resources(request_cpu, request_gpu, request_memory, request_ephemeral, minimum_resources, maximum_resources)
+        validation_response = validate_request_resources(
+            request_cpu, request_gpu, request_memory, request_ephemeral,
+            minimum_resources, maximum_resources,
+            username=username, app_id=app_id
+        )
         if validation_response is not None:
             return validation_response
 
@@ -605,8 +644,24 @@ class InstanceViewSet(viewsets.GenericViewSet):
         host = get_host(request)
         system = tycho.start(principal, app_id, resource_request.resources, host, env)
 
-        identity_token.consumer_id = identity_token.compute_app_consumer_id(system.identifier)
-        identity_token.save()
+        try:
+            identity_token.consumer_id = identity_token.compute_app_consumer_id(system.identifier)
+            identity_token.save()
+            logger.debug(f"Updated identity token with consumer_id {identity_token.consumer_id} for user {username}")
+        except Exception as e:
+            logger.error(
+                f"Failed to save identity token for user {username}, app {app_id}, "
+                f"system {system.identifier}: {type(e).__name__}: {str(e)}"
+            )
+            # Clean up the system that was started
+            try:
+                tycho.delete({"name": system.services[0].identifier})
+            except Exception as cleanup_error:
+                logger.error(f"Failed to cleanup system after token save failure: {str(cleanup_error)}")
+            return Response(
+                {"message": "Failed to save authentication token"},
+                status=drf_status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         s = InstanceSpec(
             principal.username,
@@ -631,6 +686,15 @@ class InstanceViewSet(viewsets.GenericViewSet):
                 # for the user.
                 logger.error(f"Failed to launch app { app_id } for user { username }; exception: { str(e) }")
                 tycho.delete({"name": system.services[0].identifier})
+                # Clean up the identity token since instance won't be tracked
+                try:
+                    identity_token.delete()
+                    logger.debug(f"Deleted identity token for failed instance launch: user={username}, app={app_id}")
+                except Exception as token_error:
+                    logger.error(
+                        f"Failed to delete identity token after instance validation failure: "
+                        f"user={username}, app={app_id}, error={str(token_error)}"
+                    )
                 return Response(
                     serializer.errors, status=drf_status.HTTP_400_BAD_REQUEST
                 )
@@ -639,7 +703,14 @@ class InstanceViewSet(viewsets.GenericViewSet):
             # potentially created instance rather than leaving it hanging.
             logger.error(f"Failed to launch app { app_id } for user { username }; null instance spec")
             tycho.delete({"name": system.services[0].identifier})
-            identity_token.delete()
+            try:
+                identity_token.delete()
+                logger.debug(f"Deleted identity token for null instance spec: user={username}, app={app_id}")
+            except Exception as token_error:
+                logger.error(
+                    f"Failed to delete identity token after null instance spec: "
+                    f"user={username}, app={app_id}, error={str(token_error)}"
+                )
             return Response(
                 {"message": "failed to submit app start."},
                 status=drf_status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -694,9 +765,18 @@ class InstanceViewSet(viewsets.GenericViewSet):
                 logger.info(f"Terminating app id { sid } for user { request.user.username }")
                 response = tycho.delete({"name": serializer.validated_data["sid"]})
                 # Delete all the tokens the user had associated with that app
-                consumer_id = UserIdentityToken.compute_app_consumer_id(serializer.validated_data["sid"])
-                tokens = UserIdentityToken.objects.filter(user=request.user, consumer_id=consumer_id)
-                tokens.delete()
+                try:
+                    consumer_id = UserIdentityToken.compute_app_consumer_id(serializer.validated_data["sid"])
+                    tokens = UserIdentityToken.objects.filter(user=request.user, consumer_id=consumer_id)
+                    token_count = tokens.count()
+                    tokens.delete()
+                    logger.info(f"Deleted {token_count} identity token(s) for terminated instance: user={request.user.username}, sid={sid}")
+                except Exception as token_error:
+                    logger.error(
+                        f"Failed to delete identity tokens for terminated instance: "
+                        f"user={request.user.username}, sid={sid}, error={type(token_error).__name__}: {str(token_error)}"
+                    )
+                    # Continue anyway since the app was terminated successfully
                 # TODO How can we avoid this sleep? Do we need an immediate response beyond
                 # a successful submission? Can we do a follow up with Web Sockets or SSE
                 # to the front end?
@@ -745,8 +825,12 @@ class InstanceViewSet(viewsets.GenericViewSet):
         request_gpu = float(data["gpu"]) if "gpu" in data else None
         request_memory = to_bytes(data["memory"]) if "memory" in data else None
         request_ephemeral = None
-        
-        validation_response = validate_request_resources(request_cpu, request_gpu, request_memory, request_ephemeral, minimum_resources, maximum_resources)
+
+        validation_response = validate_request_resources(
+            request_cpu, request_gpu, request_memory, request_ephemeral,
+            minimum_resources, maximum_resources,
+            username=username, app_id=app_id
+        )
         if validation_response is not None:
             return validation_response
 
@@ -815,6 +899,8 @@ class UsersViewSet(viewsets.GenericViewSet):
 
     @action(methods=["POST"], detail=False)
     def logout(self, request):
+        username = request.user.username if request.user.is_authenticated else "anonymous"
+        logger.info(f"User {username} logged out via API")
         logout(request)
         data = {"success": "Successfully logged out"}
         return Response(data=data, status=status.HTTP_200_OK)
@@ -873,11 +959,12 @@ class LoginProviderViewSet(viewsets.GenericViewSet):
             "allauth.account.auth_backends.AuthenticationBackend"
             in settings.AUTHENTICATION_BACKENDS
         ):
-            for provider in socialaccount.providers.registry.get_class_list():
-                inst = provider(request, "allauth.socialaccount")
+            adapter = socialaccount.adapter.get_adapter(request)
+            providers = adapter.list_providers(request)
+            for provider in providers:
                 provider_data.append(
                     asdict(
-                        LoginProvider(inst.name, inst.get_login_url(request))
+                        LoginProvider(provider.name, provider.get_login_url(request))
                     )
                 )
 

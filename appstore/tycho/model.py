@@ -160,7 +160,7 @@ class Container:
 class System:
     """ Distributed system of interacting containerized software. """
     def __init__(self, config, name, principal, service_account, conn_string, proxy_rewrite, containers, identifier,
-                 gitea_integration, services={}, security_context={}, init_security_context={}):
+                 services={}, security_context={}, init_security_context={}):
         """ Construct a new abstract model of a system given a name and set of containers.
         
             Serves as context for the generation of compute cluster specific artifacts.
@@ -214,6 +214,7 @@ class System:
         self.namespace = "default"
         self.serviceaccount = service_account
         self.enable_init_container = os.environ.get("TYCHO_APP_ENABLE_INIT_CONTAINER", "true")
+        self.enable_trash_cli = os.environ.get("TYCHO_APP_ENABLE_TRASH_CLI", "false").lower()
         self.conn_string = conn_string
         """PVC flags and other variables for default volumes"""
         self.create_home_dirs = os.environ.get("CREATE_HOME_DIRS", "false").lower()
@@ -237,6 +238,8 @@ class System:
         self.init_image_tag = os.environ.get("TYCHO_APP_INIT_IMAGE_TAG", "latest")
         self.init_cpus = os.environ.get("TYCHO_APP_INIT_CPUS", "250m")
         self.init_memory = os.environ.get("TYCHO_APP_INIT_MEMORY", "250Mi")
+        self.init_nobody_uid = int(os.environ.get("TYCHO_APP_INIT_NOBODY_UID", "524288"))
+        self.init_nobody_gid = int(os.environ.get("TYCHO_APP_INIT_NOBODY_GID", "524288"))
         self.gpu_resource_name = os.environ.get("TYCHO_APP_GPU_RESOURCE_NAME", "nvidia.com/gpu")
         """Proxy rewrite rule for ambassador service annotations"""
         self.proxy_rewrite = proxy_rewrite
@@ -247,11 +250,6 @@ class System:
             self.nfsrods_host = os.environ.get('NFSRODS_HOST', '')
         else:
             logger.info("Irods host not enabled")
-        """gitea settings"""
-        self.gitea_integration = gitea_integration
-        self.gitea_host = os.environ.get("GITEA_HOST", " ")
-        self.gitea_user = os.environ.get("GITEA_USER", " ")
-        self.gitea_service_name = os.environ.get("GITEA_SERVICE_NAME", " ")
         self.ambassador_service_name = os.environ.get("AMBASSADOR_SVC_NAME", "")
 
     @staticmethod
@@ -453,7 +451,6 @@ class System:
             "proxy_rewrite": spec.get("proxy_rewrite", { 'target':None, 'enabled':False }),
             "containers": containers,
             "identifier": identifier,
-            "gitea_integration": spec.get("gitea_integration", False),
             "services": services,
             "security_context": security_context,
             "init_security_context": init_security_context

@@ -157,7 +157,7 @@ class TychoContext:
                 if not repo_url.startswith("http"):
                     # Assume it is a directory within the same repo as the app registry file.
                     if self.tycho_config_url == "":
-                        logging.error("tycho_config_url is empty string")
+                        logger.error("tycho_config_url is empty string")
                         raise ValueError(f"-- tycho_config_url is empty string, can't load app registry file")
                     repo_url = urljoin(self.tycho_config_url, repo_url)
                 # ToDo: Remove the next four lines if we deprecate DOCKSTORE_APPS_BRANCH.
@@ -336,9 +336,6 @@ class TychoContext:
         proxy_rewrite = self.apps.get(app_id).get("proxy-rewrite", { "enabled":False, "target":None })
         spec["services"][app_id]["proxy_rewrite"] = proxy_rewrite
         if proxy_rewrite_rule: spec["services"][app_id]["proxy_rewrite"]["enabled"] = True
-        """ Add gitea integration rule """
-        gitea_integration = self.apps.get(app_id).get("gitea-integration", False)
-        spec["services"][app_id]["gitea_integration"] = gitea_integration
 
         if spec is not None:
             system = self._start ({

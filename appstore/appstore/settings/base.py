@@ -46,11 +46,11 @@ DEBUG = bool(DEBUG_STRING)
 DEV_PHASE = os.environ.get("DEV_PHASE", "local")
 TYCHO_MODE = os.environ.get("TYCHO_MODE", "null" if DEV_PHASE == "stub" else "live")
 
-# Needs to be JSON-encoded since expressions can contain basically any character that would be used as a delimiter. 
+# Needs to be JSON-encoded since expressions can contain basically any character that would be used as a delimiter.
 AUTO_WHITELIST_PATTERNS = json.loads(os.environ.get("AUTO_WHITELIST_PATTERNS", "[]"))
 
 # Variables used for an external Tycho app registry.
-# ToDo: Consider setting the default value of TYCHO_APP_REGISTRY_REPO to 
+# ToDo: Consider setting the default value of TYCHO_APP_REGISTRY_REPO to
 # "https://github.com/helxplatform/helx-apps/raw" and remove any other similar
 # variable.  Maybe don't set and raise a fatal error if not set (still remove
 # other similar variables).
@@ -73,6 +73,8 @@ IMAGE_DOWNLOAD_URL = os.environ.get(
     "IMAGE_DOWNLOAD_URL", "https://braini-metalnx.renci.org/metalnx"
 )
 
+PRODUCT_LINKS = json.loads(os.environ.get("PRODUCT_LINKS", "[]"))
+
 DJANGO_APPS = [
     "django.contrib.admin",
     "django.contrib.contenttypes",
@@ -91,7 +93,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
     "crispy_forms",
     "rest_framework",
-    "drf_spectacular",
+    "drf_spectacular"
 ]
 
 ##  Setting to allow for a seamless login that was breaking at django-allauth 0.47.
@@ -107,10 +109,51 @@ LOCAL_APPS = [
     "tycho",
 ]
 
+ACCOUNT_EMAIL_REQUIRED = True
+
+SOCIALACCOUNT_ADAPTER = "appstore.adapter.SocialAccountAdapter"
+SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
+SOCIALACCOUNT_STORE_TOKENS = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+
+SOCIALACCOUNT_PROVIDERS = {
+    "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}},
+}
+
 OAUTH_PROVIDERS = os.environ.get("OAUTH_PROVIDERS", "").split(",")
+
+# Notes: there are currently 3 types of SSO providers that can be specified:
+# github,google,cilogon
 for PROVIDER in OAUTH_PROVIDERS:
     if PROVIDER != '':
         THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
+
+# get the OIDC name if exists
+OIDC_NAME = os.environ.get("OIDC_NAME", "")
+
+# add in the OIDC params
+if OIDC_NAME != "":
+    # add the oidc provider to the django config
+    THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.openid_connect")
+
+    # get the rest of the OIDC parameters
+    OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID","")
+    OIDC_SECRET = os.environ.get("OIDC_SECRET","")
+    OIDC_SERVER_URL = os.environ.get("OIDC_SERVER_URL","")
+
+    SOCIALACCOUNT_PROVIDERS.update(
+    {
+        "openid_connect": {
+            "APPS": [
+             {
+                "provider_id": OIDC_NAME,
+                "name": OIDC_NAME,
+                "client_id": OIDC_CLIENT_ID,
+                "secret": OIDC_SECRET,
+                "settings": { "server_url": OIDC_SERVER_URL }
+            }]
+        }
+    })
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -126,6 +169,7 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django.contrib.auth.middleware.PersistentRemoteUserMiddleware",
+    "middleware.request_logging_middleware.RequestLoggingMiddleware",
     "middleware.filter_whitelist_middleware.AllowWhiteListedUserOnly",
     "middleware.session_idle_timeout.SessionIdleTimeout",
     "allauth.account.middleware.AccountMiddleware"
@@ -146,7 +190,6 @@ AUTHENTICATION_BACKENDS = (
 
 ACCOUNT_ADAPTER = "appstore.adapter.LoginRedirectAdapter"
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = os.environ.get("ACCOUNT_DEFAULT_HTTP_PROTOCOL", "http")
-ACCOUNT_EMAIL_REQUIRED = True
 ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 1
 ACCOUNT_EMAIL_VERIFICATION = "none"
 ACCOUNT_RATE_LIMITS= {'login_failed':10}
@@ -154,17 +197,12 @@ ACCOUNT_RATE_LIMITS= {'login_failed':10}
 ACCOUNT_LOGOUT_REDIRECT_URL = "/helx"
 LOGIN_REDIRECT_URL = "/helx/workspaces/login/success"
 LOGIN_URL = "/accounts/login"
-LOGIN_WHITELIST_URL = "/login_whitelist/"
+LOGIN_WHITELIST_URL = "/helx/workspaces/login?whitelist_required=true"
 OIDC_SESSION_MANAGEMENT_ENABLE = True
 SAML_URL = "/accounts/saml"
 SAML_ACS_URL = "/saml2_auth/acs/"
 #SAML_ACS_URL = "/sso/acs/"
-SOCIALACCOUNT_ADAPATER = "appstore.adapter.SocialAccountAdapter"
-SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
-SOCIALACCOUNT_STORE_TOKENS = True
-SOCIALACCOUNT_PROVIDERS = {
-    "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}}
-}
+
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 TEMPLATES = [
@@ -261,6 +299,15 @@ DEFAULT_SUPPORT_EMAIL = os.environ.get(
 # Logging
 MIN_LOG_LEVEL = "INFO"
 LOG_LEVEL = "DEBUG" if DEBUG else os.environ.get("LOG_LEVEL", MIN_LOG_LEVEL)
+
+# check the env param to enable the file loggers
+# note this is set when the log pvc is to be created.
+USE_LOG_FILE = os.environ.get("USE_LOG_FILE", "")
+
+# confirm the state, empty string will not enable file loggers below
+if USE_LOG_FILE.lower() == "false":
+    USE_LOG_FILE = ""
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,  # keep Django's default loggers
@@ -279,6 +326,9 @@ LOGGING = {
         },
         "timestampthread": {
             "format": "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s] [%(name)-25.25s  ]  %(message)s",
+        },
+        "json": {
+            "()": "appstore.json_formatter.JSONFormatter",
         },
     },
     "handlers": {
@@ -314,38 +364,43 @@ LOGGING = {
     },
     "loggers": {
         "": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "propagate": False,
             "level": LOG_LEVEL
         },
+        "appstore": {
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
         "django": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "django.request": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
             "filters": ["skip_superfluous_endpoint_logs"]
         },
         "django.template": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": True,
         },
         "django.db.backends": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["djangoLog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "admin": {
-            "handlers": ["console"],
+            "handlers": ["console"] + (["syslog"] if USE_LOG_FILE else []),
             "level": LOG_LEVEL,
         },
         "tycho": {
-            "handlers": ["console"],
-            "level": "WARNING",
+            "handlers": ["console"] + (["app_store_log"] if USE_LOG_FILE else []),
+            "level": LOG_LEVEL,
         },
         # Info logs coming from xmlschema are generally irrelevant and crowd the logs
         "xmlschema": {
@@ -374,10 +429,10 @@ if DEBUG and DEV_PHASE in ("local", "stub", "dev"):
     ]
 
     CSRF_TRUSTED_ORIGINS += [
-        "https://localhost",
-        "https://127.0.0.1",
-        "http://localhost",
-        "http://127.0.0.1",
+        "https://localhost:3000",
+        "https://127.0.0.1:3000",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
 
     CORS_ALLOWED_ORIGINS = [

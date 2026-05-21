@@ -19,6 +19,9 @@ var (
 
 	// baseGid is obtained from a flag and used when processing UNC Users.
 	baseGid string
+
+	// baseGroup is obtained from a flag and used for the shared posixGroup.
+	baseGroup string
 )
 
 // HookRequest represents the input payload for the /hook endpoint.
@@ -38,9 +41,9 @@ type DerivedSearch struct {
 
 // HookResponse defines the response structure returned by the /hook endpoint.
 type HookResponse struct {
-	Transformed interface{}     `json:"transformed"`
-	Derived     []DerivedSearch `json:"derived"`
-	Reset       bool            `json:"reset"`
+	Transformed []map[string]interface{} `json:"transformed"` // must be an array so main.go can parse []TransformedEntry
+	Derived     []DerivedSearch          `json:"derived"`
+	Reset       bool                     `json:"reset"`
 }
 
 // @Summary Process LDAP hook payload
@@ -116,6 +119,7 @@ func processORDRDGroup(req HookRequest) HookResponse {
 	// Process members – build new member list and derive a filter.
 	newMembers := []string{}
 	filterParts := []string{}
+	memberUids := []string{} // track resolved uids so we can patch each member's groups
 	mappingMissing := false
 
 	for _, m := range memberSlice {
@@ -136,6 +140,7 @@ func processORDRDGroup(req HookRequest) HookResponse {
 			mappingMissing = true
 			break
 		}
+		memberUids = append(memberUids, uid)
 		newVal := fmt.Sprintf("uid=%s,ou=users,dc=example,dc=org", uid)
 		newMembers = append(newMembers, newVal)
 	}
@@ -172,8 +177,22 @@ func processORDRDGroup(req HookRequest) HookResponse {
 		"content": newContent,
 	}
 
+	// Emit one extra transformed entry per member that patches their groups attribute.
+	// Because groups is a merge attribute in the main service, these accumulate correctly
+	// (e.g. a user in both "users" and "eagle" ends up with groups: [users, eagle]).
+	transformedEntries := []map[string]interface{}{transformed}
+	for _, uid := range memberUids {
+		userGroupPatch := map[string]interface{}{
+			"dn": fmt.Sprintf("uid=%s,ou=users,dc=example,dc=org", uid),
+			"content": map[string]interface{}{
+				"groups": []interface{}{groupname},
+			},
+		}
+		transformedEntries = append(transformedEntries, userGroupPatch)
+	}
+
 	return HookResponse{
-		Transformed: transformed,
+		Transformed: transformedEntries,
 		Derived:     derived,
 		Reset:       false,
 	}
@@ -200,6 +219,7 @@ func processUNCUser(req HookRequest) HookResponse {
 		"displayName":   req.Content["displayName"],
 		"gidNumber":     baseGid, // Use the global baseGid.
 		"givenName":     req.Content["givenName"],
+		"groups":        []interface{}{baseGroup}, // every user belongs to the base group
 		"homeDirectory": fmt.Sprintf("/home/%s", uid),
 		"objectClass":   []string{"top", "inetOrgPerson", "posixAccount", "helxUser"},
 		"ou":            "users",
@@ -230,7 +250,7 @@ func processUNCUser(req HookRequest) HookResponse {
 	}
 
 	return HookResponse{
-		Transformed: transformed,
+		Transformed: []map[string]interface{}{transformed},
 		Derived:     derived,
 		Reset:       false,
 	}
@@ -277,7 +297,7 @@ func processPosixGroup(req HookRequest) HookResponse {
 	}
 
 	return HookResponse{
-		Transformed: transformed,
+		Transformed: []map[string]interface{}{transformed},
 		Derived:     []DerivedSearch{},
 		Reset:       false,
 	}
@@ -321,6 +341,7 @@ func copyMap(orig map[string]interface{}) map[string]interface{} {
 func main() {
 	// Accept the baseGid flag. Default value is "200" (adjust as needed).
 	flag.StringVar(&baseGid, "baseGid", "200", "Base gidNumber to use for UNC Users")
+	flag.StringVar(&baseGroup, "baseGroup", "users", "Base group name for all UNC Users")
 	flag.Parse()
 
 	e := echo.New()

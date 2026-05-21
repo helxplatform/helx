@@ -38,7 +38,8 @@ class ProductSettings:
     capabilities: List[str] = field(default_factory=lambda: ['app', 'search'])
 
     def __post_init__(self):
-        from appstore.settings.base import GITEA_BASE_URL
-        if GITEA_BASE_URL:
+        from appstore.settings.base import PRODUCT_LINKS
+        if PRODUCT_LINKS:
             if self.links is None: self.links = []
-            self.links.append(ProductLink("Gitea", GITEA_BASE_URL))
+            for link in PRODUCT_LINKS:
+                self.links.append(ProductLink(link["name"], link["url"]))

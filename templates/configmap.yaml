@@ -11,11 +11,14 @@ data:
   # Default is always "True" on the server. Change to "False" in prod.
   DEBUG: "{{ .Values.debug }}"
   LOG_LEVEL: "{{ upper .Values.logLevel }}"
+  USE_LOG_FILE: "{{ .Values.logsStorageAppstore.createPVC | toString }}"
   OAUTH_DB_DIR: /var/lib/sqlite3
   OAUTH_DB_FILE: DATABASE.sqlite3
   ACCOUNT_DEFAULT_HTTP_PROTOCOL: "{{ .Values.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}"
   AUTO_WHITELIST_PATTERNS: |
     {{ toJson .Values.django.AUTO_WHITELIST_PATTERNS | nindent 4 }}
+  PRODUCT_LINKS: |
+    {{ toJson .Values.django.PRODUCT_LINKS | nindent 4 }}
   DEV_PHASE: "{{ .Values.django.DEV_PHASE }}"
   # Just adding these ports temporarily until they have a default value in the code.
   BRAINI_PORT: "1247"

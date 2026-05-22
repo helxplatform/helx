@@ -76,6 +76,23 @@ resources:
 
 security:
   isolatedApps: true
+  # In-namespace pods that app pods are allowed to egress to. Each entry is a
+  # map of pod labels (AND-matched within an entry, OR-matched across entries).
+  # Empty by default, so apps are fully isolated from other in-namespace pods.
+  # External egress and DNS remain allowed regardless.
+  # Example: allow apps to reach a postgres database:
+  #   appEgressAllowedPods:
+  #     - app.kubernetes.io/name: my-postgres
+  appEgressAllowedPods: []
+  # Labels identifying the cluster DNS pods, used to permit DNS egress from
+  # app pods. When set, egress is allowed to any pod carrying these labels
+  # on any port. When empty, falls back to permitting egress on common DNS
+  # ports (53, 5353, 1053) to any destination — works out of the box on most
+  # clusters but is broader than a label-based rule.
+  # Examples:
+  #   Stock Kubernetes / CoreDNS:  {k8s-app: kube-dns}
+  #   OpenShift:                   {dns.operator.openshift.io/daemonset-dns: default}
+  dnsPodSelector: {}
 
 # -- Choose http or https for the protocol that is used by external users to access
 # the appstore web service.
@@ -114,6 +131,10 @@ django:
   # ex. Whitelist all UNC emails - "^[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\\.)?unc\\.edu$"
   # ex. Whitelist CS dept. (grad./prof.) UNC emails - "^[A-Za-z0-9._%+-]+@cs\\.unc\\.edu$"
   AUTO_WHITELIST_PATTERNS: []
+
+  # Add arbitrary product links that appear in the UI header navbar.
+  # Ex: [{"name": "Gitea", "url": "https://gitea.com"}]
+  PRODUCT_LINKS: []
 
   # -- user emails for oauth providers
   AUTHORIZED_USERS: ""
@@ -154,15 +175,18 @@ oauth:
   # -- oauth providers separated by commas (google, github)
   OAUTH_PROVIDERS: ""
   GITHUB_NAME: ""
-  GITHUB_KEY: ""
-  GITHUB_SITES: ""
   GITHUB_CLIENT_ID: ""
   GITHUB_SECRET: ""
   GOOGLE_NAME: ""
-  GOOGLE_KEY: ""
-  GOOGLE_SITES: ""
   GOOGLE_CLIENT_ID: ""
   GOOGLE_SECRET: ""
+  CILOGON_NAME: ""
+  CILOGON_CLIENT_ID: ""
+  CILOGON_SECRET: ""
+  OIDC_NAME: ""
+  OIDC_CLIENT_ID: ""
+  OIDC_SECRET: ""
+  OIDC_SERVER_URL: ""
 
 saml:
   cache:
@@ -281,6 +305,8 @@ tycho:
   runAsGroup: 0
   # -- Application processes launched will also be part of this supplimentary group.
   fsGroup: 0
+  # -- Enable trash-cli functionality in tycho-launched apps
+  enableTrashCli: false
   # -- Start the init container to take care of any needed tasks before the
   # main container is started.  This can be to create certain directories or
   # set file permissions.
@@ -293,6 +319,10 @@ tycho:
   initRunAsUser: 0
   # -- Init processes will have this group permissions.
   initRunAsGroup: 0
+  # -- "Userless" init processes will run as this user.
+  initRunAsNobodyUser: 524288
+  # -- "Userless" init processes will have these group permissions.
+  initRunAsNobodyGroup: 524288
   # -- Create Home and shared directories for users.
   createHomeDirs: true
   # -- directory that will be used to mount user's home directories in
@@ -376,14 +406,3 @@ postgresql:
     enabled: true
   # -- enable/disable postgresql network policy, allows traffic to and from appstore pod only.
   networkPolicyEnabled: true
-
-# -- gitea settings
-gitea:
-  # -- set whether a gitea connection is enabled
-  enabled: false
-  # -- the hostname of the gitea server
-  host: eduhelx-git.apps.renci.org
-  # -- the default user that gets populated in the gitea ssh config file
-  user: git
-  # -- the name of service in Kubernetes to connect to gitea
-  serviceName: gitea-ssh

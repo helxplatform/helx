@@ -27,8 +27,9 @@ def update_user(user):
     # https://github.com/grafana/django-saml2-auth/blob/11b97beaa2a431209e2c54103cb49c033c42ff54/django_saml2_auth/user.py#L165
     # This trigger gets and set the email field in the django user db
     _user = get_user(user)
-    _user.email = user['email']
-    _user.save()
+    if user['email']:
+        _user.email = user['email']
+        _user.save()
     return _user
 
 class AuthorizedUser(models.Model):

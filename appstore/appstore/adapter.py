@@ -62,12 +62,13 @@ class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
         return url
     
 class SocialAccountAdapter(DefaultSocialAccountAdapter):
-
-    # debug commenting out for now.
-    # def populate_user(self, request, sociallogin, data):
-    #     user = super().populate_user(request, sociallogin, data)
-    #     print('sociallogin.account.extra_data:', sociallogin.account.extra_data)
-    #     return user
+    def generate_unique_username(self, txts, regex=None):
+        # Split the email to use as generated username (jdoe@gmail.com -> jdoe)
+        # rather than the first name. allauth still sanitizes and suffixes on collision.
+        email = next((t for t in txts if t and "@" in t), None)
+        if email:
+            txts = [email] + [t for t in txts if t != email]
+        return super().generate_unique_username(txts, regex)
 
     def on_authentication_error(self, request, provider, error=None, exception=None, extra_context=None):
         provider_id = provider.id if provider else "unknown"

@@ -454,11 +454,6 @@ if DEBUG and DEV_PHASE in ("local", "stub", "dev"):
     # middleware that would disrupt in the process
     MIDDLEWARE[1:1] = DEBUG_MIDDLEWARE
 
-# Whether the SAML IdP is trusted to have verified the email address it releases.
-# When True, a SAML login whose email matches an existing account's verified email
-# is merged into that account (see core.models.saml_get_user)
-SAML_TRUST_VERIFIED_EMAIL = os.environ.get("SAML_TRUST_VERIFIED_EMAIL", "False").lower() == "true"
-
 SAML2_AUTH = {
     # Optional settings below
     "DEFAULT_NEXT_URL": "/helx/workspaces/login/success",  # Custom target redirect URL after the user get logged in. Default to /admin if not set. This setting will be overwritten if you have parameter ?next= specificed in the login URL.
@@ -477,7 +472,6 @@ SAML2_AUTH = {
     },
     "TRIGGER": {
         "CREATE_USER": "core.models.update_user",
-        "GET_USER": "core.models.saml_get_user",
     },
     "ASSERTION_URL": os.environ.get("SAML2_AUTH_ASSERTION_URL"),
     "ENTITY_ID": os.environ.get(

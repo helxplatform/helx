@@ -83,7 +83,6 @@ DJANGO_APPS = [
     "django.contrib.auth",
     "django.contrib.messages",
     "django.contrib.sites",
-    "django_saml2_auth",
 ]
 
 THIRD_PARTY_APPS = [
@@ -127,6 +126,71 @@ OAUTH_PROVIDERS = os.environ.get("OAUTH_PROVIDERS", "").split(",")
 for PROVIDER in OAUTH_PROVIDERS:
     if PROVIDER != '':
         THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
+
+# The SAML provider is loaded whenever SAML login is enabled. ALLOW_SAML_LOGIN
+# is kept as a lower-cased string above for compatibility with templates and
+# views that compare it to the literal "true".
+SAML_PROVIDER_SLUG = os.environ.get("SAML_PROVIDER_SLUG", "saml")
+SAML_PROVIDER_NAME = os.environ.get("SAML_PROVIDER_NAME", "Single Sign-On")
+if ALLOW_SAML_LOGIN == "true":
+    THIRD_PARTY_APPS.append("allauth.socialaccount.providers.saml")
+
+    _saml_entity_id = os.environ["SAML2_AUTH_ENTITY_ID"]
+    _saml_metadata_source = os.environ["SAML_METADATA_SOURCE"]
+
+    # Allauth-SAML accepts either a remote `metadata_url` (which it fetches
+    # and caches itself) or a fully-explicit dict with entity_id/x509cert/
+    # sso_url. The deployment may hand us either: a metadata URL when the
+    # chart's fetch sidecar is disabled, or a local XML file path when the
+    # sidecar is mirroring the IdP metadata onto a PVC. The file-path case
+    # is parsed once here so allauth gets explicit IdP fields.
+    if _saml_metadata_source.startswith(("http://", "https://")):
+        _saml_idp = {
+            "entity_id": _saml_entity_id,
+            "metadata_url": _saml_metadata_source,
+        }
+    else:
+        from onelogin.saml2.idp_metadata_parser import OneLogin_Saml2_IdPMetadataParser
+        _parsed = OneLogin_Saml2_IdPMetadataParser.parse_file(
+            _saml_metadata_source,
+            entity_id=_saml_entity_id or None,
+        )["idp"]
+        _saml_idp = {
+            "entity_id": _saml_entity_id or _parsed["entityId"],
+            "sso_url": _parsed["singleSignOnService"]["url"],
+            "x509cert": _parsed["x509cert"],
+        }
+        _slo = _parsed.get("singleLogoutService") or {}
+        if _slo.get("url"):
+            _saml_idp["slo_url"] = _slo["url"]
+
+    SOCIALACCOUNT_PROVIDERS["saml"] = {
+        "APPS": [{
+            "provider_id": SAML_PROVIDER_SLUG,
+            "client_id": SAML_PROVIDER_SLUG,
+            "name": SAML_PROVIDER_NAME,
+            "settings": {
+                "idp": _saml_idp,
+                # Preserve the legacy username-from-uid mapping. Both `uid`
+                # (SocialAccount.uid, the stable external identifier) and
+                # `username` (Django auth_user.username) are populated from
+                # the SAML `uid` attribute so returning users keep their
+                # existing usernames.
+                "attribute_mapping": {
+                    "uid": ["uid"],
+                    "username": ["uid"],
+                    "email": ["mail"],
+                    "first_name": ["givenName"],
+                    "last_name": ["sn"],
+                },
+                "advanced": {
+                    "want_assertion_signed": True,
+                    "authn_request_signed": False,
+                    "want_message_signed": False,
+                },
+            },
+        }],
+    }
 
 # get the OIDC name if exists
 OIDC_NAME = os.environ.get("OIDC_NAME", "")
@@ -453,48 +517,5 @@ if DEBUG and DEV_PHASE in ("local", "stub", "dev"):
     # Add debug middleware early on so it doesn't conflict or process through
     # middleware that would disrupt in the process
     MIDDLEWARE[1:1] = DEBUG_MIDDLEWARE
-
-SAML2_AUTH = {
-    # Optional settings below
-    "DEFAULT_NEXT_URL": "/helx/workspaces/login/success",  # Custom target redirect URL after the user get logged in. Default to /admin if not set. This setting will be overwritten if you have parameter ?next= specificed in the login URL.
-    "CREATE_USER": "TRUE",  # Create a new Django user when a new user logs in. Defaults to True.
-    "NEW_USER_PROFILE": {
-        "USER_GROUPS": [],  # The default group name when a new user logs in
-        "ACTIVE_STATUS": True,  # The default active status for new users
-        "STAFF_STATUS": True,  # The staff status for new users
-        "SUPERUSER_STATUS": False,  # The superuser status for new users
-    },
-    "ATTRIBUTES_MAP": {  # Change Email/UserName/FirstName/LastName to corresponding SAML2 userprofile attributes.
-        "email": "mail",
-        "username": "uid",
-        "first_name": "givenName",
-        "last_name": "sn",
-    },
-    "TRIGGER": {
-        "CREATE_USER": "core.models.update_user",
-    },
-    "ASSERTION_URL": os.environ.get("SAML2_AUTH_ASSERTION_URL"),
-    "ENTITY_ID": os.environ.get(
-        "SAML2_AUTH_ENTITY_ID"
-    ),  # Populates the Issuer element in authn request
-    "USE_JWT": False,
-    'WANT_ASSERTIONS_SIGNED': True,
-    'AUTHN_REQUESTS_SIGNED': False,
-    'WANT_RESPONSE_SIGNED': False,
-    'TOKEN_REQUIRED': False,
-}
-
-# Metadata is required, either remote url or local file path, check the environment
-# determine the type based on the form of the value.  Default to UNC if there's nothing
-
-metadata_source = os.environ.get("SAML_METADATA_SOURCE")
-if metadata_source != None and type(metadata_source) is str and len(metadata_source) != 0: 
-    metadata_source_components = metadata_source.split(':')
-    if len(metadata_source_components) > 1:
-        metadata_source_scheme = metadata_source_components[0]
-        if metadata_source_scheme == "http" or metadata_source_scheme == "https":
-           SAML2_AUTH["METADATA_AUTO_CONF_URL"] = metadata_source
-        else: SAML2_AUTH["METADATA_LOCAL_FILE_PATH"] = metadata_source
-    else: SAML2_AUTH["METADATA_LOCAL_FILE_PATH"] = metadata_source
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

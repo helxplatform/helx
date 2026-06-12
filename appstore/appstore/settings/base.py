@@ -130,6 +130,8 @@ for PROVIDER in OAUTH_PROVIDERS:
 # The SAML provider is loaded whenever SAML login is enabled. ALLOW_SAML_LOGIN
 # is kept as a lower-cased string above for compatibility with templates and
 # views that compare it to the literal "true".
+SAML_URL = "/accounts/saml"
+SAML_ACS_URL = "/saml2_auth/acs/"
 SAML_PROVIDER_SLUG = os.environ.get("SAML_PROVIDER_SLUG", "saml")
 SAML_PROVIDER_NAME = os.environ.get("SAML_PROVIDER_NAME", "Single Sign-On")
 if ALLOW_SAML_LOGIN == "true":
@@ -142,6 +144,13 @@ if ALLOW_SAML_LOGIN == "true":
     # to it (allauth would otherwise derive a different value from URL routing,
     # which would not match what the IdP has registered).
     SAML_SP_ENTITY_ID = os.environ["SAML2_AUTH_ENTITY_ID"]
+    # SP ACS URL — the full assertion-consumer-service URL the IdP has
+    # registered. Allauth-SAML's default points at /accounts/saml/<slug>/acs/
+    # which does not match what existing IdP registrations use; pinned via
+    # the same AppConfig.ready() hook. Defaults to the SP host + legacy ACS
+    # path, which matches the original django-saml2-auth convention.
+    _sp_host = "/".join(SAML_SP_ENTITY_ID.split("/", 3)[:3])  # scheme://host
+    SAML_SP_ACS_URL = os.environ.get("SAML_SP_ACS_URL") or (_sp_host + SAML_ACS_URL)
     # IdP entity ID — selects which IdP within a federation aggregate the
     # OneLogin metadata parser should extract. Required when the metadata
     # source is a multi-IdP aggregate (e.g. UNC's federation metadata).
@@ -275,8 +284,13 @@ LOGIN_REDIRECT_URL = "/helx/workspaces/login/success"
 LOGIN_URL = "/accounts/login"
 LOGIN_WHITELIST_URL = "/helx/workspaces/login?whitelist_required=true"
 OIDC_SESSION_MANAGEMENT_ENABLE = True
-SAML_URL = "/accounts/saml"
-SAML_ACS_URL = "/saml2_auth/acs/"
+# The ingress terminates TLS and forwards to the pod over plain HTTP, setting
+# X-Forwarded-Proto: https. Trust that header so request.build_absolute_uri()
+# returns https:// URLs. Critical for allauth-SAML, which puts the ACS URL into
+# the AuthnRequest — IdPs reject ACS URLs whose scheme doesn't match the
+# registered SP. Only safe behind a proxy that strips/sets these headers.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 #SAML_ACS_URL = "/sso/acs/"
 
 SECURE_CROSS_ORIGIN_OPENER_POLICY = None

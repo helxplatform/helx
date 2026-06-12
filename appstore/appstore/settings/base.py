@@ -135,7 +135,17 @@ SAML_PROVIDER_NAME = os.environ.get("SAML_PROVIDER_NAME", "Single Sign-On")
 if ALLOW_SAML_LOGIN == "true":
     THIRD_PARTY_APPS.append("allauth.socialaccount.providers.saml")
 
-    _saml_entity_id = os.environ["SAML2_AUTH_ENTITY_ID"]
+    # SP entity ID — what the IdP has registered to identify this service.
+    # Kept under the legacy SAML2_AUTH_ENTITY_ID name so existing chart values
+    # and IdP registrations continue to work. Exposed as a top-level setting
+    # so the appstore AppConfig.ready() hook can pin allauth-SAML's SP entityId
+    # to it (allauth would otherwise derive a different value from URL routing,
+    # which would not match what the IdP has registered).
+    SAML_SP_ENTITY_ID = os.environ["SAML2_AUTH_ENTITY_ID"]
+    # IdP entity ID — selects which IdP within a federation aggregate the
+    # OneLogin metadata parser should extract. Required when the metadata
+    # source is a multi-IdP aggregate (e.g. UNC's federation metadata).
+    SAML_IDP_ENTITY_ID = os.environ.get("SAML_IDP_ENTITY_ID") or None
     _saml_metadata_source = os.environ["SAML_METADATA_SOURCE"]
 
     # Allauth-SAML accepts either a remote `metadata_url` (which it fetches
@@ -146,17 +156,19 @@ if ALLOW_SAML_LOGIN == "true":
     # is parsed once here so allauth gets explicit IdP fields.
     if _saml_metadata_source.startswith(("http://", "https://")):
         _saml_idp = {
-            "entity_id": _saml_entity_id,
+            "entity_id": SAML_IDP_ENTITY_ID,
             "metadata_url": _saml_metadata_source,
         }
     else:
         from onelogin.saml2.idp_metadata_parser import OneLogin_Saml2_IdPMetadataParser
-        _parsed = OneLogin_Saml2_IdPMetadataParser.parse_file(
-            _saml_metadata_source,
-            entity_id=_saml_entity_id or None,
+        with open(_saml_metadata_source, "r") as _f:
+            _xml = _f.read()
+        _parsed = OneLogin_Saml2_IdPMetadataParser.parse(
+            _xml,
+            entity_id=SAML_IDP_ENTITY_ID,
         )["idp"]
         _saml_idp = {
-            "entity_id": _saml_entity_id or _parsed["entityId"],
+            "entity_id": _parsed["entityId"],
             "sso_url": _parsed["singleSignOnService"]["url"],
             "x509cert": _parsed["x509cert"],
         }

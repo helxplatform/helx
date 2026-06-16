@@ -170,11 +170,11 @@ if ALLOW_SAML_LOGIN == "true":
             "settings": {
                 "idp": _saml_idp,
                 "attribute_mapping": {
-                    "uid": ["uid"],
-                    "username": ["uid"],
-                    "email": ["mail"],
-                    "first_name": ["givenName"],
-                    "last_name": ["sn"],
+                    "uid": ["urn:oid:0.9.2342.19200300.100.1.1"],
+                    "username": ["urn:oid:0.9.2342.19200300.100.1.1"],
+                    "email": ["urn:oid:0.9.2342.19200300.100.1.3", "urn:oid:1.3.6.1.4.1.5923.1.1.1.6"],
+                    "first_name": ["urn:oid:2.5.4.42"],
+                    "last_name": ["urn:oid:2.5.4.4"],
                 },
                 "advanced": {
                     "want_assertion_signed": True,

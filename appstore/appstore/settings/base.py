@@ -127,9 +127,6 @@ for PROVIDER in OAUTH_PROVIDERS:
     if PROVIDER != '':
         THIRD_PARTY_APPS.append(f"allauth.socialaccount.providers.{PROVIDER}")
 
-# The SAML provider is loaded whenever SAML login is enabled. ALLOW_SAML_LOGIN
-# is kept as a lower-cased string above for compatibility with templates and
-# views that compare it to the literal "true".
 SAML_URL = "/accounts/saml"
 SAML_ACS_URL = "/saml2_auth/acs/"
 SAML_PROVIDER_SLUG = os.environ.get("SAML_PROVIDER_SLUG", "saml")
@@ -137,32 +134,12 @@ SAML_PROVIDER_NAME = os.environ.get("SAML_PROVIDER_NAME", "Single Sign-On")
 if ALLOW_SAML_LOGIN == "true":
     THIRD_PARTY_APPS.append("allauth.socialaccount.providers.saml")
 
-    # SP entity ID — what the IdP has registered to identify this service.
-    # Kept under the legacy SAML2_AUTH_ENTITY_ID name so existing chart values
-    # and IdP registrations continue to work. Exposed as a top-level setting
-    # so the appstore AppConfig.ready() hook can pin allauth-SAML's SP entityId
-    # to it (allauth would otherwise derive a different value from URL routing,
-    # which would not match what the IdP has registered).
     SAML_SP_ENTITY_ID = os.environ["SAML2_AUTH_ENTITY_ID"]
-    # SP ACS URL — the full assertion-consumer-service URL the IdP has
-    # registered. Allauth-SAML's default points at /accounts/saml/<slug>/acs/
-    # which does not match what existing IdP registrations use; pinned via
-    # the same AppConfig.ready() hook. Defaults to the SP host + legacy ACS
-    # path, which matches the original django-saml2-auth convention.
-    _sp_host = "/".join(SAML_SP_ENTITY_ID.split("/", 3)[:3])  # scheme://host
+    _sp_host = "/".join(SAML_SP_ENTITY_ID.split("/", 3)[:3])
     SAML_SP_ACS_URL = os.environ.get("SAML_SP_ACS_URL") or (_sp_host + SAML_ACS_URL)
-    # IdP entity ID — selects which IdP within a federation aggregate the
-    # OneLogin metadata parser should extract. Required when the metadata
-    # source is a multi-IdP aggregate (e.g. UNC's federation metadata).
     SAML_IDP_ENTITY_ID = os.environ.get("SAML_IDP_ENTITY_ID") or None
     _saml_metadata_source = os.environ["SAML_METADATA_SOURCE"]
 
-    # Allauth-SAML accepts either a remote `metadata_url` (which it fetches
-    # and caches itself) or a fully-explicit dict with entity_id/x509cert/
-    # sso_url. The deployment may hand us either: a metadata URL when the
-    # chart's fetch sidecar is disabled, or a local XML file path when the
-    # sidecar is mirroring the IdP metadata onto a PVC. The file-path case
-    # is parsed once here so allauth gets explicit IdP fields.
     if _saml_metadata_source.startswith(("http://", "https://")):
         _saml_idp = {
             "entity_id": SAML_IDP_ENTITY_ID,
@@ -192,11 +169,6 @@ if ALLOW_SAML_LOGIN == "true":
             "name": SAML_PROVIDER_NAME,
             "settings": {
                 "idp": _saml_idp,
-                # Preserve the legacy username-from-uid mapping. Both `uid`
-                # (SocialAccount.uid, the stable external identifier) and
-                # `username` (Django auth_user.username) are populated from
-                # the SAML `uid` attribute so returning users keep their
-                # existing usernames.
                 "attribute_mapping": {
                     "uid": ["uid"],
                     "username": ["uid"],

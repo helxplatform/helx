@@ -15,21 +15,12 @@ handler404 = custom404
 
 
 def _saml_legacy_login(request):
-    # Legacy entry point preserved so existing IdP metadata and external
-    # links continue to resolve. Dispatches to allauth-SAML's login view
-    # under the configured organization slug.
     from allauth.socialaccount.providers.saml import views as saml_views
     return saml_views.login(request, organization_slug=settings.SAML_PROVIDER_SLUG)
 
 
 @csrf_exempt
 def _saml_legacy_acs(request):
-    # Legacy ACS endpoint preserved so the IdP can POST SAMLResponses to
-    # the same URL it was configured with under django-saml2-auth. A redirect
-    # would convert the POST to a GET and drop the assertion, so we invoke
-    # the allauth-SAML ACS view in-process instead. csrf_exempt is required
-    # on this outer wrapper because Django's CSRF middleware checks the
-    # exemption attribute on the URL-resolved callback, not the inner view.
     from allauth.socialaccount.providers.saml import views as saml_views
     return saml_views.acs(request, organization_slug=settings.SAML_PROVIDER_SLUG)
 

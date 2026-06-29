@@ -1,4 +1,4 @@
-Django==4.2.23
+Django==4.2.30
 django-allauth==0.61.1
 django-cors-headers==4.3.1
 django-crispy-forms==2.1
@@ -18,7 +18,7 @@ asgiref==3.7.2
 psycopg2-binary
 python-irodsclient==1.1.5
 deepmerge==1.0.1
-GitPython==3.1.44
+GitPython==3.1.50
 Jinja2==3.1.6
 jsonschema==3.2.0
 kubernetes==25.3.0
@@ -27,4 +27,6 @@ requests==2.32.4
 docker-compose==1.29.2
 requests_cache==1.2.1
 ldap3
-urllib3==2.5.0
+urllib3==2.7.0
+PyJWT==2.13.0
+cryptography==48.0.1

@@ -201,6 +201,12 @@ saml:
   AUTHORITY_URL: ""
   ASSERTION_URL: ""
   ENTITY_ID: ""
+  # -- IdP entity ID to select from the metadata source (required when the source is a federation aggregate, e.g. "https://sso.unc.edu/idp")
+  IDP_ENTITY_ID: ""
+  # -- URL slug under /accounts/saml/<slug>/ for the SAML provider (e.g. "unc")
+  PROVIDER_SLUG: "saml"
+  # -- human-readable name for the SAML provider, shown on the login page
+  PROVIDER_NAME: "Single Sign-On"
 
 irods:
   # -- enable irods support (true | false)

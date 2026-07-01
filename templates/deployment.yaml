@@ -112,6 +112,21 @@ spec:
             configMapKeyRef:
               key: SAML_METADATA_SOURCE
               name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_IDP_ENTITY_ID
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_IDP_ENTITY_ID
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_PROVIDER_SLUG
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_PROVIDER_SLUG
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_PROVIDER_NAME
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_PROVIDER_NAME
+              name: {{ include "appstore.fullname" . }}-env
         {{- end }}
         - name: OAUTH_DB_DIR
           valueFrom:

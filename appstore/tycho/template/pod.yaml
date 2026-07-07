@@ -256,7 +256,7 @@ spec:
     - name: {{ key }}
       value: {{ value }}
     {%endfor %}
-    {% if system.amb %}
+    {% if system.proxied %}
     - name: NB_PREFIX
       value: /private/{{system.system_name}}/{{system.username}}/{{system.identifier}}
     - name: FB_BASEURL
@@ -277,7 +277,7 @@ spec:
       value: {{ system.username }}
     - name: USER
       value: {{ system.username }}
-    {% if system.amb %}
+    {% if system.proxied %}
     - name: NB_PREFIX
       value: /private/{{system.system_name}}/{{system.username}}/{{system.identifier}}
     - name: FB_BASEURL

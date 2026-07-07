@@ -9,6 +9,8 @@ from dataclasses import asdict
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth import logout
+from django.contrib.auth.decorators import login_required
+from django.http import HttpResponse
 
 
 from rest_framework import status as drf_status, viewsets, serializers
@@ -21,6 +23,7 @@ from allauth import socialaccount
 
 from tycho.context import ContextFactory, Principal
 from core.models import IrodAuthorizedUser, UserIdentityToken
+from core.views import get_access_token
 
 from .models import Instance, InstanceSpec, App, LoginProvider, Resources, User
 from .serializers import (
@@ -37,7 +40,7 @@ from .serializers import (
     EmptySerializer,
 )
 
-from urllib.parse import urljoin
+from urllib.parse import urljoin, unquote
 
 # TODO: Structured Logging
 logger = logging.getLogger(__name__)
@@ -280,6 +283,104 @@ def get_social_tokens(request):
 def get_tokens(request):
     username = request.user.get_username()
     return username, None, None
+
+
+# Matches the launched-app URL scheme: /private/{app}/{user}/{guid}[/{rest}]
+PRIVATE_URI_RE = re.compile(
+    r"^/private/(?P<app>[^/]+)/(?P<user>[^/]+)/(?P<guid>[^/]+)(?:/(?P<rest>.*))?$"
+)
+
+
+@login_required
+def private_route(request):
+    """Resolve a /private/{app}/{user}/{guid}/... request to its backend.
+
+    This replaces the per-app Ambassador Mapping. Instead of Ambassador
+    routing by a Service annotation, the reverse proxy (resty) issues a
+    subrequest here to learn:
+      * which backend Service host:port to proxy to,
+      * whether/how to rewrite the path (per-app proxy-rewrite rule), and
+      * the REMOTE_USER / ACCESS_TOKEN headers to inject downstream.
+
+    Crucially, it also enforces that the authenticated user actually owns
+    the target system -- a check Ambassador never performed (it set
+    bypass_auth: true on every launched app, so any logged-in user who knew
+    a guid could reach another user's running app).
+
+    The proxy passes the original app URL in X-Original-URI. Responds:
+      * 200 + routing headers when the user may access the system,
+      * 403 when the user does not own the system,
+      * 404 when the URI is malformed or the system is not running,
+      * 502/503 on registry/orchestrator errors.
+    """
+    # The proxy passes the browser's path here; it arrives percent-encoded
+    # (the subrequest encodes it as a query arg), so decode before matching.
+    original_uri = unquote(request.META.get("HTTP_X_ORIGINAL_URI", ""))
+    match = PRIVATE_URI_RE.match(original_uri)
+    if not match:
+        return HttpResponse("Malformed private URI.", status=404)
+
+    app_id = match.group("app")
+    path_user = match.group("user")
+    guid = match.group("guid")
+    username = request.user.get_username()
+
+    # Ownership check 1: the user embedded in the path must be the caller.
+    if path_user != username:
+        logger.warning(
+            f"private_route: {username} attempted to access {path_user}'s "
+            f"app {app_id}/{guid}"
+        )
+        return HttpResponse("Forbidden.", status=403)
+
+    # Ownership check 2: the guid must be one of this user's running systems.
+    # tycho.status is already scoped to the principal, so membership here is
+    # proof of ownership.
+    try:
+        active = tycho.status({"username": username}).services
+    except Exception as e:
+        logger.error(f"private_route: tycho.status failed for {username}: {e}")
+        return HttpResponse("Unable to resolve app.", status=503)
+
+    instance = next((i for i in active if i.identifier == guid), None)
+    if instance is None:
+        # Either not owned by this user, or not scheduled yet.
+        return HttpResponse("App service not ready.", status=404)
+
+    # Registry metadata drives port + rewrite (mirrors tycho context.start).
+    app_name = instance.app_id.replace(f"-{guid}", "")
+    app_reg = tycho.apps.get(app_name, {}) or {}
+    services = app_reg.get("services", {}) or {}
+    port = services.get(app_name) or next(iter(services.values()), None)
+    if not port:
+        logger.error(f"private_route: no registry port for app {app_name}")
+        return HttpResponse("App has no routable port.", status=502)
+
+    conn_string = app_reg.get("conn_string", "") or ""
+
+    # proxy-rewrite semantics, matching tycho/template/service.yaml:
+    #   proxy-rewrite-rule: True            -> path preserved (no strip)
+    #   proxy-rewrite: {enabled, target: X} -> strip prefix, serve under X
+    proxy_rewrite = app_reg.get("proxy-rewrite", {}) or {}
+    rewrite_target = ""
+    if proxy_rewrite.get("enabled") and proxy_rewrite.get("target"):
+        rewrite_target = proxy_rewrite["target"]
+
+    # The exact prefix Ambassador used to match (and rewrite) on.
+    prefix = f"/private/{app_id}/{username}/{guid}/{conn_string}"
+
+    response = HttpResponse(status=200)
+    response["REMOTE_USER"] = username
+    # Same access token the existing /auth endpoint hands back to the proxy.
+    response["ACCESS_TOKEN"] = get_access_token(request)
+    # {app_name}-{guid} is exactly the launched app's k8s Service name
+    # (tycho System.name = f"{name}-{identifier}").
+    response["X-Backend-Host"] = instance.app_id
+    response["X-Backend-Port"] = str(port)
+    response["X-Rewrite"] = rewrite_target
+    response["X-Prefix"] = prefix
+    return response
+
 
 class AppViewSet(viewsets.GenericViewSet):
     """

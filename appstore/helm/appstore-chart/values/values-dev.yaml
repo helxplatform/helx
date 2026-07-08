@@ -1,0 +1,49 @@
+image:
+  tag: develop
+
+ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
+
+django:
+  ALLOW_SAML_LOGIN: true
+  DEV_PHASE: dev
+  DOCKSTORE_APPS_BRANCH: 
+
+fetcherImage:
+  repository: wateim/url-fetch
+  tag: develop
+  pullPolicy: Always
+
+logLevel: "info"
+
+oauth:
+  OAUTH_PROVIDERS: ""
+
+saml:
+  AUTHORITY_URL: "https://sso.unc.edu/metadata/unc"
+  ASSERTION_URL: https://helx-dev.apps.renci.org
+  ENTITY_ID: "https://helx-dev.apps.renci.org/saml2_auth/acs/"
+  cache:
+     enabled: true
+     storageSize: "50M"
+     FETCH_INTERVAL: 3600000
+
+userStorage:
+  createPVC: false
+
+apps:
+  WEBTOP_PUID: "30000"
+  WEBTOP_PGID: "1136"
+  PGADMIN_LISTEN_PORT: "8080"
+
+tycho:
+  runAsUser: 30000
+  runAsGroup: 1136
+  fsGroup: 1136
+  initRunAsUser: 30000
+  initRunAsGroup: 1136
+  externalAppRegistryEnabled: true
+  externalAppRegistryRepo: "https://github.com/helxplatform/helx-apps/raw"
+  externalAppRegistryBranch: "helx-dev"
+
+global:
+  stdnfsPvc: helx-dev-projects-helx-users-pvc

@@ -1,0 +1,598 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "appstore.fullname" . }}
+  labels:
+    {{- include "appstore.labels" . | nindent 4 }}
+    {{- with .Values.networkPolicyLabels }}
+    {{ toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  strategy:
+    type: "{{ .Values.updateStrategy.type }}"
+  selector:
+    matchLabels:
+      {{- include "appstore.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+    {{- with .Values.podAnnotations }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- toYaml . | nindent 8 }}
+    {{- end }}
+      labels:
+        {{- include "appstore.selectorLabels" . | nindent 8 }}
+        {{- with .Values.networkPolicyLabels }}
+        {{ toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "appstore.fullname" . }}-sa
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+      {{- if .Values.postgresql.enabled }}
+      - name: wait-for-postgresql
+        image: "{{ .Values.imagePostgresql.repository }}:{{ .Values.imagePostgresql.tag }}"
+        imagePullPolicy: "{{ .Values.imagePostgresql.pullPolicy }}"
+        command:
+          - sh
+          - -c
+          {{- if .Values.fullnameOverride }}
+          - until pg_isready -h {{ include "appstore.fullname" . }}-postgresql -p 5432 -U postgres; do echo "waiting for postgresql"; sleep 5; done
+          {{- else }}
+          - until pg_isready -h {{ .Release.Name }}-postgresql -p 5432 -U postgres; do echo "waiting for postgresql"; sleep 5; done
+          {{- end }}
+      {{- end }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ['/bin/bash', '-c']
+        args: ["{{ .Values.appstoreEntrypointArgs }}"]
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        env:
+        {{- if .Values.graderApiUrl }}
+        - name: GRADER_API_URL
+          value: {{ .Values.graderApiUrl }}
+        {{- end }}
+        - name: GUNICORN_WORKERS
+          valueFrom:
+            configMapKeyRef:
+              key: GUNICORN_WORKERS
+              name: {{ include "appstore.fullname" . }}-env
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              key: LOG_LEVEL
+              name: {{ include "appstore.fullname" . }}-env
+        - name: USE_LOG_FILE
+          valueFrom:
+            configMapKeyRef:
+              key: USE_LOG_FILE
+              name: {{ include "appstore.fullname" . }}-env
+        - name: DEBUG
+          valueFrom:
+            configMapKeyRef:
+              key: DEBUG
+              name: {{ include "appstore.fullname" . }}-env
+        - name: DJANGO_SETTINGS_MODULE
+          valueFrom:
+            configMapKeyRef:
+              key: DJANGO_SETTINGS_MODULE
+              name: {{ include "appstore.fullname" . }}-env
+        - name: DJANGO_SESSION_IDLE_TIMEOUT
+          valueFrom:
+            configMapKeyRef:
+              key: DJANGO_SESSION_IDLE_TIMEOUT
+              name: {{ include "appstore.fullname" . }}-env
+        - name: ALLOW_DJANGO_LOGIN
+          valueFrom:
+            configMapKeyRef:
+              key: ALLOW_DJANGO_LOGIN
+              name: {{ include "appstore.fullname" . }}-env
+        - name: ALLOW_SAML_LOGIN
+          valueFrom:
+            configMapKeyRef:
+              key: ALLOW_SAML_LOGIN
+              name: {{ include "appstore.fullname" . }}-env
+        {{- if .Values.saml.AUTHORITY_URL }}
+        - name: SAML2_AUTH_ASSERTION_URL
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_AUTH_ASSERTION_URL
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SAML2_AUTH_ENTITY_ID
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_AUTH_ENTITY_ID
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_METADATA_SOURCE
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_METADATA_SOURCE
+              name: {{ include "appstore.fullname" . }}-env
+        {{- end }}
+        - name: OAUTH_DB_DIR
+          valueFrom:
+            configMapKeyRef:
+              key: OAUTH_DB_DIR
+              name: {{ include "appstore.fullname" . }}-env
+        - name: OAUTH_DB_FILE
+          valueFrom:
+            configMapKeyRef:
+              key: OAUTH_DB_FILE
+              name: {{ include "appstore.fullname" . }}-env
+        - name: ACCOUNT_DEFAULT_HTTP_PROTOCOL
+          valueFrom:
+            configMapKeyRef:
+              key: ACCOUNT_DEFAULT_HTTP_PROTOCOL
+              name: {{ include "appstore.fullname" . }}-env
+        - name: AUTO_WHITELIST_PATTERNS
+          valueFrom:
+            configMapKeyRef:
+              key: AUTO_WHITELIST_PATTERNS
+              name: {{ include "appstore.fullname" . }}-env
+        - name: PRODUCT_LINKS
+          valueFrom:
+            configMapKeyRef:
+              key: PRODUCT_LINKS
+              name: {{ include "appstore.fullname" . }}-env
+        - name: DEV_PHASE
+          valueFrom:
+            configMapKeyRef:
+              key: DEV_PHASE
+              name: {{ include "appstore.fullname" . }}-env
+        - name: BRAINI_PORT
+          valueFrom:
+            configMapKeyRef:
+              key: BRAINI_PORT
+              name: {{ include "appstore.fullname" . }}-env
+        - name: NRC_PORT
+          valueFrom:
+            configMapKeyRef:
+              key: NRC_PORT
+              name: {{ include "appstore.fullname" . }}-env
+        {{- if .Values.ldap.enabled }}
+        - name: LDAP_URI
+          valueFrom:
+            configMapKeyRef:
+              key: LDAP_URI
+              name: {{ include "appstore.fullname" . }}-env
+        - name: LDAP_GROUP_DN
+          valueFrom:
+            configMapKeyRef:
+              key: LDAP_GROUP_DN
+              name: {{ include "appstore.fullname" . }}-env
+        - name: LDAP_SEARCH_BASE
+          valueFrom:
+            configMapKeyRef:
+              key: LDAP_SEARCH_BASE
+              name: {{ include "appstore.fullname" . }}-env
+        {{- end }}
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              key: APPSTORE_SECRET_KEY
+              name: {{ include "appstore.fullname" . }}
+        - name: APPSTORE_DJANGO_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: APPSTORE_DJANGO_USERNAME
+              name: {{ include "appstore.fullname" . }}
+        - name: APPSTORE_DJANGO_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: APPSTORE_DJANGO_PASSWORD
+              name: {{ include "appstore.fullname" . }}
+        {{- if .Values.global.ambassador_id }}
+        - name: AMBASSADOR_ID
+          valueFrom:
+            secretKeyRef:
+              key: AMBASSADOR_ID
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        {{- if .Values.django.DOCKSTORE_APPS_BRANCH }}
+        - name: DOCKSTORE_APPS_BRANCH
+          valueFrom:
+            secretKeyRef:
+              key: DOCKSTORE_APPS_BRANCH
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        {{- if .Values.django.REMOVE_AUTHORIZED_USERS }}
+        - name: REMOVE_AUTHORIZED_USERS
+          valueFrom:
+            secretKeyRef:
+              key: REMOVE_AUTHORIZED_USERS
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        {{- if .Values.django.AUTHORIZED_USERS }}
+        - name: AUTHORIZED_USERS
+          valueFrom:
+            secretKeyRef:
+              key: AUTHORIZED_USERS
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        - name: CSRF_DOMAINS
+          valueFrom:
+            secretKeyRef:
+              key: CSRF_DOMAINS
+              name: {{ include "appstore.fullname" . }}
+        - name: OAUTH_PROVIDERS
+          valueFrom:
+            secretKeyRef:
+              key: OAUTH_PROVIDERS
+              name: {{ include "appstore.fullname" . }}
+        {{- if .Values.oauth.GITHUB_NAME }}
+        - name: GITHUB_NAME
+          valueFrom:
+            secretKeyRef:
+              key: GITHUB_NAME
+              name: {{ include "appstore.fullname" . }}
+        - name: GITHUB_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: GITHUB_CLIENT_ID
+              name: {{ include "appstore.fullname" . }}
+        - name: GITHUB_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: GITHUB_SECRET
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+
+        {{- if .Values.oauth.GOOGLE_NAME }}
+        - name: GOOGLE_NAME
+          valueFrom:
+            secretKeyRef:
+              key: GOOGLE_NAME
+              name: {{ include "appstore.fullname" . }}
+        - name: GOOGLE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: GOOGLE_CLIENT_ID
+              name: {{ include "appstore.fullname" . }}
+        - name: GOOGLE_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: GOOGLE_SECRET
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+
+        {{- if .Values.oauth.CILOGON_NAME }}
+        - name: CILOGON_NAME
+          valueFrom:
+            secretKeyRef:
+              key: CILOGON_NAME
+              name: {{ include "appstore.fullname" . }}
+        - name: CILOGON_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: CILOGON_CLIENT_ID
+              name: {{ include "appstore.fullname" . }}
+        - name: CILOGON_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: CILOGON_SECRET
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+
+        {{- if .Values.oauth.OIDC_NAME }}
+        - name: OIDC_NAME
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_NAME
+              name: {{ include "appstore.fullname" . }}
+        - name: OIDC_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_CLIENT_ID
+              name: {{ include "appstore.fullname" . }}
+        - name: OIDC_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_SECRET
+              name: {{ include "appstore.fullname" . }}
+        - name: OIDC_SERVER_URL
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_SERVER_URL
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+
+        {{- if .Values.irods.enabled }}
+        - name: BRAINI_RODS
+          valueFrom:
+            secretKeyRef:
+              key: BRAINI_RODS
+              name: {{ include "appstore.fullname" . }}
+        - name: NRC_MICROSCOPY_IRODS
+          valueFrom:
+            secretKeyRef:
+              key: NRC_MICROSCOPY_IRODS
+              name: {{ include "appstore.fullname" . }}
+        - name: RODS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: RODS_USERNAME
+              name: {{ include "appstore.fullname" . }}
+        - name: RODS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: RODS_PASSWORD
+              name: {{ include "appstore.fullname" . }}
+        - name: IROD_COLLECTIONS
+          valueFrom:
+            secretKeyRef:
+              key: IROD_COLLECTIONS
+              name: {{ include "appstore.fullname" . }}
+        - name: IROD_ZONE
+          valueFrom:
+            secretKeyRef:
+              key: IROD_ZONE
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        {{- if .Values.irodsUnbranded.enabled }}
+        - name: IROD_HOST
+          valueFrom:
+            secretKeyRef:
+              key: IROD_HOST
+              name: {{ include "appstore.fullname" . }}
+        - name: RODS_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: RODS_USERNAME
+              name: {{ include "appstore.fullname" . }}
+        - name: RODS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: RODS_PASSWORD
+              name: {{ include "appstore.fullname" . }}
+        - name: IROD_ZONE
+          valueFrom:
+            secretKeyRef:
+              key: IROD_ZONE
+              name: {{ include "appstore.fullname" . }}
+        - name: IROD_PORT
+          valueFrom:
+            secretKeyRef:
+              key: IROD_PORT
+              name: {{ include "appstore.fullname" . }}
+        - name: NFSRODS_HOST
+          valueFrom:
+            secretKeyRef:
+              key: NFSRODS_HOST
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        - name: EMAIL_HOST
+          valueFrom:
+            secretKeyRef:
+              key: EMAIL_HOST
+              name: {{ include "appstore.fullname" . }}
+        - name: EMAIL_PORT
+          valueFrom:
+            secretKeyRef:
+              key: EMAIL_PORT
+              name: {{ include "appstore.fullname" . }}
+        - name: EMAIL_USE_TLS
+          valueFrom:
+            secretKeyRef:
+              key: EMAIL_USE_TLS
+              name: {{ include "appstore.fullname" . }}
+        - name: EMAIL_HOST_USER
+          valueFrom:
+            secretKeyRef:
+              key: EMAIL_HOST_USER
+              name: {{ include "appstore.fullname" . }}
+        - name: EMAIL_HOST_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: EMAIL_HOST_PASSWORD
+              name: {{ include "appstore.fullname" . }}
+        - name: RECIPIENT_EMAILS
+          valueFrom:
+            secretKeyRef:
+              key: RECIPIENT_EMAILS
+              name: {{ include "appstore.fullname" . }}
+        {{- if .Values.postgresql.global.postgresql }}
+        - name: PG_DB_ENGINE
+          valueFrom:
+            secretKeyRef:
+              key: PG_DB_ENGINE
+              name: {{ include "appstore.fullname" . }}
+        - name: PG_DB_DATABASE
+          valueFrom:
+            secretKeyRef:
+              key: PG_DB_DATABASE
+              name: {{ include "appstore.fullname" . }}
+        - name: PG_DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: PG_DB_USERNAME
+              name: {{ include "appstore.fullname" . }}
+        {{- if .Values.postgresql.auth.existingSecret }}
+        - name: PG_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres-password
+              name: {{ .Values.postgresql.auth.existingSecret }}
+        {{- else }}
+        - name: PG_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: PG_DB_PASSWORD
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        - name: PG_DB_HOST
+          valueFrom:
+            secretKeyRef:
+              key: PG_DB_HOST
+              name: {{ include "appstore.fullname" . }}
+        - name: PG_DB_PORT
+          valueFrom:
+            secretKeyRef:
+              key: PG_DB_PORT
+              name: {{ include "appstore.fullname" . }}
+        {{- end }}
+        - name: POSTGRES_ENABLED
+          valueFrom:
+            secretKeyRef:
+              key: POSTGRES_ENABLED
+              name: {{ include "appstore.fullname" . }}
+        {{- range $key, $value := .Values.extraEnv }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        - name: IMAGE_DOWNLOAD_URL
+          valueFrom:
+            configMapKeyRef:
+              key: IMAGE_DOWNLOAD_URL
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SET_BUILD_ENV_FROM_FILE
+          valueFrom:
+            configMapKeyRef:
+              key: SET_BUILD_ENV_FROM_FILE
+              name: {{ include "appstore.fullname" . }}-env
+
+        # Tycho-launched app settings
+        - name: TYCHO_APP_INIT_MEMORY
+          valueFrom:
+            configMapKeyRef:
+              key: TYCHO_INIT_RESOURCES_MEMORY
+              name: {{ include "appstore.fullname" . }}-env
+        - name: TYCHO_APP_INIT_CPUS
+          valueFrom:
+            configMapKeyRef:
+              key: TYCHO_INIT_RESOURCES_CPUS
+              name: {{ include "appstore.fullname" . }}-env
+        - name: TYCHO_APP_GPU_RESOURCE_NAME
+          value: "{{- .Values.tycho.GPUResourceName }}"
+        - name: TYCHO_APP_RUN_AS_USER
+          value: "{{- .Values.tycho.runAsUser }}"
+        - name: TYCHO_APP_RUN_AS_GROUP
+          value: "{{- .Values.tycho.runAsGroup }}"
+        - name: TYCHO_APP_INIT_NOBODY_UID
+          value: "{{- .Values.tycho.initRunAsNobodyUser }}"
+        - name: TYCHO_APP_INIT_NOBODY_GID
+          value: "{{- .Values.tycho.initRunAsNobodyGroup }}"
+        - name: TYCHO_APP_FS_GROUP
+          value: "{{- .Values.tycho.fsGroup }}"
+        - name: EXTERNAL_TYCHO_APP_REGISTRY_ENABLED
+          value: "{{- .Values.tycho.externalAppRegistryEnabled }}"
+        - name: EXTERNAL_TYCHO_APP_REGISTRY_REPO
+          value: "{{- .Values.tycho.externalAppRegistryRepo }}"
+        - name: EXTERNAL_TYCHO_APP_REGISTRY_BRANCH
+          value: "{{ .Values.tycho.externalAppRegistryBranch | default (printf "v%s" .Chart.AppVersion) }}"
+        - name: EXTERNAL_TYCHO_APP_REGISTRY_APP_SPECS_DIR
+          value: "{{- .Values.tycho.externalAppRegistryAppSpecsDir }}"
+        - name: DOCKSTORE_APP_SPECS_DIR_URL
+          {{- if .Values.tycho.externalAppRegistryEnabled }}
+          value: "{{- .Values.tycho.externalAppRegistryRepo }}/{{ .Values.tycho.externalAppRegistryBranch | default (printf "v%s" .Chart.AppVersion) }}/{{- .Values.tycho.externalAppRegistryAppSpecsDir }}"
+          {{- else }}
+          value: "{{- .Values.tycho.externalAppRegistryRepo }}/{{- .Values.django.DOCKSTORE_APPS_BRANCH }}/{{- .Values.tycho.externalAppRegistryAppSpecsDir }}"
+          {{- end }}
+        - name: TYCHO_APP_INIT_IMAGE_REPOSITORY
+          value: "{{- .Values.tycho.initImageRepository }}"
+        - name: TYCHO_APP_INIT_IMAGE_TAG
+          value: "{{- .Values.tycho.initImageTag }}"
+        - name: INIT_SC_RUN_AS_USER
+          value: "{{- .Values.tycho.initRunAsUser }}"
+        - name: INIT_SC_RUN_AS_GROUP
+          value: "{{- .Values.tycho.initRunAsGroup }}"
+        - name: TYCHO_APP_ENABLE_INIT_CONTAINER
+          value: "{{- .Values.tycho.enableInitContainer }}"
+        - name: TYCHO_APP_ENABLE_TRASH_CLI
+          value: "{{- .Values.tycho.enableTrashCli }}"
+        - name: CREATE_HOME_DIRS
+          value: "{{- .Values.tycho.createHomeDirs }}"
+        - name: PARENT_DIR
+          value: "{{ .Values.tycho.parent_dir }}"
+        {{- if .Values.subpath_dir }}
+        - name: SUBPATH_DIR
+          value: "{{ .Values.tycho.subpath_dir }}"
+        {{- end }}
+        - name: SHARED_DIR
+          value: "{{ .Values.tycho.shared_dir }}"
+        - name: STDNFS_PVC
+          value: "{{ .Values.global.stdnfsPvc }}"
+        {{- if .Values.global.ambassador_service_name }}
+        - name: AMBASSADOR_SVC_NAME
+          value: {{ .Values.global.ambassador_service_name }}
+        {{- end }}
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+          {{- if not .Values.postgresql.enabled }}
+          - mountPath: /var/lib/sqlite3
+            name: appstore-sqlite-volume
+          {{- end }}
+          {{- if .Values.logsStorageAppstore.createPVC }}
+          - name: appstore-logs-volume
+            mountPath: /usr/src/inst-mgmt/log
+            subPath: log
+          {{- end}}
+          {{- if and .Values.saml.cache.claimName .Values.saml.cache.enabled }}
+          - name: saml-claim
+            mountPath: {{ .Values.saml.cache.APPSTORE_DIRECTORY }}
+          {{- end }}
+      {{- if .Values.saml.cache.enabled }}
+      - name: {{ .Chart.Name }}-saml-fetch
+        image: "{{ .Values.fetcherImage.repository }}:{{ .Values.fetcherImage.tag }}"
+        imagePullPolicy: {{ .Values.fetcherImage.pullPolicy }}
+        env:
+        - name: FETCH_URL
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_FETCH_URL
+              name: {{ include "appstore.fullname" . }}-env
+        - name: FETCH_FILE
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_FETCH_FILE
+              name: {{ include "appstore.fullname" . }}-env
+        - name: FETCH_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_FETCH_INTERVAL
+              name: {{ include "appstore.fullname" . }}-env
+        volumeMounts:
+        - name: saml-claim
+          mountPath: /data
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Always
+      volumes:
+      {{- if not .Values.postgresql.enabled }}
+        - name: appstore-sqlite-volume
+          persistentVolumeClaim:
+            {{- if .Values.sqliteStorage.claimName }}
+            claimName: {{ .Values.sqliteStorage.claimName }}
+            {{- else }}
+            claimName: appstore-sqlite-pvc
+            {{- end }}
+      {{- end }}
+      {{- if .Values.logsStorageAppstore.createPVC }}
+        - name: appstore-logs-volume
+          persistentVolumeClaim:
+            {{- if .Values.logsStorageAppstore.claimName }}
+            claimName: {{ .Values.logsStorageAppstore.claimName }}
+            {{- else }}
+            claimName: appstore-logs-pvc
+            {{- end }}
+      {{- end }}
+      {{- if and .Values.saml.cache.enabled .Values.saml.cache.claimName }}
+        - name: saml-claim
+          persistentVolumeClaim:
+            claimName: {{ .Values.saml.cache.claimName }}
+      {{- end }}
+      {{- if .Values.irodsUnbranded.enabled }}
+        - configMap:
+            name: appstore-nfsrods
+            items:
+              - key: iroduserdata
+                path: iroduserdata
+          name: irod-user-volume
+      {{- end }}

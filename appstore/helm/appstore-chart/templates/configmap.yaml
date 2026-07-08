@@ -1,0 +1,52 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+  name: {{ include "appstore.fullname" . }}-env
+data:
+  # /usr/src/inst-mgmt is default location if db is created in the container.
+  # OAUTH_DB_DIR: /usr/src/inst-mgmt
+  # /var/lib/sqlite3 is used for PVC mount point.
+  DJANGO_SETTINGS_MODULE: appstore.settings.{{ .Values.djangoSettings }}_settings
+  # Default is always "True" on the server. Change to "False" in prod.
+  DEBUG: "{{ .Values.debug }}"
+  LOG_LEVEL: "{{ upper .Values.logLevel }}"
+  USE_LOG_FILE: "{{ .Values.logsStorageAppstore.createPVC | toString }}"
+  OAUTH_DB_DIR: /var/lib/sqlite3
+  OAUTH_DB_FILE: DATABASE.sqlite3
+  ACCOUNT_DEFAULT_HTTP_PROTOCOL: "{{ .Values.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}"
+  AUTO_WHITELIST_PATTERNS: |
+    {{ toJson .Values.django.AUTO_WHITELIST_PATTERNS | nindent 4 }}
+  PRODUCT_LINKS: |
+    {{ toJson .Values.django.PRODUCT_LINKS | nindent 4 }}
+  DEV_PHASE: "{{ .Values.django.DEV_PHASE }}"
+  # Just adding these ports temporarily until they have a default value in the code.
+  BRAINI_PORT: "1247"
+  NRC_PORT: "1247"
+  ALLOW_DJANGO_LOGIN: "{{ .Values.django.ALLOW_DJANGO_LOGIN }}"
+  ALLOW_SAML_LOGIN: "{{ .Values.django.ALLOW_SAML_LOGIN }}"
+  IMAGE_DOWNLOAD_URL: "{{ .Values.django.IMAGE_DOWNLOAD_URL }}"
+  DJANGO_SESSION_IDLE_TIMEOUT: "{{ .Values.django.SESSION_IDLE_TIMEOUT }}"
+
+  # Tycho-launched app pod settings
+  TYCHO_INIT_RESOURCES_CPUS: "{{ .Values.tycho.init.resources.cpus }}"
+  TYCHO_INIT_RESOURCES_MEMORY: "{{ .Values.tycho.init.resources.memory }}"
+
+  {{- if .Values.saml.cache.enabled }}
+  SAML_METADATA_SOURCE: "{{ .Values.saml.cache.APPSTORE_DIRECTORY }}/{{ .Values.saml.cache.APPSTORE_FILE }}"
+  {{- else if .Values.saml.AUTHORITY_URL }}
+  SAML_METADATA_SOURCE: {{ .Values.saml.AUTHORITY_URL }}
+  {{- end }}
+  {{- if .Values.ldap.enabled }}
+  LDAP_URI: {{ .Values.ldap.uri }}
+  LDAP_GROUP_DN: {{ .Values.ldap.groupDN }}
+  LDAP_SEARCH_BASE: {{ .Values.ldap.searchBase }}
+  {{- end }}
+  SAML_FETCH_URL: "{{ .Values.saml.AUTHORITY_URL }}"
+  SAML_FETCH_FILE: "{{ .Values.saml.cache.FETCH_FILE }}"
+  SAML_FETCH_INTERVAL: "{{ .Values.saml.cache.FETCH_INTERVAL }}"
+  SAML_AUTH_ASSERTION_URL: "{{ .Values.saml.ASSERTION_URL }}"
+  SAML_AUTH_ENTITY_ID: "{{ .Values.saml.ENTITY_ID }}"
+  GUNICORN_WORKERS: "{{ .Values.gunicorn.workers }}"
+  SET_BUILD_ENV_FROM_FILE: "{{ .Values.SET_BUILD_ENV_FROM_FILE }}"
+

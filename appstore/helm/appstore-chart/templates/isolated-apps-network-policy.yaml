@@ -1,0 +1,62 @@
+{{- if .Values.security.isolatedApps }}
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: {{ include "appstore.fullname" . }}-default-deny-ingress
+spec:
+  podSelector:
+    matchLabels:
+      executor: tycho
+  policyTypes:
+  - Ingress
+  - Egress
+  # More permissive policy elsewhere in the namespace may override
+  # this ambassador-only restriction.
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ambassador
+  egress:
+  {{- if .Values.security.dnsPodSelector }}
+  # Allow DNS to pods matching the configured selector.
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          {{- toYaml .Values.security.dnsPodSelector | nindent 10 }}
+  {{- else }}
+  # Allow DNS on common ports to any destination. Used when no DNS pod
+  # selector is configured — works on most clusters without tuning.
+  - ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 5353
+    - protocol: TCP
+      port: 5353
+    - protocol: UDP
+      port: 1053
+    - protocol: TCP
+      port: 1053
+  {{- end }}
+  # Allow external (non-cluster) egress.
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+  {{- with .Values.security.appEgressAllowedPods }}
+  # Explicitly allowlisted in-cluster destinations.
+  - to:
+    {{- range . }}
+    - podSelector:
+        matchLabels:
+          {{- toYaml . | nindent 10 }}
+    {{- end }}
+  {{- end }}
+{{- end }}

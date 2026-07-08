@@ -1,0 +1,121 @@
+.modal-content-container {
+  padding: 1rem;
+  width: 100% !important;
+  max-height: 600px;
+  overflow-y:  auto;
+  scrollbar-width: thin; /* firefox only */
+  scrollbar-color: #00000022 transparent; /* firefox only */
+  transition: scrollbar-color 250ms; /* firefox only */
+}
+
+.ant-space {
+  width: 100%;
+}
+
+.concept-modal > .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.concept-modal > .ant-modal-content > .ant-modal-footer {
+  background: white;
+  z-index: 1;
+}
+
+.concept-modal .ant-modal-body > .ant-space {
+  /* Override the inline-flex */
+  display: flex;
+  align-items: stretch;
+  max-height: 60vh;
+}
+.concept-modal .ant-modal-body > .ant-space > .ant-space-item {
+  overflow: auto;
+}
+
+/* Space item container for concept-modal-tabs  */
+.concept-modal .ant-modal-body .ant-space .ant-space-item:first-child {
+  flex: none;
+}
+
+.concept-modal-tabs {
+  width: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.concept-modal-tabs .ant-menu-item {
+  display: inline-flex !important;
+  width: auto !important;
+  margin-top: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0;
+}
+.concept-modal-tabs .ant-menu-title-content {
+  flex: none !important;
+  overflow: visible !important;
+  width: 100%;
+}
+.concept-modal-tabs .ant-menu-title-content > .tab-menu-item-wrapper {
+  padding-left: 24px;
+  padding-right: 16px;
+}
+
+.concept-modal-body > .ant-space-item:nth-child(2) {
+  /* width: 100% !important; */
+  flex-grow: 1;
+}
+
+.previous-result-btn {
+  margin-top: 4px;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.45) !important;
+  transition: color 0.3s ease;
+}
+.previous-result-btn:hover {
+  color: inherit !important;
+}
+
+.study-variables-list {
+  font-size: 90% !important;
+}
+
+.study-variables-list-item {
+  margin-left: 4px;
+  padding-left: 1rem !important;
+  border-left:  2px solid #eee;
+  margin-bottom: 0.5rem;
+}
+
+.variable-name {
+  font-weight: 500;
+}
+
+.variable-description {
+  font-style: italic;
+}
+
+.tab-name {
+  display: none;
+}
+
+.concept-modal-failed-result .ant-result-icon {
+  margin-top: 16px;
+}
+.concept-modal-failed-result .ant-result-content {
+  /* Cancel out padding without cutting off component */
+  margin-bottom: -16px;
+}
+
+.explanation-score-progress {
+  display: inline-flex !important;
+  align-items: center;
+}
+.explanation-score-progress .ant-progress-outer {
+  display: inline-flex;
+}
+
+@media (min-width: 600px) {
+  .tab-name {
+    display: inline;
+  }
+}

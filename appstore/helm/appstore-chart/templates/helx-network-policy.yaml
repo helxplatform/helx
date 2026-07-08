@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-network-policy
+spec:
+  # Allow resty, ambassador, nginx, and appstore-socket pods to communicate
+  # with the appstore pod.
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: resty
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: ambassador
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: nginx
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: appstore-sockets
+  policyTypes:
+  - Ingress

@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ui.fullname" . }}-config
+  labels:
+    {{- include "ui.labels" . | nindent 4 }}
+data:
+  analytics_enabled: {{ .Values.config.analytics.enabled | quote }}
+  analytics_platform: {{ .Values.config.analytics.platform | quote }}
+  analytics_token: {{ .Values.config.analytics.token | quote }}
+  meta_title: {{ .Values.config.meta.title | quote }}
+  meta_description: {{ .Values.config.meta.description | quote }}
+  appstore_asset_base_url: {{ .Values.config.appstore_asset_base_url }}
+  appstore_asset_branch: {{ .Values.config.appstore_asset_branch }}
+  brand_name: {{ .Values.config.brand_name }}
+  hidden_result_tabs: {{ .Values.config.hidden_result_tabs | quote }}
+  search_enabled: {{ .Values.config.search.enabled | quote }}
+  search_url: '{{ .Values.config.search.url }}'
+  {{- if eq .Values.config.search.enabled "false" }}
+  search_tour_enabled: "false"
+  {{- else }}
+  search_tour_enabled: {{ .Values.config.search.tour_enabled | quote }}
+  {{- end }}
+  tranql_url: {{ .Values.config.tranql_url | quote }}
+  login_title: {{ .Values.config.login_title | quote }}
+  support_help_portal_url: {{ .Values.config.support.help_portal_url | quote }}
+  support_user_guide_url: {{ .Values.config.support.user_guide_url | quote }}
+  support_faqs_url: {{ .Values.config.support.faqs_url | quote }}
+  support_intro_video_url: {{ .Values.config.support.intro_video_url | quote }}
+  support_howto_video_url: {{ .Values.config.support.howto_video_url | quote }}
+  workspaces_enabled: {{ .Values.config.workspaces.enabled | quote }}
+  brand_desc.html: {{ .Values.config.brand_description.html | nindent 4 }}
+  {{- if and (eq .Values.config.workspaces.enabled "true") (eq .Values.config.search.enabled "false") }}
+  default_space: "workspaces"
+  {{- else if and (eq .Values.config.workspaces.enabled "false") (eq .Values.config.search.enabled "true") }}
+  default_space: "search"
+  {{- else if and (eq .Values.config.workspaces.enabled "true") (eq .Values.config.search.enabled "true") }}
+  default_space: {{ .Values.config.default_space | quote }}
+  {{- else }}
+  default_space: "support"
+  {{- end }}

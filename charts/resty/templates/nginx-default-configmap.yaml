@@ -25,11 +25,16 @@ data:
     # Override with resty.dnsResolver if your cluster DNS differs.
     resolver {{ .Values.dnsResolver | default "kube-dns.kube-system.svc.cluster.local" }} valid=10s ipv6=off;
 
-    {{- $appstore := printf "%s:8000" (.Values.global.appstore_service_name | default "appstore") }}
-    {{- $ui := printf "%s:80" (.Values.global.ui_service_name | default "helx-ui") }}
-    {{- $sockets := printf "%s:5555" (.Values.global.appstore_sockets_service_name | default "appstore-sockets-service") }}
     {{- $appsNamespace := .Values.global.apps_namespace | default .Release.Namespace }}
     {{- $dnsSuffix := .Values.global.cluster_dns_suffix | default "svc.cluster.local" }}
+    {{- /* Use FQDNs: any proxy_pass containing a variable (e.g. $request_uri)
+           resolves via the `resolver` directive, which does not apply the
+           pod's DNS search domains -- bare service names fail. Platform
+           services are assumed to live in the same namespace as launched apps. */}}
+    {{- $appstore := printf "%s.%s.%s:8000" (.Values.global.appstore_service_name | default "appstore") $appsNamespace $dnsSuffix }}
+    {{- $ui := printf "%s.%s.%s:80" (.Values.global.ui_service_name | default "helx-ui") $appsNamespace $dnsSuffix }}
+    {{- $sockets := printf "%s.%s.%s:5555" (.Values.global.appstore_sockets_service_name | default "appstore-sockets-service") $appsNamespace $dnsSuffix }}
+    {{- $airflow := printf "%s.%s.%s:8080" (.Values.global.airflow_service_name | default "airflow-webserver") $appsNamespace $dnsSuffix }}
 
     {{- if and (.Values.SSL) (not .Values.ingress.create) }}
     server {
@@ -124,17 +129,21 @@ data:
           end
 
           local h = res.header
-          local host    = h["X-Backend-Host"]
           local port    = h["X-Backend-Port"]
           local rewrite = h["X-Rewrite"] or ""
           local prefix  = h["X-Prefix"] or ""
 
-          if not host or not port then
-            ngx.log(ngx.ERR, "private resolve: missing backend host/port")
+          if not port then
+            ngx.log(ngx.ERR, "private resolve: missing backend port")
             ngx.exit(502)
           end
 
-          ngx.var.upstream = host .. ".{{ $appsNamespace }}.{{ $dnsSuffix }}:" .. port
+          -- The backend Service name is deterministic from the URL path:
+          -- {app}-{guid} (Tycho System.name = f"{app_id}-{identifier}").
+          -- Build it from the regex captures rather than trusting a
+          -- resolver-returned name, so it can't drift.
+          local svc = ngx.var.app .. "-" .. ngx.var.guid
+          ngx.var.upstream = svc .. ".{{ $appsNamespace }}.{{ $dnsSuffix }}:" .. port
 
           local uri = ngx.var.request_uri
           if rewrite ~= "" then
@@ -268,7 +277,7 @@ data:
         {{- end }}
         {{- end }}
         proxy_set_header Host $http_host;
-        proxy_pass http://{{ .Values.global.airflow_service_name | default "airflow-webserver" }}:8080$request_uri;
+        proxy_pass http://{{ $airflow }}$request_uri;
         proxy_pass_request_headers  on;
       }
 

@@ -290,6 +290,49 @@ PRIVATE_URI_RE = re.compile(
     r"^/private/(?P<app>[^/]+)/(?P<user>[^/]+)/(?P<guid>[^/]+)(?:/(?P<rest>.*))?$"
 )
 
+_core_v1_api = None
+_pod_namespace = None
+
+
+def _current_namespace():
+    """Namespace this appstore pod (and its launched apps) run in."""
+    global _pod_namespace
+    if _pod_namespace is None:
+        try:
+            with open("/var/run/secrets/kubernetes.io/serviceaccount/namespace") as f:
+                _pod_namespace = f.read().strip()
+        except Exception:
+            _pod_namespace = os.environ.get("POD_NAMESPACE", "default")
+    return _pod_namespace
+
+
+def k8s_service_port(service_name):
+    """Return the live first port of a launched app's k8s Service, or None.
+
+    This is the authoritative backend port -- the value Tycho actually
+    deployed (derived from the app's compose spec). Preferred over the
+    registry 'services' value, which can be stale/incorrect.
+    """
+    global _core_v1_api
+    try:
+        if _core_v1_api is None:
+            from kubernetes import client, config
+            try:
+                config.load_incluster_config()
+            except Exception:
+                config.load_kube_config()
+            _core_v1_api = client.CoreV1Api()
+        svc = _core_v1_api.read_namespaced_service(
+            name=service_name, namespace=_current_namespace()
+        )
+        if svc.spec.ports:
+            return svc.spec.ports[0].port
+    except Exception as e:
+        logger.warning(
+            f"private_route: k8s port lookup failed for {service_name}: {e}"
+        )
+    return None
+
 
 @login_required
 def private_route(request):
@@ -347,13 +390,22 @@ def private_route(request):
         # Either not owned by this user, or not scheduled yet.
         return HttpResponse("App service not ready.", status=404)
 
-    # Registry metadata drives port + rewrite (mirrors tycho context.start).
     app_name = instance.app_id.replace(f"-{guid}", "")
     app_reg = tycho.apps.get(app_name, {}) or {}
-    services = app_reg.get("services", {}) or {}
-    port = services.get(app_name) or next(iter(services.values()), None)
+
+    # The backend port must be the LIVE Service port Tycho deployed (it
+    # derives system_port from the app's compose spec). The registry
+    # 'services' value is NOT reliable -- e.g. filebrowser is registered as
+    # 8888 but the container/Service actually listens on 8080 -- and Tycho's
+    # status returns a stub port in proxied mode. So read the Service itself;
+    # fall back to the registry only if that lookup fails.
+    service_name = instance.name  # {app}-{guid}: the real k8s Service name
+    port = k8s_service_port(service_name)
     if not port:
-        logger.error(f"private_route: no registry port for app {app_name}")
+        services = app_reg.get("services", {}) or {}
+        port = services.get(app_name) or next(iter(services.values()), None)
+    if not port:
+        logger.error(f"private_route: no port for {service_name} (app {app_name})")
         return HttpResponse("App has no routable port.", status=502)
 
     conn_string = app_reg.get("conn_string", "") or ""
@@ -373,9 +425,9 @@ def private_route(request):
     response["REMOTE_USER"] = username
     # Same access token the existing /auth endpoint hands back to the proxy.
     response["ACCESS_TOKEN"] = get_access_token(request)
-    # {app_name}-{guid} is exactly the launched app's k8s Service name
-    # (tycho System.name = f"{name}-{identifier}").
-    response["X-Backend-Host"] = instance.app_id
+    # instance.name is the launched app's k8s Service name ({app}-{guid},
+    # tycho System.name = f"{name}-{identifier}").
+    response["X-Backend-Host"] = service_name
     response["X-Backend-Port"] = str(port)
     response["X-Rewrite"] = rewrite_target
     response["X-Prefix"] = prefix

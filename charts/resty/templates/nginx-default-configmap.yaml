@@ -112,6 +112,7 @@ data:
 
         set $upstream '';
         set $upstream_uri '';
+        set $location_prefix '';
 
         {{- if .Values.DEV_PHASE.dev }}
         # dev: appstore/tycho run locally, no in-cluster resolution.
@@ -147,6 +148,10 @@ data:
 
           local uri = ngx.var.request_uri
           if rewrite ~= "" then
+            -- Stripped apps (rstudio, webtop, cloudbeaver, ...) think they
+            -- live at "/", so their 3xx Location headers are root-relative.
+            -- Remember the prefix so header_filter_by_lua can re-add it.
+            ngx.var.location_prefix = prefix:gsub("/$", "")
             -- Strip the app prefix and serve under the rewrite target
             -- (e.g. rstudio's proxy-rewrite target "/"). Tolerate a
             -- missing trailing slash on the matched prefix.
@@ -194,6 +199,26 @@ data:
         proxy_buffering off;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $http_connection;
+
+        # For stripped apps, re-add the /private/{app}/{user}/{guid} prefix to
+        # redirect Location headers (the app emits root-relative/same-host
+        # redirects because it thinks it lives at "/"). This is what Ambassador
+        # + the old nginx did via X-Original-Path.
+        header_filter_by_lua_block {
+          local lp = ngx.var.location_prefix
+          if lp ~= "" and ngx.status >= 300 and ngx.status < 400 then
+            local loc = ngx.header["Location"]
+            if loc and loc ~= "" then
+              -- drop scheme://host from same-origin absolute URLs
+              local path = loc:gsub("^https?://[^/]+", "")
+              -- only rewrite root-relative paths not already under the prefix
+              if path:sub(1, 1) == "/" and path:sub(1, 2) ~= "//"
+                 and path:sub(1, #lp) ~= lp then
+                ngx.header["Location"] = lp .. path
+              end
+            end
+          end
+        }
       }
 
       # ---- internal resolver subrequest -> appstore control plane ----

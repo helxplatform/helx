@@ -92,13 +92,13 @@ moving every routing *decision* into appstore.
 - Registry rebased onto the cut-down **edu720-azure** base + a `helx` context
   (appstore `product=helx` **requires** a matching context or `_grok` raises
   `ContextException`). Later migrated wholesale from **cddp-staging** (known-good
-  images) and the desktop family + cloudbeaver re-added.
+  images) and the desktop family re-added.
 - Per-app `securityContext: {runAsUser: 30000}` for **jupyter** and **rstudio**
   (see §6).
 - Per-app rewrite (see §5).
 
-Relevant commits: `456c3f0` (cddp-staging migrate), `9816c82` (desktops+cloudbeaver),
-`9d03a72` (jupyter revert + uid), `61656db` (rstudio uid), `827e7e3` (cloudbeaver preserve).
+Relevant commits: `456c3f0` (cddp-staging migrate), `9816c82` (desktops),
+`9d03a72` (jupyter revert + uid), `61656db` (rstudio uid).
 
 ## 5. Per-app routing model
 
@@ -118,7 +118,6 @@ resolver + resty (exactly as Ambassador used them):
 | rstudio-server | 8787 | strip → `/` | redirects (needs `Location` rewrite); session events channel |
 | webtop / -octave / -image-apps | 3000 | strip → `/` | KasmVNC desktops; socket.io |
 | slicer | 6901 | strip → `/` | KasmVNC desktop |
-| cloudbeaver | 8978 | preserve | prefix-aware for static; **API/WS servlets not yet** (see §8) |
 
 ## 6. Assumptions
 
@@ -152,7 +151,6 @@ resolver + resty (exactly as Ambassador used them):
   session/CSRF context broke (`400 "CSRF token is missing"`). Fix: forward them.
 - **rstudio off-app redirect** — a stripped app's root-relative `302` sent the
   browser to the site root. Fix: rewrite redirect `Location` headers.
-- **cloudbeaver 404** — assumed strip; it is prefix-aware. Fix: preserve.
 
 ## 8. Validation (live, `helx-internal`, product=helx)
 
@@ -166,17 +164,6 @@ Control plane: resolver + ownership check + CSRF + dynamic proxy: **✅**.
 | slicer | ✅ (routing) | strip |
 | rstudio-server | ✅ | strip + redirect-rewrite + R-session events; needed uid 30000 |
 | jupyter-helx-notebook | ✅ | preserve + kernel APIs; needed uid 30000 |
-| cloudbeaver | ⚠️ UI loads; API/WS 405/404 | app-config (see below) — **not routing** |
-
-### cloudbeaver open item
-resty correctly forwards the full `/private/cloudbeaver/…/` path (UI static loads
-200). But cloudbeaver's **GraphQL (`/api/gql`) and WebSocket (`/api/ws`) servlets
-are not mounted under the dynamic prefix** — `POST /private/…/api/gql` hits
-Jetty's static handler → `405 "POST not supported by this URL"`; root `/api/gql`
-→ 404. cloudbeaver's `rootURI`/`serverURL` must place the API + WS servlets under
-the same `NB_PREFIX`-derived base as the static content. This is a cloudbeaver
-image/config task (in development), not a routing change. **TODO: inspect the
-image config / source for the servlet base-path knob.**
 
 ## 9. Environmental issues surfaced (NOT routing / not this work)
 
@@ -205,15 +192,14 @@ Cluster access: `ks` = `kubectl --kubeconfig=/Users/jseals/.kube/sterling` (OIDC
 
 ## 11. Remaining work
 
-1. **cloudbeaver** API/WS servlet base-path (image/config).
-2. Fold the resty config + values into the deployed `helx` chart (so `helm upgrade`
+1. Fold the resty config + values into the deployed `helx` chart (so `helm upgrade`
    stops reverting the live patch); set `global.*_service_name` / `apps_namespace`.
-3. Flip `APP_ROUTING_MODE=proxy` (stop emitting the now-unused Ambassador
+2. Flip `APP_ROUTING_MODE=proxy` (stop emitting the now-unused Ambassador
    annotation), then scale down / remove the `helx-ambassador` deployment + service.
-4. Rebuild appstore from branch tip so all fixes are in the image (no live `cp`).
-5. Verify helx-ui's positional URL parsing (`split("/")[6]`, `parts.length-2`)
+3. Rebuild appstore from branch tip so all fixes are in the image (no live `cp`).
+4. Verify helx-ui's positional URL parsing (`split("/")[6]`, `parts.length-2`)
    against the unchanged `/private/…` scheme.
-6. (Optional) fold `appstore-sockets` into appstore if pursuing full consolidation
+5. (Optional) fold `appstore-sockets` into appstore if pursuing full consolidation
    (requires ASGI/Channels).
 
 ## 12. Branch index

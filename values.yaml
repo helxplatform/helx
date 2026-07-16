@@ -1,23 +1,23 @@
 # Parent chart for HeLx.
 
 # --------------------------------------------------------------------------
-# Removing Ambassador (route launched apps via appstore + resty instead):
-#   ambassador.enabled: false
-#   resty.enabled: true                    # de-Ambassador resty config (data plane)
-#   appstore.tycho.appRoutingMode: proxy   # appstore becomes the routing control plane
+# De-Ambassador configuration (this branch's target state):
+#   Ambassador is removed; resty is the edge/data plane (it replaces nginx,
+#   which is being retired entirely); appstore is the routing control plane.
+#   To fall back to the legacy Ambassador path: ambassador.enabled=true,
+#   nginx.enabled=true, resty.enabled=false, appstore.tycho.appRoutingMode=ambassador.
 # See the appstore repo: spec/ambassador-removal.md (§11 enablement runbook).
 # --------------------------------------------------------------------------
 ambassador:
-  # -- enable/disable deployment of Ambassador
-  enabled: true
+  # -- enable/disable deployment of Ambassador (retired in the de-Ambassador design)
+  enabled: false
 appstore:
   # -- enable/disable deployment of appstore
   enabled: true
   tycho:
-    # -- routing data plane for Tycho-launched apps: "ambassador" (default,
-    # legacy) or "proxy" (ClusterIP + /private, resolved by appstore via resty).
-    # Set to "proxy" when ambassador.enabled=false and resty.enabled=true.
-    appRoutingMode: ambassador
+    # -- routing data plane for Tycho-launched apps: "proxy" (ClusterIP +
+    # /private, resolved by appstore via resty) or "ambassador" (legacy).
+    appRoutingMode: proxy
 backup-pvc-cronjob:
   # -- enable/disable deployment of backup-pvc-cronjob
   enabled: false
@@ -36,14 +36,14 @@ nfsrods:
   # -- enable/disable deployment of nfsrods
   enabled: false
 nginx:
-  # -- enable/disable deployment of nginx
-  enabled: true
+  # -- enable/disable deployment of nginx (retired; replaced by resty)
+  enabled: false
 pod-reaper:
   # -- enable/disable deployment of pod-reaper
   enabled: true
 resty:
-  # -- enable/disable deployment of nginx
-  enabled: false
+  # -- enable/disable deployment of resty (the edge/data plane; replaces nginx)
+  enabled: true
 search:
   # -- enable/disable deployment of search
   enabled: false

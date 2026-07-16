@@ -299,6 +299,12 @@ extraEnv: {}
 useSparkServiceAccount: false
 
 tycho:
+  # -- How Tycho-launched apps are routed. "ambassador" (default, legacy):
+  # emit the Ambassador Mapping annotation when Ambassador is present.
+  # "proxy": ClusterIP + /private prefix, backend resolved by an external
+  # reverse proxy (resty) via appstore's /api/v1/private-route/ resolver — set
+  # this (and disable Ambassador) to remove Ambassador. "none": no routing wiring.
+  appRoutingMode: ambassador
   # -- Application processes launched will run as this user.
   runAsUser: 0
   # -- Application processes launched will have this group permissions.

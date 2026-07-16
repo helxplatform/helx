@@ -190,7 +190,50 @@ would revert them until folded into the chart:
 
 Cluster access: `ks` = `kubectl --kubeconfig=/Users/jseals/.kube/sterling` (OIDC).
 
-## 11. Remaining work
+## 11. How to invoke the change (enablement)
+
+The switch is driven by **`APP_ROUTING_MODE`** (appstore/Tycho env) plus swapping the
+data plane from Ambassador to the de-Ambassador resty config. Three modes:
+
+| `APP_ROUTING_MODE` | Tycho emits | Data plane | Use |
+|---|---|---|---|
+| `ambassador` (default) | Service with `getambassador.io/config` annotation | Ambassador `:80` | legacy / unchanged |
+| `proxy` | ClusterIP Service + `/private` prefix, `NB_PREFIX`/`FB_BASEURL` injected, **no** annotation | resty resolver → appstore | **this change** |
+| `none` | plain ClusterIP, no routing wiring | — | apps unreachable (debug) |
+
+**To enable (target: clean chart deploy):**
+
+1. **appstore** — deploy an image built from `prototype/remove-ambassador` (must
+   include the `private_route` resolver **and** `SECURE_PROXY_SSL_HEADER`), and set on
+   the appstore/tycho deployment:
+   - `APP_ROUTING_MODE=proxy`
+   - `EXTERNAL_TYCHO_APP_REGISTRY_BRANCH=ambassador_removal` (or your registry with the
+     per-app `proxy-rewrite` + `securityContext` from §5/§6).
+2. **resty** — deploy the `prototype/remove-ambassador` chart so the ConfigMap carries
+   the de-Ambassador `nginx-default-configmap.yaml`, and set the values it needs:
+   `dnsResolver`, `global.{appstore,ui,appstore_sockets,airflow}_service_name`,
+   `apps_namespace`, `cluster_dns_suffix`.
+3. **Ambassador** — once `proxy` is confirmed, scale down / remove the
+   `helx-ambassador` deployment + service. Nothing references it anymore (resty no
+   longer proxies to `ambassador:80`; Tycho no longer stamps the annotation).
+
+**What happens at request time** (`APP_ROUTING_MODE=proxy`): a hit to
+`/private/{app}/{user}/{guid}/…` triggers resty `access_by_lua` → subrequest to
+appstore `/api/v1/private-route/` → appstore verifies ownership and returns the backend
+host/port + rewrite + `REMOTE_USER`/`ACCESS_TOKEN` → resty proxies to
+`{app}-{guid}.<apps_namespace>.svc.<cluster_dns_suffix>:<live-port>`. No Ambassador in
+the path.
+
+**Rollback:** set `APP_ROUTING_MODE=ambassador` and restore the stock resty ConfigMap;
+newly launched apps get the annotation again and route through Ambassador. (Already
+running apps keep whatever wiring they launched with until relaunched.)
+
+The current `helx-internal` deployment (§10) is a **partial** enablement: resty is
+already de-Ambassadored, but `APP_ROUTING_MODE` is left at `ambassador` (apps are
+ClusterIP with the real port, and resty simply doesn't route to Ambassador). Flipping
+to `proxy` is step 1 above.
+
+## 12. Remaining work
 
 1. Fold the resty config + values into the deployed `helx` chart (so `helm upgrade`
    stops reverting the live patch); set `global.*_service_name` / `apps_namespace`.
@@ -202,7 +245,7 @@ Cluster access: `ks` = `kubectl --kubeconfig=/Users/jseals/.kube/sterling` (OIDC
 5. (Optional) fold `appstore-sockets` into appstore if pursuing full consolidation
    (requires ASGI/Channels).
 
-## 12. Branch index
+## 13. Branch index
 
 | Repo | Branch |
 |---|---|

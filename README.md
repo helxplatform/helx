@@ -68,11 +68,11 @@ You can view the README.md files for each subchart to see the variables that exi
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| ambassador | object | `{"enabled":true}` | ------------------------------------------------------------------------ |
-| ambassador.enabled | bool | `true` | enable/disable deployment of Ambassador |
+| ambassador | object | `{"enabled":false}` | ------------------------------------------------------------------------ |
+| ambassador.enabled | bool | `false` | enable/disable deployment of Ambassador (retired in the de-Ambassador design) |
 | appstore-sockets.enabled | bool | `true` | enable/disable deployment of appstore websockets service |
 | appstore.enabled | bool | `true` | enable/disable deployment of appstore |
-| appstore.tycho.appRoutingMode | string | `"ambassador"` | routing data plane for Tycho-launched apps: "ambassador" (default, legacy) or "proxy" (ClusterIP + /private, resolved by appstore via resty). Set to "proxy" when ambassador.enabled=false and resty.enabled=true. |
+| appstore.tycho.appRoutingMode | string | `"proxy"` | routing data plane for Tycho-launched apps: "proxy" (ClusterIP + /private, resolved by appstore via resty) or "ambassador" (legacy). |
 | backup-pvc-cronjob.enabled | bool | `false` | enable/disable deployment of backup-pvc-cronjob |
 | global.ambassador_service_name | string | `"ambassador"` |  |
 | global.redis.existingSecret | string | `"redis-secret"` |  |
@@ -83,9 +83,9 @@ You can view the README.md files for each subchart to see the variables that exi
 | monitoring.enabled | bool | `false` | enable/disable deployment of monitoring (kube-prometheus-stack, cost-analyzer, etc.) |
 | nfs-server.enabled | bool | `false` | enable/disable deployment of nfs-server |
 | nfsrods.enabled | bool | `false` | enable/disable deployment of nfsrods |
-| nginx.enabled | bool | `true` | enable/disable deployment of nginx |
+| nginx.enabled | bool | `false` | enable/disable deployment of nginx (retired; replaced by resty) |
 | pod-reaper.enabled | bool | `true` | enable/disable deployment of pod-reaper |
-| resty.enabled | bool | `false` | enable/disable deployment of nginx |
+| resty.enabled | bool | `true` | enable/disable deployment of resty (the edge/data plane; replaces nginx) |
 | search.enabled | bool | `false` | enable/disable deployment of search |
 | ui.enabled | bool | `true` | enable/disable deployment of helx-ui |
 

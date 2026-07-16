@@ -68,9 +68,11 @@ You can view the README.md files for each subchart to see the variables that exi
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| ambassador | object | `{"enabled":true}` | ------------------------------------------------------------------------ |
 | ambassador.enabled | bool | `true` | enable/disable deployment of Ambassador |
 | appstore-sockets.enabled | bool | `true` | enable/disable deployment of appstore websockets service |
 | appstore.enabled | bool | `true` | enable/disable deployment of appstore |
+| appstore.tycho.appRoutingMode | string | `"ambassador"` | routing data plane for Tycho-launched apps: "ambassador" (default, legacy) or "proxy" (ClusterIP + /private, resolved by appstore via resty). Set to "proxy" when ambassador.enabled=false and resty.enabled=true. |
 | backup-pvc-cronjob.enabled | bool | `false` | enable/disable deployment of backup-pvc-cronjob |
 | global.ambassador_service_name | string | `"ambassador"` |  |
 | global.redis.existingSecret | string | `"redis-secret"` |  |

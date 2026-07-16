@@ -1,11 +1,23 @@
 # Parent chart for HeLx.
 
+# --------------------------------------------------------------------------
+# Removing Ambassador (route launched apps via appstore + resty instead):
+#   ambassador.enabled: false
+#   resty.enabled: true                    # de-Ambassador resty config (data plane)
+#   appstore.tycho.appRoutingMode: proxy   # appstore becomes the routing control plane
+# See the appstore repo: spec/ambassador-removal.md (§11 enablement runbook).
+# --------------------------------------------------------------------------
 ambassador:
   # -- enable/disable deployment of Ambassador
   enabled: true
 appstore:
   # -- enable/disable deployment of appstore
   enabled: true
+  tycho:
+    # -- routing data plane for Tycho-launched apps: "ambassador" (default,
+    # legacy) or "proxy" (ClusterIP + /private, resolved by appstore via resty).
+    # Set to "proxy" when ambassador.enabled=false and resty.enabled=true.
+    appRoutingMode: ambassador
 backup-pvc-cronjob:
   # -- enable/disable deployment of backup-pvc-cronjob
   enabled: false

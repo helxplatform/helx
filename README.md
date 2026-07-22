@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 5.1.2](https://img.shields.io/badge/Version-5.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.4.2](https://img.shields.io/badge/AppVersion-4.4.2-informational?style=flat-square)
+![Version: 5.1.3](https://img.shields.io/badge/Version-5.1.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.4.1](https://img.shields.io/badge/AppVersion-4.4.1-informational?style=flat-square)
 
 ## CI/CD
 
@@ -154,6 +154,7 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | sqliteStorage.claimName | string | `nil` | If a claim name is not specified, it defaults to appstore-oauth-pvc. |
 | tolerations | list | `[]` |  |
 | tycho.GPUResourceName | string | `"nvidia.com/gpu"` | The GPU resource name that a container can utilize.  Typically this is "nvidia.com/gpu", but other types exist, such as "nvidia.com/mig-1g.5gb" and other manufacturers have their own types. |
+| tycho.appRoutingMode | string | `"proxy"` | How Tycho-launched apps are routed. "proxy" (default on this branch): ClusterIP + /private prefix, backend resolved by an external reverse proxy (resty) via appstore's /api/v1/private-route/ resolver — the de-Ambassador design. "ambassador" (legacy): emit the Ambassador Mapping annotation when Ambassador is present. "none": no routing wiring. |
 | tycho.createHomeDirs | bool | `true` | Create Home and shared directories for users. |
 | tycho.enableInitContainer | bool | `true` | Start the init container to take care of any needed tasks before the main container is started.  This can be to create certain directories or set file permissions. |
 | tycho.enableTrashCli | bool | `false` | Enable trash-cli functionality in tycho-launched apps |

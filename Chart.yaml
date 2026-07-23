@@ -12,10 +12,12 @@ description: A Helm chart for Kubernetes
 type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
-version: 5.1.2
+version: 5.1.3
 # This is the version number of the application being deployed. This version
 # number should be incremented each time you make changes to the application.
-appVersion: 4.4.2
+# 4.4.1 is the released appstore image carrying the Ambassador-removal changes
+# (private_route resolver, APP_ROUTING_MODE, SECURE_PROXY_SSL_HEADER).
+appVersion: 4.4.1
 dependencies:
   - name: postgresql
     condition: postgresql.enabled

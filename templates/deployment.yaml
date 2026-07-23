@@ -519,6 +519,8 @@ spec:
         - name: AMBASSADOR_SVC_NAME
           value: {{ .Values.global.ambassador_service_name }}
         {{- end }}
+        - name: APP_ROUTING_MODE
+          value: "{{ .Values.tycho.appRoutingMode }}"
         ports:
         - containerPort: 8000
         volumeMounts:

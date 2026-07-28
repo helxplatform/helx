@@ -10,13 +10,14 @@ spec:
   policyTypes:
   - Ingress
   - Egress
-  # More permissive policy elsewhere in the namespace may override
-  # this ambassador-only restriction.
+  # Allow ingress to launched apps only from resty (the reverse proxy that
+  # serves /private in the de-Ambassador design). A more permissive policy
+  # elsewhere in the namespace may override this restriction.
   ingress:
   - from:
     - podSelector:
         matchLabels:
-          app.kubernetes.io/name: ambassador
+          app.kubernetes.io/name: resty
   egress:
   {{- if .Values.security.dnsPodSelector }}
   # Allow DNS to pods matching the configured selector.

@@ -13,12 +13,19 @@ A Helm chart for Kubernetes
 | basicAuth | object | `{"enabled":false,"password":"defaultPassword","username":"defaultUser"}` | Creates a basicAuth scheme preventing un-authenticated access to the whole site. |
 | basicAuth.password | string | `"defaultPassword"` | Password, make sure to override. |
 | basicAuth.username | string | `"defaultUser"` | Username , make sure to override. |
+| dnsResolver | string | `"kube-dns.kube-system.svc.cluster.local"` | PROTOTYPE (ambassador removal): cluster DNS used to re-resolve the dynamic /private/ upstreams at request time. Must point at your cluster DNS (CoreDNS/kube-dns). Some nginx builds require an IP here rather than a name -- set the CoreDNS service ClusterIP if the hostname form fails. |
 | external_http_host | bool | `false` | If using an external http proxy host set this to true and specify serverName.  Used for TACC. |
 | fullnameOverride | string | `""` |  |
+| global.airflow_service_name | string | `"airflow-webserver"` |  |
 | global.ambassador_service_name | string | `"ambassador"` |  |
+| global.apps_namespace | string | `""` | Namespace where Tycho launches app pods (for /private DNS names). Defaults to the release namespace when empty. |
+| global.appstore_service_name | string | `"appstore"` | PROTOTYPE (ambassador removal): direct backend service names that were previously reached only through the "ambassador" service. Set these to match your appstore / ui / sockets Service names. |
+| global.appstore_sockets_service_name | string | `"appstore-sockets-service"` |  |
+| global.cluster_dns_suffix | string | `"svc.cluster.local"` |  |
 | global.dug_search_client_service_name | string | `"dug-search-client"` |  |
 | global.dug_web_service_name | string | `"dug-web"` |  |
 | global.restartr_api_service_name | string | `"restartr-api-service"` |  |
+| global.ui_service_name | string | `"helx-ui"` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"bitnami/openresty"` |  |
 | image.tag | float | `1.21` | Overrides the image tag whose default is the chart appVersion. |

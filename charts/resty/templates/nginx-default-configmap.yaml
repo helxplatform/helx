@@ -31,8 +31,14 @@ data:
            resolves via the `resolver` directive, which does not apply the
            pod's DNS search domains -- bare service names fail. Platform
            services are assumed to live in the same namespace as launched apps. */}}
-    {{- $appstore := printf "%s.%s.%s:8000" (.Values.global.appstore_service_name | default "appstore") $appsNamespace $dnsSuffix }}
-    {{- $ui := printf "%s.%s.%s:80" (.Values.global.ui_service_name | default "helx-ui") $appsNamespace $dnsSuffix }}
+    {{- /* Default the appstore/ui Service names to the bare chart name when
+           resty is the root chart (deployed on its own), or "<release>-<name>"
+           when it is a subchart of the umbrella (Helm prefixes subchart Service
+           names with the release name). Override via global.*_service_name. */}}
+    {{- $appstoreDefault := ternary "appstore" (printf "%s-appstore" .Release.Name) .Chart.IsRoot }}
+    {{- $uiDefault := ternary "ui" (printf "%s-ui" .Release.Name) .Chart.IsRoot }}
+    {{- $appstore := printf "%s.%s.%s:8000" (.Values.global.appstore_service_name | default $appstoreDefault) $appsNamespace $dnsSuffix }}
+    {{- $ui := printf "%s.%s.%s:80" (.Values.global.ui_service_name | default $uiDefault) $appsNamespace $dnsSuffix }}
     {{- $sockets := printf "%s.%s.%s:5555" (.Values.global.appstore_sockets_service_name | default "appstore-sockets-service") $appsNamespace $dnsSuffix }}
     {{- $airflow := printf "%s.%s.%s:8080" (.Values.global.airflow_service_name | default "airflow-webserver") $appsNamespace $dnsSuffix }}
 

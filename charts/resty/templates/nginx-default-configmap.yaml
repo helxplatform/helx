@@ -322,6 +322,25 @@ data:
         proxy_pass_request_headers  on;
       }
 
+      {{- if .Values.artifactCache.enabled }}
+      # ---- artifact-cache (replaces the ambassador Mapping: prefix /artifact/
+      #      -> artifact-cache:8080). Used by air-gapped envs to serve the
+      #      helx-apps registry/specs (and browser-side app assets) in-cluster.
+      #      The trailing slash on proxy_pass strips the /artifact/ prefix, so
+      #      /artifact/assets/... reaches the cache as /assets/... (Ambassador's
+      #      default rewrite). Set artifactCache.authenticate=true to gate it. ----
+      location /artifact/ {
+        proxy_http_version 1.1;
+        {{- if .Values.artifactCache.authenticate }}
+        auth_request /auth;
+        auth_request_set $remoteUser $upstream_http_remote_user;
+        proxy_set_header REMOTE_USER $remoteUser;
+        {{- end }}
+        proxy_set_header Host $http_host;
+        proxy_pass http://{{ .Values.artifactCache.serviceName }}.{{ $appsNamespace }}.{{ $dnsSuffix }}:{{ .Values.artifactCache.port }}/;
+      }
+      {{- end }}
+
       {{- if .Values.stubStatus.enabled }}
       location {{ .Values.stubStatus.stubStatusLocation }} {
         stub_status;

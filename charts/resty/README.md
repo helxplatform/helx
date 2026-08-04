@@ -1,6 +1,6 @@
 # resty
 
-![Version: 1.0.4](https://img.shields.io/badge/Version-1.0.4-informational?style=flat-square) ![AppVersion: 2.0.1](https://img.shields.io/badge/AppVersion-2.0.1-informational?style=flat-square)
+![Version: 1.0.5](https://img.shields.io/badge/Version-1.0.5-informational?style=flat-square) ![AppVersion: 2.0.1](https://img.shields.io/badge/AppVersion-2.0.1-informational?style=flat-square)
 
 A Helm chart for Kubernetes
 
@@ -10,6 +10,7 @@ A Helm chart for Kubernetes
 |-----|------|---------|-------------|
 | DEV_PHASE.dev | bool | `false` | Set the DEV_PHASE.dev True, if Appstore/Tycho running locally. Else, set it to False |
 | airflow.authenticate | bool | `true` |  |
+| artifactCache | object | `{"authenticate":false,"enabled":false,"port":8080,"serviceName":"artifact-cache"}` | Optional /artifact route to an in-cluster artifact-cache service (replaces the ambassador Mapping for /artifact). Enable in envs that serve the helx-apps registry/specs from an artifact cache (e.g. air-gapped OpenShift). Off by default. Set authenticate=true to require the auth_request gate on /artifact. |
 | basicAuth | object | `{"enabled":false,"password":"defaultPassword","username":"defaultUser"}` | Creates a basicAuth scheme preventing un-authenticated access to the whole site. |
 | basicAuth.password | string | `"defaultPassword"` | Password, make sure to override. |
 | basicAuth.username | string | `"defaultUser"` | Username , make sure to override. |

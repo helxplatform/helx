@@ -115,3 +115,13 @@ global:
   # Defaults to the release namespace when empty.
   apps_namespace: ""
   cluster_dns_suffix: svc.cluster.local
+
+# -- Optional /artifact route to an in-cluster artifact-cache service (replaces
+# the ambassador Mapping for /artifact). Enable in envs that serve the helx-apps
+# registry/specs from an artifact cache (e.g. air-gapped OpenShift). Off by
+# default. Set authenticate=true to require the auth_request gate on /artifact.
+artifactCache:
+  enabled: false
+  serviceName: artifact-cache
+  port: 8080
+  authenticate: false

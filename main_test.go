@@ -48,16 +48,27 @@ func resetState(t *testing.T) {
 	dependencyTracker = newDependencyState()
 	dnLocks = sync.Map{}
 	db = nil
+
+	pluginRegistry = nil
+	dispatchSyncEvent = func(event SyncEvent) {
+		if pluginRegistry == nil {
+			return
+		}
+		pluginRegistry.Dispatch(event)
+	}
 }
 
 // mockStore captures calls to ldapStore and records the entries written.
+// The reported SyncOp is Created the first time a DN is seen and Updated
+// thereafter, mirroring storeDestinationLDAP's Add-vs-Modify branch.
 type mockStore struct {
 	mu      sync.Mutex
 	written []*TransformedEntry
+	seen    map[string]struct{}
 	err     error // returned on every call if set
 }
 
-func (s *mockStore) store(e *TransformedEntry) error {
+func (s *mockStore) store(e *TransformedEntry) (SyncOp, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Deep-copy content so concurrent mutations don't corrupt the snapshot.
@@ -66,7 +77,18 @@ func (s *mockStore) store(e *TransformedEntry) error {
 		copied[k] = v
 	}
 	s.written = append(s.written, &TransformedEntry{DN: e.DN, Content: copied})
-	return s.err
+	if s.err != nil {
+		return "", s.err
+	}
+	if s.seen == nil {
+		s.seen = make(map[string]struct{})
+	}
+	key := normalizeDN(e.DN)
+	if _, ok := s.seen[key]; ok {
+		return SyncOpUpdated, nil
+	}
+	s.seen[key] = struct{}{}
+	return SyncOpCreated, nil
 }
 
 func (s *mockStore) entries() []*TransformedEntry {
@@ -395,7 +417,7 @@ func TestHandleEntry_NoDeps(t *testing.T) {
 		DN:      "uid=alice,ou=users,dc=example,dc=org",
 		Content: map[string]interface{}{"groups": []interface{}{"users"}},
 	}
-	ds.handleEntry(entry, nil)
+	ds.handleEntry(entry, nil, "test-search")
 
 	written := ms.entries()
 	if len(written) != 1 {
@@ -420,7 +442,7 @@ func TestHandleEntry_PendingDeps(t *testing.T) {
 		DN:      "uid=alice,ou=users,dc=example,dc=org",
 		Content: map[string]interface{}{"groups": []interface{}{"users"}},
 	}
-	ds.handleEntry(entry, []string{dep})
+	ds.handleEntry(entry, []string{dep}, "test-search")
 
 	// Not written yet — dep not synced
 	if len(ms.entries()) != 0 {
@@ -428,7 +450,7 @@ func TestHandleEntry_PendingDeps(t *testing.T) {
 	}
 
 	// Syncing the dep should release alice
-	ds.markSyncedAndRelease(dep)
+	ds.markSyncedAndRelease(dep, "", nil, "")
 
 	written := ms.entries()
 	if len(written) != 1 {
@@ -451,7 +473,7 @@ func TestHandleEntry_SelfDepSkipped(t *testing.T) {
 		Content: map[string]interface{}{"groups": []interface{}{"users"}},
 	}
 	// dep is same as the entry DN — should be ignored
-	ds.handleEntry(entry, []string{dn})
+	ds.handleEntry(entry, []string{dn}, "test-search")
 
 	if len(ms.entries()) != 1 {
 		t.Fatalf("self-dep should be skipped; expected 1 write, got %d", len(ms.entries()))
@@ -472,7 +494,7 @@ func TestHandleEntry_MissingBindings(t *testing.T) {
 		DN:      "uid=$pidUidMap.p99,ou=users,dc=example,dc=org",
 		Content: map[string]interface{}{"groups": []interface{}{"users"}},
 	}
-	dependencyTracker.handleEntry(entry, nil)
+	dependencyTracker.handleEntry(entry, nil, "test-search")
 
 	// Binding not set → should not be written yet
 	if len(ms.entries()) != 0 {
@@ -515,8 +537,8 @@ func TestHandleEntry_ConcurrentSameDN_MergesGroups(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); ds.handleEntry(eaglePatch, []string{sharedDep}) }()
-	go func() { defer wg.Done(); ds.handleEntry(falconPatch, []string{sharedDep}) }()
+	go func() { defer wg.Done(); ds.handleEntry(eaglePatch, []string{sharedDep}, "test-search") }()
+	go func() { defer wg.Done(); ds.handleEntry(falconPatch, []string{sharedDep}, "test-search") }()
 	wg.Wait()
 
 	// Both patches pending — nothing written yet
@@ -525,7 +547,7 @@ func TestHandleEntry_ConcurrentSameDN_MergesGroups(t *testing.T) {
 	}
 
 	// Release the shared dep → pending entry for Alice fires
-	ds.markSyncedAndRelease(sharedDep)
+	ds.markSyncedAndRelease(sharedDep, "", nil, "")
 
 	written := ms.entries()
 	if len(written) != 1 {
@@ -608,8 +630,8 @@ func TestHandleEntry_DeterministicRace(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); ds.handleEntry(eaglePatch, []string{sharedDep}) }()
-	go func() { defer wg.Done(); ds.handleEntry(falconPatch, []string{sharedDep}) }()
+	go func() { defer wg.Done(); ds.handleEntry(eaglePatch, []string{sharedDep}, "test-search") }()
+	go func() { defer wg.Done(); ds.handleEntry(falconPatch, []string{sharedDep}, "test-search") }()
 
 	// Wait until both goroutines are stalled inside the window (up to 5 s).
 	select {
@@ -628,7 +650,7 @@ func TestHandleEntry_DeterministicRace(t *testing.T) {
 		t.Fatalf("expected 0 writes before dep synced; got %d", n)
 	}
 
-	ds.markSyncedAndRelease(sharedDep)
+	ds.markSyncedAndRelease(sharedDep, "", nil, "")
 
 	written := ms.entries()
 	if len(written) != 1 {
@@ -684,10 +706,10 @@ func TestMarkSyncedAndRelease_Chain(t *testing.T) {
 	entryB := &TransformedEntry{DN: "uid=b,ou=users,dc=example,dc=org", Content: map[string]interface{}{}}
 	entryC := &TransformedEntry{DN: "uid=c,ou=users,dc=example,dc=org", Content: map[string]interface{}{}}
 
-	ds.handleEntry(entryC, []string{entryB.DN})
-	ds.handleEntry(entryB, []string{entryA.DN})
+	ds.handleEntry(entryC, []string{entryB.DN}, "test-search")
+	ds.handleEntry(entryB, []string{entryA.DN}, "test-search")
 	// A has no deps → written immediately
-	ds.handleEntry(entryA, nil)
+	ds.handleEntry(entryA, nil, "test-search")
 
 	written := ms.entries()
 	if len(written) != 3 {

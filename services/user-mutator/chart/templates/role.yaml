@@ -1,0 +1,14 @@
+{{- if .Values.serviceAccount.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: user-mutator-role
+  namespace: {{ .Release.Namespace }}
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["secrets","persistentvolumeclaims", "configmaps"]
+  verbs: ["get", "list"]
+{{- end }}

@@ -1,0 +1,34 @@
+export function helpPortalOpened() {
+    this.analytics.trackEvent({
+        category: "ui_interaction",
+        action: "support_help_portal_open"
+    });
+}
+
+export function userGuideOpened() {
+    this.analytics.trackEvent({
+        category: "ui_interaction",
+        action: "support_user_guide_open"
+    });
+}
+
+export function faqsOpened() {
+    this.analytics.trackEvent({
+        category: "ui_interaction",
+        action: "support_faqs_open"
+    });
+}
+
+export function introVideoOpened() {
+    this.analytics.trackEvent({
+        category: "ui_interaction",
+        action: "support_intro_video_open"
+    });
+}
+
+export function howtoVideoOpened() {
+    this.analytics.trackEvent({
+        category: "ui_interaction",
+        action: "support_howto_video_open"
+    });
+}

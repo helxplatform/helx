@@ -1,0 +1,124 @@
+# Default values for ui.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: helxplatform/helx-ui
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the appVersion supplied in umbrella chart.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use. If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+config:
+  meta:
+    # -- Browser tab title and title on "Workspaces" login page
+    title: HeLx UI
+    # -- Page description with a link preview.
+    description: HeLx UI
+  analytics:
+    enabled: false
+    platform: google
+    token: ""
+  appstore_asset_base_url: 'https:\/\/raw.githubusercontent.com\/helxplatform\/appstore'
+  appstore_asset_branch: "master"
+  brand_name: ""
+  hidden_result_tabs: ""
+  search:
+    # -- If search page should show up. This is configured to work with DUG
+    enabled: "true"
+    url: 'https:\/\/helx.renci.org'
+    # --- If guided tour for search should show up
+    tour_enabled: "false"
+  tranql_url: 'https:\/\/helx.renci.org\/tranql\/'
+  # -- Support page sections to display. If a link is provided, the corresponding section will be displayed
+  support:
+    # -- Link to portal for submitting tickets/requesting features/reporting bugs
+    help_portal_url: ''
+    # -- Link to a page with user instructions on how to use the deployment
+    user_guide_url: ''
+    # -- Link for a page with FAQs.
+    faqs_url: ''
+    # -- Link to an introduction video for the deployment.
+    intro_video_url: ''
+    # -- Link to a video on how to use the deployment
+    howto_video_url: ''
+  workspaces:
+    # -- Allow Workspaces.
+    enabled: "true"
+  # -- Define landing page when the deployment is loaded. Default is support. Acceptable values: "workspaces", "search", "support"
+  default_space: "search"
+  # -- Heading on the Workspaces Login screen. If not set, this will be "<config.meta.title> Workspaces"
+  login_title: ""
+  # -- Multiline value (4 space indent) with html code describing the deployment, will be displayed on the Workspaces login page
+  brand_description: 
+    html: |
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

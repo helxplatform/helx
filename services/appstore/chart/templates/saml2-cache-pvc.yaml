@@ -1,0 +1,17 @@
+{{- if .Values.saml.cache.enabled }}
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ .Values.saml.cache.claimName }}
+  labels:
+    {{- include "appstore.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.saml.cache.storageSize }}
+  {{ if .Values.saml.cache.storageClass }}
+  storageClassName: {{ .Values.saml.cache.storageClass }}
+  {{- end }}
+{{- end }}

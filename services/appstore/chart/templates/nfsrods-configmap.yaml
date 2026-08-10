@@ -1,0 +1,12 @@
+{{- if .Values.irodsUnbranded.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+  name: {{ include "appstore.fullname" . }}-nfsrods
+data:
+  iroduserdata: |-
+    {{- range $key, $val := .Values.irodsUnbranded.IROD_USER_VALUES }}
+    {{ printf "%s::%.0f" $key $val }}
+    {{- end}}
+{{- end }}

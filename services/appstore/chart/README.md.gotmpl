@@ -1,0 +1,15 @@
+{{ template "chart.header" . }}
+{{ template "chart.description" . }}
+
+{{ template "chart.versionBadge" .  }}{{ template "chart.typeBadge" .  }}{{ template "chart.appVersionBadge" .  }}
+
+## CI/CD
+
+When the main branch of this chart is updated, using Github Actions we send the updated version to helm-charts repo to be indexed and packaged automatically.
+
+Additionally there is a workflow that allows bumping the chart version, if this is all that is needed to the cooresponding version of the appstore repository.
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}
+

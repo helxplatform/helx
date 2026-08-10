@@ -1,0 +1,24 @@
+{{- if .Values.postgresql.networkPolicyEnabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "appstore.fullname" . }}-postgresql-network-policy
+spec:
+  podSelector:
+    matchLabels:
+      {{- with .Values.postgresql.primary.podLabels }}
+      {{ toYaml . | nindent 6 }}
+      {{- end }}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          {{- with .Values.networkPolicyLabels }}
+          {{ toYaml . | nindent 10 }}
+          {{- end }}
+    ports:
+    - protocol: TCP
+      port: 5432
+{{- end }}

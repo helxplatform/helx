@@ -1,0 +1,13 @@
+# On pull request, ensure helm-docs is being run
+
+name: Run-Helm-Docs
+on:
+  pull_request:
+    types: [ opened, synchronize ]
+    paths-ignore:
+      - .github/workflows/*
+      - .github/*
+jobs:
+  run-helm-docs:
+    uses: helxplatform/helx-github-actions/.github/workflows/run-helm-docs.yml@main
+    secrets: inherit

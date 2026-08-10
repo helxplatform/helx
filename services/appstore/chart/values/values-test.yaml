@@ -1,0 +1,53 @@
+ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
+debug: "true"
+logLevel: "debug"
+
+django:
+  ALLOW_SAML_LOGIN: true
+  DEV_PHASE: dev
+  AUTHORIZED_USERS: muralikk@email.unc.edu,ashokk@email.unc.edu,bo7@ad.unc.edu,howard_lander@unc.edu,isma@email.unc.edu,jeffw@renci.org,jmajikes@cs.unc.edu,mattb523@live.unc.edu,tcheek9@email.unc.edu,baconm@renci.org,tcheek9@renci.org,bennettc@renci.org,cbiii@email.unc.edu
+  DOCKSTORE_APPS_BRANCH:
+
+djangoSettings: eduhelx-dev
+
+helx_ui:
+  REACT_APP_UI_BRAND_NAME: eduhelx
+  REACT_APP_APPSTORE_ASSET_BRANCH: develop
+
+image:
+  pullPolicy: Always
+  tag: develop
+
+fetcherImage:
+  repository: wateim/url-fetch
+  tag: develop
+  pullPolicy: Always
+
+resources:
+  limits:
+    cpu: 1
+    memory: 1024Mi
+  requests:
+    cpu: 1
+    memory: 1024Mi
+
+useSparkServiceAccount: false
+
+saml:
+  AUTHORITY_URL: "https://sso.unc.edu/metadata/unc"
+  ASSERTION_URL: https://helx-test.apps.renci.org
+  ENTITY_ID: "https://helx-test.apps.renci.org/saml2_auth/acs/"
+  cache:
+     enabled: true
+     storageSize: "50M"
+     FETCH_INTERVAL: 3600000
+
+tycho:
+  initRunAsUser: 30000
+  initRunAsGroup: 1136
+  runAsUser: 30000
+  runAsGroup: 1136
+  fsGroup: 1136
+  externalAppRegistryEnabled: true
+  externalAppRegistryRepo: "https://github.com/helxplatform/helx-apps/raw"
+  externalAppRegistryBranch: "eduhelx-dev_brand"

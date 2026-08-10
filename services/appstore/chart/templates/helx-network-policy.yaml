@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-network-policy
+spec:
+  # Allow resty and appstore-socket pods to communicate with the appstore pod.
+  # (Ambassador and nginx are retired in the de-Ambassador design; resty is the
+  # edge/data plane.)
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: resty
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: appstore-sockets
+  policyTypes:
+  - Ingress

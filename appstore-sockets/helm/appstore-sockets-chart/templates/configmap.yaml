@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  labels:
-  name: {{ include "appstore-sockets.fullname" . }}-env
-data:
-  REQUIRE_PUBLISH_SECRET: "{{ .Values.requirePublishSecret }}"
-  WS_HOST: "{{ .Values.serviceName }}"
-  APPSTORE_HOST: {{ include "appstore-sockets.appstoreServiceName" . }}:8000

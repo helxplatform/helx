@@ -1,0 +1,40 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "appstore-prepuller.fullname" . }}-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "appstore-prepuller.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+spec:
+  schedule: {{ .Values.controller.schedule | quote }}
+  concurrencyPolicy: Replace
+  successfulJobsHistoryLimit: {{ .Values.controller.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.controller.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            {{- include "appstore-prepuller.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: controller
+        spec:
+          serviceAccountName: {{ include "appstore-prepuller.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          containers:
+            - name: controller
+              image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+              imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+              env:
+                - name: PREPULLER_DAEMONSET_NAME
+                  value: {{ include "appstore-prepuller.daemonsetName" . }}
+                - name: PREPULLER_NAMESPACE
+                  value: {{ .Release.Namespace }}
+                - name: APP_REGISTRY_REPO
+                  value: {{ .Values.appRegistry.repo | quote }}
+                - name: APP_REGISTRY_BRANCH
+                  value: {{ .Values.appRegistry.branch | quote }}
+                - name: APP_REGISTRY_BRAND
+                  value: {{ .Values.appRegistry.brand | quote }}
+              resources:
+                {{- toYaml .Values.controller.resources | nindent 16 }}

@@ -1,0 +1,19 @@
+users:
+- cn: TestGuy
+  displayName: John Test
+  fsGroup: 1001
+  givenName: John
+  groups:
+  - tg1
+  mail: ''
+  o: Example Organization
+  ou: Engineering
+  runAsGroup: 1000
+  runAsUser: 1000
+  sn: Test
+  supplementalGroups:
+  - 2000
+  - 3000
+  telephoneNumber: 555-1234
+  uid: user01
+

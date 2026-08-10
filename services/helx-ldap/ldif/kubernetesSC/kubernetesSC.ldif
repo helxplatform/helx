@@ -1,0 +1,9 @@
+dn: cn=schema,cn=config
+changetype: modify
+add: olcObjectClasses
+olcObjectClasses: ( 2.25.328237954979916257113461139461922192996
+  NAME 'kubernetesSC' 
+  DESC 'Kubernetes Security Context' 
+  SUP top 
+  AUXILIARY 
+  MAY ( runAsUser $ runAsGroup $ fsGroup $ supplementalGroups ))

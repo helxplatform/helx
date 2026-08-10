@@ -1,0 +1,414 @@
+# Default values for appstore.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+image:
+  # -- repository where image is located
+  repository: containers.renci.org/helxplatform/appstore
+  # -- pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion.
+  # Set to "" before release!
+  tag:
+
+imagePostgresql:
+  # -- repository where postgresql image is located
+  repository: containers.renci.org/bitnami/postgresql
+  # -- pull policy
+  pullPolicy: IfNotPresent
+  # -- Image tag for postgresql, coordinate this with postgresql dependency.
+  tag: 17.6.0-debian-12-r0
+
+# An empty string equates to false, anything else is true.  If debug is true the logLevel is also set to DEBUG.
+debug: ""
+
+fetcherImage:
+  # -- repository where image is located
+  repository: helxplatform/url-fetch
+  # -- pull policy
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: latest
+
+# -- credentials for a private repo
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+networkPolicyLabels: {"role": "appstore"}
+
+podAnnotations: {}
+
+# -- Set the log level for the application.  (DEBUG INFO WARNING ERROR CRITICAL)
+logLevel: "WARNING"
+
+ldap:
+  enabled: false
+  uri: "ldap://openldap"
+  groupDN: "cn=users,ou=groups,dc=example,dc=org"
+  searchBase: "ou=users,dc=example,dc=org"
+
+updateStrategy:
+  # -- 'RollingUpdate' or 'Recreate'. Must use Recreate if mounting PVCs due to multi-attach errors.
+  type: Recreate
+
+serviceAccount:
+  # -- specifies whether a service account should be created
+  create: true
+  # -- The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name:
+
+podSecurityContext: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  name: http
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 1024Mi
+  requests:
+    cpu: 200m
+    memory: 300Mi
+
+security:
+  isolatedApps: true
+  # In-namespace pods that app pods are allowed to egress to. Each entry is a
+  # map of pod labels (AND-matched within an entry, OR-matched across entries).
+  # Empty by default, so apps are fully isolated from other in-namespace pods.
+  # External egress and DNS remain allowed regardless.
+  # Example: allow apps to reach a postgres database:
+  #   appEgressAllowedPods:
+  #     - app.kubernetes.io/name: my-postgres
+  appEgressAllowedPods: []
+  # Labels identifying the cluster DNS pods, used to permit DNS egress from
+  # app pods. When set, egress is allowed to any pod carrying these labels
+  # on any port. When empty, falls back to permitting egress on common DNS
+  # ports (53, 5353, 1053) to any destination — works out of the box on most
+  # clusters but is broader than a label-based rule.
+  # Examples:
+  #   Stock Kubernetes / CoreDNS:  {k8s-app: kube-dns}
+  #   OpenShift:                   {dns.operator.openshift.io/daemonset-dns: default}
+  dnsPodSelector: {}
+
+# -- Choose http or https for the protocol that is used by external users to access
+# the appstore web service.
+ACCOUNT_DEFAULT_HTTP_PROTOCOL: http
+
+# -- Set environment variables from a file.
+SET_BUILD_ENV_FROM_FILE: false
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+ambassador:
+   # -- register appstore with ambassador flag: <True or False>
+   flag: true
+
+# -- set the theme for appstore (bdc, braini, restartr, scidas)
+djangoSettings: helx
+# -- Allow for a custom entrypoint command via the values file.
+appstoreEntrypointArgs: "make start"
+
+gunicorn:
+  # -- Set the number of gunicorn workers.  (2*CPU)+1 is recommended.
+  workers: 5
+
+graderApiUrl: ""
+
+django:
+  # -- Note that these only run on a user's primary alias.
+  # If a user has primary@cs.unc.edu as their primary alias,
+  # and secondary@renci.org as a secondary alias, they will only
+  # be whitelisted automatically if cs.unc.edu emails are allowed.
+  # ex. Whitelist all RENCI emails - "^[A-Za-z0-9._%+-]+@renci\\.org$"
+  # ex. Whitelist all UNC emails - "^[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\\.)?unc\\.edu$"
+  # ex. Whitelist CS dept. (grad./prof.) UNC emails - "^[A-Za-z0-9._%+-]+@cs\\.unc\\.edu$"
+  AUTO_WHITELIST_PATTERNS: []
+
+  # Add arbitrary product links that appear in the UI header navbar.
+  # Ex: [{"name": "Gitea", "url": "https://gitea.com"}]
+  PRODUCT_LINKS: []
+
+  # -- user emails for oauth providers
+  AUTHORIZED_USERS: ""
+  # -- user emails to remove from an already-existing database
+  REMOVE_AUTHORIZED_USERS: ""
+  # -- Specify the git branch to use for HeLx app specifications.  When
+  # declaring 'tycho.externalAppRegistryRepo' leave this as an empty string.
+  DOCKSTORE_APPS_BRANCH: "v1.6.0"
+  ###################################################
+  APPSTORE_DJANGO_USERNAME: "admin"
+  APPSTORE_DJANGO_PASSWORD: ""
+  # -- show Django log in fields (true | false)
+  ALLOW_DJANGO_LOGIN: ""
+  # -- show SAML log in fields (true | false)
+  ALLOW_SAML_LOGIN: ""
+  # -- Email Server host ie relay.unc.edu | relay.renci.org
+  EMAIL_HOST: ""
+  # -- Email Server port ie 25 or other.
+  EMAIL_PORT: ""
+  # -- Does the Email Server require TLS connection or not? Boolean (true | false)
+  EMAIL_USE_TLS: False
+  # -- email of account to use for outgoing emails
+  EMAIL_HOST_USER: ""
+  # -- password of account to use for outgoing emails
+  EMAIL_HOST_PASSWORD: ""
+  # -- Specify URL to use for the "Image Download" link on the top part of website.
+  IMAGE_DOWNLOAD_URL: ""
+  # -- idle timeout for user web session
+  SESSION_IDLE_TIMEOUT: "2592000" # 30 days
+  # -- list of appstore registration emails
+  RECIPIENT_EMAILS: ""
+  # -- should be 'live' unless you are doing some kind of development
+  DEV_PHASE: "live"
+  # -- allowed domains to make post requests to the appstore
+  CSRF_DOMAINS: "https://*.renci.org,https://*.renci.unc.edu"
+
+oauth:
+  # -- oauth providers separated by commas (google, github)
+  OAUTH_PROVIDERS: ""
+  GITHUB_NAME: ""
+  GITHUB_CLIENT_ID: ""
+  GITHUB_SECRET: ""
+  GOOGLE_NAME: ""
+  GOOGLE_CLIENT_ID: ""
+  GOOGLE_SECRET: ""
+  CILOGON_NAME: ""
+  CILOGON_CLIENT_ID: ""
+  CILOGON_SECRET: ""
+  OIDC_NAME: ""
+  OIDC_CLIENT_ID: ""
+  OIDC_SECRET: ""
+  OIDC_SERVER_URL: ""
+
+saml:
+  cache:
+    enabled: false
+    claimName: "saml-cache"
+    storageSize: "20M"
+    storageClass: ""
+    FETCH_FILE: "/data/saml_metadata.xml"
+    FETCH_INTERVAL: "60000"
+    APPSTORE_DIRECTORY: "/saml"
+    APPSTORE_FILE: "saml_metadata.xml"
+  AUTHORITY_URL: ""
+  ASSERTION_URL: ""
+  ENTITY_ID: ""
+
+irods:
+  # -- enable irods support (true | false)
+  enabled: false
+  BRAINI_RODS: ""
+  NRC_MICROSCOPY_IRODS: ""
+  RODS_USERNAME: ""
+  RODS_PASSWORD: ""
+  IROD_COLLECTIONS: ""
+  IROD_ZONE: ""
+
+
+irodsUnbranded:
+  enabled: false
+  RODS_USERNAME: ""
+  RODS_PASSWORD: ""
+  IROD_ZONE: ""
+  IROD_PORT: ""
+  IROD_HOST: ""
+  IROD_USER_VALUES: {}
+  NFSRODS_HOST: ""
+
+atlas:
+  # -- Disabling will turn off the creation of secrets/configmaps for Atlas
+  enabled: true
+imagej:
+  # -- Disabling will turn off the creation of secrets/configmaps for ImageJ
+  enabled: true
+octave:
+  # -- Disabling will turn off the creation of secrets/configmaps for Octave
+  enabled: true
+pgadmin:
+  # -- Disabling will turn off the creation of secrets/configmaps for PgAdmin
+  enabled: true
+webtop:
+  # -- Disabling will turn off the creation of secrets/configmaps for Webtop
+  enabled: true
+
+apps:
+  DICOMGH_GOOGLE_CLIENT_ID: ""
+  DATASOURCE_CONNECTION_URL: ""
+  DATASOURCE_PASSWORD: ""
+  FLYWAY_DATASOURCE_CONNECTION_URL: ""
+  FLYWAY_DATASOURCE_PASSWORD: ""
+  DATASOURCE_USERNAME: "ohdsi"
+  FLYWAY_DATASOURCE_USERNAME: "ohdsi"
+  # -- PUID variable in webtop specifies the UID to switch the user to after
+  # initialization.
+  WEBTOP_PUID: "1000"
+  # -- PGID variable in webtop specifies the GID to switch the user to after
+  # initialization.
+  WEBTOP_PGID: "1000"
+  # -- Specify email for pgAdmin user.
+  PGADMIN_EMAIL: "user@domain.com"
+  # -- Specify the database hostname used for pgAdmin's clients to connect to.
+  # If specified this replaces 'mimic-postgresql' in the pgadmin4.db
+  # configuration file.
+  HELX_DB_HOSTNAME: ""
+  PGADMIN_DISABLE_POSTFIX: "true"
+  PGADMIN_LISTEN_PORT: "80"
+
+replicaCount: 1
+
+# -- Settings for django sqlite3 db file persistence, if postgresql is not enabled (postgresql.enabled: false).
+sqliteStorage:
+  # -- If a claim name is not specified, it defaults to appstore-oauth-pvc.
+  claimName:
+  storageClass:
+
+# -- Settings for django logs persistence.
+logsStorageAppstore:
+  createPVC: false
+  # -- Set to true if a claim has been created outside of the appstore chart.
+  existingClaim: false
+  # -- Specify the claim name if it pre-exists or it defaults to appstore-logs-pvc.
+  claimName:
+  storageSize: 2Gi
+  storageClass:
+
+userStorage:
+  # -- Create a PVC for user's files.  If false then the PVC needs to be created
+  # outside of the appstore chart.
+  createPVC: true
+  retain: true
+  storageSize: 10Gi
+  storageClass:
+  nfs:
+    createPV: false
+    path:
+    server:
+
+# Add any extra environment variables not already defined in the chart.
+extraEnv: {}
+
+# -- Set to true, when using blackbalsam.
+useSparkServiceAccount: false
+
+tycho:
+  # -- How Tycho-launched apps are routed. "proxy" (default on this branch):
+  # ClusterIP + /private prefix, backend resolved by an external reverse proxy
+  # (resty) via appstore's /api/v1/private-route/ resolver — the de-Ambassador
+  # design. "ambassador" (legacy): emit the Ambassador Mapping annotation when
+  # Ambassador is present. "none": no routing wiring.
+  appRoutingMode: proxy
+  # -- Application processes launched will run as this user.
+  runAsUser: 0
+  # -- Application processes launched will have this group permissions.
+  runAsGroup: 0
+  # -- Application processes launched will also be part of this supplimentary group.
+  fsGroup: 0
+  # -- Enable trash-cli functionality in tycho-launched apps
+  enableTrashCli: false
+  # -- Start the init container to take care of any needed tasks before the
+  # main container is started.  This can be to create certain directories or
+  # set file permissions.
+  enableInitContainer: true
+  # -- The image repository to use for HeLx app init containers.
+  initImageRepository: busybox
+  # -- The image tag to use for HeLx app init containers.
+  initImageTag: latest
+  # -- Init processes will run as this user.
+  initRunAsUser: 0
+  # -- Init processes will have this group permissions.
+  initRunAsGroup: 0
+  # -- "Userless" init processes will run as this user.
+  initRunAsNobodyUser: 524288
+  # -- "Userless" init processes will have these group permissions.
+  initRunAsNobodyGroup: 524288
+  # -- Create Home and shared directories for users.
+  createHomeDirs: true
+  # -- directory that will be used to mount user's home directories in
+  parent_dir: "/home"
+  # -- Name of directory to use for a user's home directory.  If null then the
+  # user's username will be used.
+  subpath_dir: null
+  # -- name of directory to use for shared data
+  shared_dir: "shared"
+  # -- Resource for Tycho init container. Defaults cpus|250m memory|250Mi
+  init:
+    resources:
+      cpus: 250m
+      memory: 250Mi
+  # -- The GPU resource name that a container can utilize.  Typically this is
+  # "nvidia.com/gpu", but other types exist, such as "nvidia.com/mig-1g.5gb"
+  # and other manufacturers have their own types.
+  GPUResourceName: "nvidia.com/gpu"
+  # -- Enable/disable the external app registry file for Tycho.  Set
+  # 'django.DOCKSTORE_APPS_BRANCH' to an empty string when when using an
+  # external app registry.
+  externalAppRegistryEnabled: false
+  # -- Can be set to a git repo URL for fetching the app registry file or
+  # defaults file.  Something in the form of 
+  # 'https://github.com/helxplatform/helx-apps/raw'.
+  externalAppRegistryRepo: "https://github.com/helxplatform/helx-apps/raw"
+  # -- The branch that would be appended to 'externalAppRegistryRepo' to
+  # retrieve the app registry and defaults files.  The full URL, if using the
+  # externalAppRegistryRepo example for the app registry file would be 
+  # 'https://github.com/helxplatform/helx-apps/raw/master/app-registry.yaml'.
+  # The default value is the AppVersion of this chart prefixed with a 'v'
+  # (ex. v2.0.0).
+  externalAppRegistryBranch:
+  externalAppRegistryAppSpecsDir: "app-specs"
+
+global:
+  # -- container image registry to use for Bitnami images
+  imageRegistry: "containers.renci.org"
+  security:
+    # -- load container images from non-Bitnami container registry servers
+    allowInsecureImages: true
+  # -- the name of the PVC to use for user's files
+  stdnfsPvc: stdnfs
+  # -- specify the id of the ambassador for Tycho-launched services.
+  ambassador_id:
+  # -- specify the service name for ambassador
+  ambassador_service_name: ambassador
+  # -- specify the mapping name for ambassador
+  ambassador_mapping_name: appstore-mapping
+
+#############################################################################
+# -- appstore database settings
+db:
+  name: appstore
+  port: 5432
+
+# -- postgresql settings
+postgresql:
+  enabled: true
+  global:
+    # -- postgresql credentials
+    postgresql:
+      auth:
+        database: "appstore-oauth"
+        username: "renci"
+        password: "renciAdmin"
+        postgresPassword: "adminPass"
+  # -- postgresql labels
+  primary:
+    labels: {"np-label": "appstore-db"}
+    podLabels: {"np-label": "appstore-db"}
+  # -- postgresql logs
+  audit:
+    logHostname: true
+    logConnections: true
+  # -- postgresql persistence storage
+  persistence:
+    existingClaim: "appstore-postgresql-pvc"
+    storageClass:
+  volumePermissions:
+    enabled: true
+  # -- enable/disable postgresql network policy, allows traffic to and from appstore pod only.
+  networkPolicyEnabled: true

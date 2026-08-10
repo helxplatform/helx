@@ -1,0 +1,23 @@
+dn: cn=schema,cn=config
+changetype: modify
+add: olcAttributeTypes
+olcAttributeTypes: ( 2.25.295213285356351129958111332942614625011
+  NAME 'runAsUser' 
+  DESC 'Run as User ID for Kubernetes pods' 
+  EQUALITY integerMatch 
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )
+olcAttributeTypes: ( 2.25.100990483154718548810320214886904306940
+  NAME 'runAsGroup' 
+  DESC 'Run as Group ID for Kubernetes pods' 
+  EQUALITY integerMatch 
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )
+olcAttributeTypes: ( 2.25.131839995621429190200059800980008643225
+  NAME 'fsGroup' 
+  DESC 'Filesystem Group ID for Kubernetes pods' 
+  EQUALITY integerMatch 
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 SINGLE-VALUE )
+olcAttributeTypes: ( 2.25.172546665113844842292165551788180104609
+  NAME 'supplementalGroups' 
+  DESC 'Supplemental Group IDs for Kubernetes pods' 
+  EQUALITY integerMatch 
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 )

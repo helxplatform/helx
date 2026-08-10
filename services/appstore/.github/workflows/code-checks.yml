@@ -1,0 +1,41 @@
+# Workflow responsible for core acceptance testing.
+# Tests Currently Run:
+#     - flake8-linter
+#     - image-build-test
+#    
+# This workflow will build a test image for everything but develop
+# and main branches. The tag will be test_{your_branch_name}
+#
+# The build-push-dev-image and build-push-release workflows 
+# handle the develop and release image storage respectively.
+#
+#
+
+name: Code-Checks-Remote
+on:
+    push:
+     branches-ignore:
+      - master
+      - main
+      - develop
+     paths-ignore:
+      - README.md
+      - .old_cicd/*
+      - .github/*
+      - .github/workflows/*
+      - LICENSE
+      - .gitignore
+      - .dockerignore
+      - .githooks
+    pull_request:
+     branches:
+      - develop
+      - master
+      - main 
+     types: [ opened, synchronize ]
+         
+jobs:
+  
+  code-checks:
+    uses: helxplatform/helx-github-actions/.github/workflows/code-checks.yml@main
+    secrets: inherit

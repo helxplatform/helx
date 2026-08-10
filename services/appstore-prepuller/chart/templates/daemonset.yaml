@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "appstore-prepuller.daemonsetName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "appstore-prepuller.labels" . | nindent 4 }}
+    app.kubernetes.io/component: puller
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "100%"
+  selector:
+    matchLabels:
+      {{- include "appstore-prepuller.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: puller
+  template:
+    metadata:
+      labels:
+        {{- include "appstore-prepuller.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: puller
+    spec:
+      {{- with .Values.daemonset.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.daemonset.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # initContainers are managed dynamically by the controller.
+      # They will be patched in once the controller runs its first sync.
+      initContainers: []
+      containers:
+        - name: pause
+          image: {{ .Values.daemonset.pauseImage }}
+          resources:
+            {{- toYaml .Values.daemonset.resources | nindent 12 }}

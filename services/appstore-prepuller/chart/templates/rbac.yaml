@@ -1,0 +1,28 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "appstore-prepuller.fullname" . }}-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "appstore-prepuller.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["{{ include "appstore-prepuller.daemonsetName" . }}"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "appstore-prepuller.fullname" . }}-controller
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "appstore-prepuller.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "appstore-prepuller.fullname" . }}-controller
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "appstore-prepuller.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

@@ -1,4 +1,0 @@
-feature feat
-fix fix
-test test
-documentation doc

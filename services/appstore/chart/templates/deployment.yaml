@@ -410,7 +410,7 @@ spec:
             secretKeyRef:
               key: PG_DB_USERNAME
               name: {{ include "appstore.fullname" . }}
-        {{- if .Values.postgresql.auth.existingSecret }}
+        {{- if and .Values.postgresql .Values.postgresql.auth .Values.postgresql.auth.existingSecret }}
         - name: PG_DB_PASSWORD
           valueFrom:
             secretKeyRef:

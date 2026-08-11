@@ -2,16 +2,20 @@ SHELL := /bin/bash
 
 # Git remotes used by the services/ git subtrees.
 APPSTORE_URL          ?= https://github.com/helxplatform/appstore.git
+APPSTORE_SOCKETS_URL  ?= https://github.com/helxplatform/appstore-sockets.git
 UI_URL                ?= https://github.com/helxplatform/helx-ui.git
 HELX_LDAP_URL         ?= https://github.com/helxplatform/helx-ldap.git
 APPSTORE_PREPULLER_URL ?= https://github.com/helxplatform/appstore-prepuller.git
 USER_MUTATOR_URL      ?= https://github.com/helxplatform/user-mutator.git
-APPSTORE_CHART_URL    ?= https://github.com/helxplatform/appstore-chart.git
-UI_CHART_URL          ?= https://github.com/helxplatform/ui-chart.git
+APPSTORE_CHART_URL          ?= https://github.com/helxplatform/appstore-chart.git
+APPSTORE_SOCKETS_CHART_URL  ?= https://github.com/helxplatform/appstore-sockets-chart.git
+UI_CHART_URL                ?= https://github.com/helxplatform/ui-chart.git
 
 # Branches and prefixes used when the subtrees are added or pulled.
 APPSTORE_PREFIX           ?= services/appstore
 APPSTORE_BRANCH           ?= develop
+APPSTORE_SOCKETS_PREFIX   ?= services/appstore-sockets
+APPSTORE_SOCKETS_BRANCH   ?= master
 UI_PREFIX                 ?= services/ui
 UI_BRANCH                 ?= develop
 HELX_LDAP_PREFIX          ?= services/helx-ldap
@@ -20,19 +24,23 @@ APPSTORE_PREPULLER_PREFIX ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH ?= main
 USER_MUTATOR_PREFIX       ?= services/user-mutator
 USER_MUTATOR_BRANCH       ?= master
-APPSTORE_CHART_PREFIX     ?= services/appstore/chart
-APPSTORE_CHART_BRANCH     ?= main
-UI_CHART_PREFIX           ?= services/ui/chart
-UI_CHART_BRANCH           ?= master
+APPSTORE_CHART_PREFIX          ?= services/appstore/chart
+APPSTORE_CHART_BRANCH          ?= main
+APPSTORE_SOCKETS_CHART_PREFIX  ?= services/appstore-sockets/chart
+APPSTORE_SOCKETS_CHART_BRANCH  ?= master
+UI_CHART_PREFIX                ?= services/ui/chart
+UI_CHART_BRANCH                ?= master
 
 .DEFAULT_GOAL := help
 
 .PHONY: help setup add-remotes add-subtrees \
-        add-subtree-appstore add-subtree-ui add-subtree-helx-ldap \
-        add-subtree-appstore-prepuller add-subtree-user-mutator \
-        add-subtree-appstore-chart add-subtree-ui-chart \
-        pull-appstore pull-ui pull-helx-ldap pull-appstore-prepuller \
-        pull-user-mutator pull-appstore-chart pull-ui-chart pull-remotes pull-subtree
+        add-subtree-appstore add-subtree-appstore-sockets add-subtree-ui \
+        add-subtree-helx-ldap add-subtree-appstore-prepuller \
+        add-subtree-user-mutator add-subtree-appstore-chart \
+        add-subtree-appstore-sockets-chart add-subtree-ui-chart \
+        pull-appstore pull-appstore-sockets pull-appstore-sockets-chart \
+        pull-ui pull-helx-ldap pull-appstore-prepuller pull-user-mutator \
+        pull-appstore-chart pull-ui-chart pull-remotes pull-subtree
 
 #help: Show the available repository setup and subtree tasks
 help:
@@ -44,6 +52,8 @@ help:
 	@echo 'Subtree updates:'
 	@echo '  make pull-remotes            Pull all configured service subtrees'
 	@echo '  make pull-appstore           Pull appstore/develop into services/appstore'
+	@echo '  make pull-appstore-sockets   Pull appstore-sockets/master into services/appstore-sockets'
+	@echo '  make pull-appstore-sockets-chart Pull appstore-sockets-chart/master into services/appstore-sockets/chart'
 	@echo '  make pull-ui                 Pull ui/develop into services/ui'
 	@echo '  make pull-helx-ldap          Pull helx-ldap/master into services/helx-ldap'
 	@echo '  make pull-appstore-prepuller Pull appstore-prepuller/main'
@@ -76,11 +86,13 @@ endef
 # add-remotes: Add or verify all remotes needed by the service subtrees
 add-remotes:
 	$(call ensure-remote,appstore,$(APPSTORE_URL))
+	$(call ensure-remote,appstore-sockets,$(APPSTORE_SOCKETS_URL))
 	$(call ensure-remote,ui,$(UI_URL))
 	$(call ensure-remote,helx-ldap,$(HELX_LDAP_URL))
 	$(call ensure-remote,appstore-prepuller,$(APPSTORE_PREPULLER_URL))
 	$(call ensure-remote,user-mutator,$(USER_MUTATOR_URL))
 	$(call ensure-remote,appstore-chart,$(APPSTORE_CHART_URL))
+	$(call ensure-remote,appstore-sockets-chart,$(APPSTORE_SOCKETS_CHART_URL))
 	$(call ensure-remote,ui-chart,$(UI_CHART_URL))
 
 # add-subtree: Add a subtree unless its prefix is already present.
@@ -96,6 +108,8 @@ endef
 # add-subtrees: Add all missing service subtrees
 add-subtrees: add-remotes \
 	add-subtree-appstore \
+	add-subtree-appstore-sockets \
+	add-subtree-appstore-sockets-chart \
 	add-subtree-ui \
 	add-subtree-helx-ldap \
 	add-subtree-appstore-prepuller \
@@ -106,6 +120,14 @@ add-subtrees: add-remotes \
 # add-subtree-appstore: Add the appstore subtree
 add-subtree-appstore: add-remotes
 	$(call add-subtree,$(APPSTORE_PREFIX),appstore,$(APPSTORE_BRANCH))
+
+# add-subtree-appstore-sockets: Add the appstore-sockets subtree
+add-subtree-appstore-sockets: add-remotes
+	$(call add-subtree,$(APPSTORE_SOCKETS_PREFIX),appstore-sockets,$(APPSTORE_SOCKETS_BRANCH))
+
+# add-subtree-appstore-sockets-chart: Add the appstore-sockets Helm chart subtree
+add-subtree-appstore-sockets-chart: add-remotes
+	$(call add-subtree,$(APPSTORE_SOCKETS_CHART_PREFIX),appstore-sockets-chart,$(APPSTORE_SOCKETS_CHART_BRANCH))
 
 # add-subtree-ui: Add the UI subtree
 add-subtree-ui: add-remotes
@@ -143,6 +165,14 @@ pull-subtree: add-remotes
 pull-appstore: add-remotes
 	git subtree pull --prefix="$(APPSTORE_PREFIX)" appstore "$(APPSTORE_BRANCH)"
 
+# pull-appstore-sockets: Pull the latest configured appstore-sockets branch
+pull-appstore-sockets: add-remotes
+	git subtree pull --prefix="$(APPSTORE_SOCKETS_PREFIX)" appstore-sockets "$(APPSTORE_SOCKETS_BRANCH)"
+
+# pull-appstore-sockets-chart: Pull the latest configured appstore-sockets chart branch
+pull-appstore-sockets-chart: add-remotes
+	git subtree pull --prefix="$(APPSTORE_SOCKETS_CHART_PREFIX)" appstore-sockets-chart "$(APPSTORE_SOCKETS_CHART_BRANCH)"
+
 # pull-ui: Pull the latest configured UI branch into its subtree
 pull-ui: add-remotes
 	git subtree pull --prefix="$(UI_PREFIX)" ui "$(UI_BRANCH)"
@@ -170,6 +200,8 @@ pull-ui-chart: add-remotes
 # pull-remotes: Pull every configured service subtree in sequence
 .NOTPARALLEL: pull-remotes
 pull-remotes: pull-appstore \
+	pull-appstore-sockets \
+	pull-appstore-sockets-chart \
 	pull-ui \
 	pull-helx-ldap \
 	pull-appstore-prepuller \

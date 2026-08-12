@@ -2,7 +2,7 @@
 
 Tools to help with help with management of images in the cluster.
 
-![Version: 1.0.1](https://img.shields.io/badge/Version-1.0.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.0.0](https://img.shields.io/badge/AppVersion-1.0.0-informational?style=flat-square)
+![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.0.0](https://img.shields.io/badge/AppVersion-1.0.0-informational?style=flat-square)
 
 For chart information on imagepullsecret-patcher see the [chart readme](https://github.com/helxplatform/imagepullsecret-patcher/tree/master/helm).
 
@@ -10,7 +10,7 @@ For chart information on imagepullsecret-patcher see the [chart readme](https://
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://ghcr.io/helxplatform/helm-charts/ | kubernetes-image-puller | 1.0.0 |
+| https://helxplatform.github.io/helm-charts | kubernetes-image-puller | 1.0.0 |
 | https://helxplatform.github.io/imagepullsecret-patcher/charts | imagepullsecret-patcher | 0.1.4 |
 
 ## Values

@@ -1,0 +1,14 @@
+{{- if .Values.serviceAccount.create -}}
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "appstore-sockets.fullname" . }}-rolebinding
+subjects:
+- kind: ServiceAccount
+  name: {{ include "appstore-sockets.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: {{ include "appstore-sockets.fullname" . }}-role
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

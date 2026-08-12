@@ -5,7 +5,7 @@ import random
 import string
 from getpass import getpass
 
-def generate_random_password(length=10):
+def generate_random_password(length=20):
     """Generates a random password of given length without punctuation."""
     characters = string.ascii_letters + string.digits  # No punctuation
     return ''.join(random.choice(characters) for i in range(length))
@@ -26,7 +26,7 @@ def prompt_password_with_default(prompt_text, default_password):
 
 def generate_ldap_config():
     """
-    Generate helx_ldap_config.yaml based on user input or defaults, with random 
+    Generate helx_ldap_config.yaml based on user input or defaults, with random
     password generation.
     """
     print("HElX LDAP Configuration Setup")
@@ -35,12 +35,14 @@ def generate_ldap_config():
     default_server_url = "ldap://localhost:5389"
     default_admin_dn = "cn=admin,dc=example,dc=org"
     default_config_dn = "cn=admin,cn=config"
+    default_namespace = "default"
 
     # Generate random passwords as defaults
     default_admin_password = generate_random_password()
     default_config_password = generate_random_password()
 
     # Ask for input with defaults
+    namespace = prompt_with_default("Namespace", default_namespace)
     server_url = prompt_with_default("LDAP Server URL", default_server_url)
     admin_dn = prompt_with_default("Admin Bind DN", default_admin_dn)
     config_dn = prompt_with_default("Config DN", default_config_dn)
@@ -48,9 +50,15 @@ def generate_ldap_config():
     # Prompt for passwords with generated defaults
     admin_password = prompt_password_with_default("Admin Password", default_admin_password)
     config_password = prompt_password_with_default("Config Password", default_config_password)
+    
+    # Prompt for OpenShift flag (default is false)
+    openshift_input = prompt_with_default("Running on OpenShift? (true/false)", "false")
+    openshift = openshift_input.lower() == "true"
 
-    # Construct the configuration dictionary
+    # Construct the configuration dictionary, including the new "openshift" flag
     ldap_config = {
+        'namespace': namespace,
+        'openshift': openshift,
         'ldap': {
             'server_url': server_url,
             'admin': {

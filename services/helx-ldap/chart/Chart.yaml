@@ -1,0 +1,15 @@
+apiVersion: v2
+name: helx-ldap
+description: HeLx LDAP deployment and configuration
+
+type: application
+version: 0.1.2
+appVersion: "2.6.9"
+
+# OpenLDAP remains owned by the upstream chart. This chart owns only the
+# HeLx-specific configuration applied after OpenLDAP is ready.
+dependencies:
+  - name: openldap-stack-ha
+    alias: openldap
+    version: "4.3.3"
+    repository: "https://jp-gouin.github.io/helm-openldap/"

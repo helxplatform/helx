@@ -12,7 +12,7 @@
   - `services/user-mutator` (`user-mutator` image)
 - Other service directories are chart-only or utility/source-only. Helm charts
   may be at the service root or under `services/<service>/chart/`.
-- The umbrella chart is `deployments/helm/helx-chart`.
+- The umbrella chart is `deploy/helm/helx-chart`.
 
 ## CI and image publishing
 

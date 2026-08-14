@@ -134,6 +134,9 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | saml.ASSERTION_URL | string | `""` |  |
 | saml.AUTHORITY_URL | string | `""` |  |
 | saml.ENTITY_ID | string | `""` |  |
+| saml.IDP_ENTITY_ID | string | `""` | IdP entity ID to select from the metadata source (required when the source is a federation aggregate, e.g. "https://sso.unc.edu/idp") |
+| saml.PROVIDER_NAME | string | `"Single Sign-On"` | human-readable name for the SAML provider, shown on the login page |
+| saml.PROVIDER_SLUG | string | `"saml"` | URL slug under /accounts/saml/<slug>/ for the SAML provider (e.g. "unc") |
 | saml.cache.APPSTORE_DIRECTORY | string | `"/saml"` |  |
 | saml.cache.APPSTORE_FILE | string | `"saml_metadata.xml"` |  |
 | saml.cache.FETCH_FILE | string | `"/data/saml_metadata.xml"` |  |

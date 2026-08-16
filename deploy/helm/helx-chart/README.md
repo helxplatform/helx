@@ -2,21 +2,21 @@
 
 A Helm chart for deploying HeLx to Kubernetes.
 
-![Version: 4.5.9](https://img.shields.io/badge/Version-4.5.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.6.5](https://img.shields.io/badge/AppVersion-3.6.5-informational?style=flat-square)
+![Version: 4.5.4](https://img.shields.io/badge/Version-4.5.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.6.4](https://img.shields.io/badge/AppVersion-3.6.4-informational?style=flat-square)
 
 HeLx puts the most advanced analytical scientific models at investigator’s finger tips using equally advanced cloud native, container orchestrated, distributed computing systems. HeLx can be applied in many domains. Its ability to empower researchers to leverage advanced analytical tools without installation or other infrastructure concerns has broad reaching benefits.
 
 ```
-# The most basic deployment of HeLx to a Kubernetes cluster on GKE.
+# Install the published chart from GHCR.
 NAMESPACE=helx
-# Add the helxplatform Helm repository.
-helm repo add helx-charts https://helxplatform.github.io/helm-charts
-# Pull down latest chart updates.
-helm repo update
-helm -n $NAMESPACE --create-namespace install helx helx-charts/helx
+helm registry login ghcr.io
+helm -n $NAMESPACE --create-namespace install helx \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.5.4
 
 # Deploy to a non-GKE cluster.
-helm -n $NAMESPACE --create-namespace install helx helx-charts/helx --set appstore.userStorage.createPVC=true,nfs-server.enabled=false
+helm -n $NAMESPACE --create-namespace install helx \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.5.4 \
+  --set appstore.userStorage.createPVC=true,nfs-server.enabled=false
 
 # Review the output of the Helm install command.  To review the output use the
 # status option.
@@ -59,8 +59,30 @@ nginx:
 
 To deploy HeLx using the values.yaml use the following command.
 ```
-helm -n $NAMESPACE --create-namespace install helx helx-charts/helx --values values.yaml
+helm -n $NAMESPACE --create-namespace install helx \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.5.4 \
+  --values values.yaml
 ```
+
+## LDAP-only smoke test
+
+The repository includes a values file and script for installing only the LDAP
+service into an existing namespace. The script creates or updates the required
+credentials Secret, prepares chart dependencies, installs the umbrella chart, and
+waits for the OpenLDAP StatefulSet and configuration hook. The namespace must
+already exist:
+
+```sh
+NAMESPACE=ai-sb-test
+helm registry login ghcr.io
+export LDAP_ADMIN_PASSWORD='choose-an-admin-password'
+export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
+bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
+```
+
+The wrapper chart applies the HeLx `cn=config` LDIFs as a hardened
+post-install/post-upgrade Job. See `services/helx-ldap/chart/README.md` for the
+chart-specific Secret contract.
 
 You can view the README.md files for each subchart to see the variables that exist.
 
@@ -68,11 +90,10 @@ You can view the README.md files for each subchart to see the variables that exi
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| ambassador | object | `{"enabled":false}` | ------------------------------------------------------------------------ |
-| ambassador.enabled | bool | `false` | enable/disable deployment of Ambassador (retired in the de-Ambassador design) |
+| ambassador.enabled | bool | `true` | enable/disable deployment of Ambassador |
 | appstore-sockets.enabled | bool | `true` | enable/disable deployment of appstore websockets service |
 | appstore.enabled | bool | `true` | enable/disable deployment of appstore |
-| appstore.tycho.appRoutingMode | string | `"proxy"` | routing data plane for Tycho-launched apps: "proxy" (ClusterIP + /private, resolved by appstore via resty) or "ambassador" (legacy). |
+| helx-ldap.enabled | bool | `false` | enable/disable deployment of the HeLx LDAP service |
 | backup-pvc-cronjob.enabled | bool | `false` | enable/disable deployment of backup-pvc-cronjob |
 | global.ambassador_service_name | string | `"ambassador"` |  |
 | global.redis.existingSecret | string | `"redis-secret"` |  |
@@ -83,9 +104,9 @@ You can view the README.md files for each subchart to see the variables that exi
 | monitoring.enabled | bool | `false` | enable/disable deployment of monitoring (kube-prometheus-stack, cost-analyzer, etc.) |
 | nfs-server.enabled | bool | `false` | enable/disable deployment of nfs-server |
 | nfsrods.enabled | bool | `false` | enable/disable deployment of nfsrods |
-| nginx.enabled | bool | `false` | enable/disable deployment of nginx (retired; replaced by resty) |
+| nginx.enabled | bool | `true` | enable/disable deployment of nginx |
 | pod-reaper.enabled | bool | `true` | enable/disable deployment of pod-reaper |
-| resty.enabled | bool | `true` | enable/disable deployment of resty (the edge/data plane; replaces nginx) |
+| resty.enabled | bool | `false` | enable/disable deployment of nginx |
 | search.enabled | bool | `false` | enable/disable deployment of search |
 | ui.enabled | bool | `true` | enable/disable deployment of helx-ui |
 

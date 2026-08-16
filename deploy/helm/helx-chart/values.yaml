@@ -1,23 +1,17 @@
 # Parent chart for HeLx.
 
-# --------------------------------------------------------------------------
-# De-Ambassador configuration (this branch's target state):
-#   Ambassador is removed; resty is the edge/data plane (it replaces nginx,
-#   which is being retired entirely); appstore is the routing control plane.
-#   To fall back to the legacy Ambassador path: ambassador.enabled=true,
-#   nginx.enabled=true, resty.enabled=false, appstore.tycho.appRoutingMode=ambassador.
-# See the appstore repo: spec/ambassador-removal.md (§11 enablement runbook).
-# --------------------------------------------------------------------------
-ambassador:
-  # -- enable/disable deployment of Ambassador (retired in the de-Ambassador design)
-  enabled: false
+# ambassador:
+#   # -- enable/disable deployment of Ambassador
+#   enabled: true
 appstore:
   # -- enable/disable deployment of appstore
   enabled: true
-  tycho:
-    # -- routing data plane for Tycho-launched apps: "proxy" (ClusterIP +
-    # /private, resolved by appstore via resty) or "ambassador" (legacy).
-    appRoutingMode: proxy
+appstore-sockets:
+  # -- enable/disable deployment of appstore websockets service
+  enabled: true
+helx-ldap:
+  # -- enable/disable deployment of the HeLx LDAP service
+  enabled: false
 backup-pvc-cronjob:
   # -- enable/disable deployment of backup-pvc-cronjob
   enabled: false
@@ -36,14 +30,14 @@ nfsrods:
   # -- enable/disable deployment of nfsrods
   enabled: false
 nginx:
-  # -- enable/disable deployment of nginx (retired; replaced by resty)
-  enabled: false
+  # -- enable/disable deployment of nginx
+  enabled: true
 pod-reaper:
   # -- enable/disable deployment of pod-reaper
   enabled: true
 resty:
-  # -- enable/disable deployment of resty (the edge/data plane; replaces nginx)
-  enabled: true
+  # -- enable/disable deployment of nginx
+  enabled: false
 search:
   # -- enable/disable deployment of search
   enabled: false
@@ -52,9 +46,6 @@ search:
 #   enabled: false
 ui:
   # -- enable/disable deployment of helx-ui
-  enabled: true
-appstore-sockets:
-  # -- enable/disable deployment of appstore websockets service
   enabled: true
 
 global:

@@ -1,0 +1,4 @@
+imagepullsecret-patcher:
+  enabled: false
+kubernetes-image-puller:
+  enabled: false

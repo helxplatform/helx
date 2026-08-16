@@ -1,0 +1,20 @@
+name: Build-Test
+on:
+  push:
+    branches-ignore:
+      - master
+      - main
+    paths-ignore:
+      - README.md
+      - .old_cicd/*
+      - .github/*
+      - .github/workflows/*
+      - LICENSE
+      - .gitignore
+      - .dockerignore
+      - .githooks
+
+jobs:
+  build-test:
+    uses: helxplatform/helx-github-actions/.github/workflows/build-test.yml@main
+    secrets: inherit

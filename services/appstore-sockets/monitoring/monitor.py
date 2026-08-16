@@ -59,7 +59,7 @@ def handle_pod_status_event(event):
     instance = event["object"]
 
     pod_name = instance.metadata.name
-    pod_labels = instance.metadata.labels
+    pod_labels = instance.metadata.labels or {}
     pod_status = instance.status.phase
     container_statuses = instance.status.container_statuses
     
@@ -148,7 +148,7 @@ def handle_namespaced_event(dyn_client, event):
         )
         resource = resource_def.get(namespace=obj.namespace, name=obj.name)
         resource_name = resource.metadata.name
-        resource_labels = resource.metadata.labels
+        resource_labels = resource.metadata.labels or {}
         resource_status = resource.status.phase
         # container_statuses = resource.status.container_statuses
 
@@ -199,8 +199,7 @@ def watch_namespaced_pods(api, dyn_client):
                 handle_pod_status_event(event)
         except Exception as e:
             if isinstance(e, KeyboardInterrupt): break
-            logger.warning(f"Connection with Kubernetes server closed. Attempting to reconnect in { RECONNECT_TIMEOUT }s...")
-            print(e)
+            logger.exception(f"Connection with Kubernetes server closed. Attempting to reconnect in { RECONNECT_TIMEOUT }s...")
             time.sleep(RECONNECT_TIMEOUT)
 
 def watch_namespaced_events(api, dyn_client):
@@ -217,8 +216,7 @@ def watch_namespaced_events(api, dyn_client):
                 handle_namespaced_event(dyn_client, event)
         except Exception as e:
             if isinstance(e, KeyboardInterrupt): break
-            logger.warning(f"Connection with Kubernetes server closed. Attempting to reconnect in { RECONNECT_TIMEOUT }s...")
-            print(e)
+            logger.exception(f"Connection with Kubernetes server closed. Attempting to reconnect in { RECONNECT_TIMEOUT }s...")
             time.sleep(RECONNECT_TIMEOUT)
 
 def main():

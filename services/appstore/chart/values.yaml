@@ -19,7 +19,8 @@ imagePostgresql:
   # -- Image tag for postgresql, coordinate this with postgresql dependency.
   tag: 17.6.0-debian-12-r0
 
-# An empty string equates to false, anything else is true.  If debug is true the logLevel is also set to DEBUG.
+# An empty string equates to false, anything else is true.  If debug is true the logLevel is also set
+# to DEBUG.
 debug: ""
 
 fetcherImage:
@@ -34,6 +35,106 @@ fetcherImage:
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
+
+secret:
+  # -- Name of a Secret containing the appstore environment variables. When set,
+  # the chart does not create or manage a Secret. For an existing legacy release,
+  # leave this empty to let the chart migrate the old primary Secret automatically.
+  existingSecret: ""
+
+  # -- Configure an ExternalSecret to populate the appstore Secret. This is
+  # mutually exclusive with secret.existingSecret. The external backend must be
+  # populated separately when migrating an existing release.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to <fullname>-secrets.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- Enable automatic migration from the legacy appstore Secret.
+    enabled: true
+
+  # -- Key/value pairs used to create the appstore Secret when neither
+  # secret.existingSecret nor secret.externalSecret.enabled is set.
+  #
+  # Keys are exposed unchanged as appstore container environment variables. Use
+  # these same names in this map, in the Secret named by existingSecret, or in
+  # the Secret returned by External Secrets.
+  #
+  # During an upgrade from the legacy chart, existing Secret data takes priority
+  # over this map. The map only supplies missing keys; it does not rotate stored
+  # passwords or signing keys automatically. Values for keys already present in
+  # the persisted Secret are ignored; rotate those credentials in the canonical
+  # Secret instead.
+  #
+  # Values are strings because Kubernetes Secret values are exposed as environment
+  # variables. Optional keys should be omitted unless the corresponding feature is
+  # enabled.
+  #
+  # Required for a normal appstore deployment:
+  #   SECRET_KEY: non-empty random string; 50 characters is the historical chart length, but the app has
+  #   no fixed length requirement (use this name, not legacy APPSTORE_SECRET_KEY)
+  #   APPSTORE_DJANGO_USERNAME: non-empty username string; "admin" is the historical default
+  #   APPSTORE_DJANGO_PASSWORD: password string; no fixed format or length is required
+  #
+  # PostgreSQL password (when PostgreSQL is enabled):
+  #   PG_DB_PASSWORD: application database-user password string; when using the
+  #   bundled PostgreSQL chart, it must match postgresql.global.postgresql.auth.password
+  #
+  # The chart computes and injects these database settings directly from Helm
+  # values/templates; do not put them in the Secret:
+  #   PG_DB_ENGINE: always "postgresql"
+  #   PG_DB_DATABASE: derived from postgresql.global.postgresql.auth.database
+  #   PG_DB_USERNAME: derived from postgresql.global.postgresql.auth.username
+  #   PG_DB_HOST: derived from the release name and PostgreSQL service name
+  #   PG_DB_PORT: derived from db.port, normally "5432"
+  #   POSTGRES_ENABLED: "true" when postgresql.enabled is true, otherwise "false"
+  #
+  # Optional appstore settings:
+  #   AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames
+  #   REMOVE_AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames
+  #   CSRF_DOMAINS: comma-separated origins including scheme, for example
+  #   "https://app.example.org,https://other.example.org"
+  #   EMAIL_HOST: SMTP hostname or IP address
+  #   EMAIL_PORT: decimal SMTP port number as a string, for example "25" or "587"
+  #   EMAIL_USE_TLS: empty string disables TLS; any non-empty string enables TLS because the app currently
+  #   reads this value without boolean parsing
+  #   EMAIL_HOST_USER: SMTP username, normally an email address
+  #   EMAIL_HOST_PASSWORD: SMTP password string
+  #   RECIPIENT_EMAILS: comma-separated email addresses
+  #
+  # OAuth provider settings (include the group matching each configured provider):
+  #   OAUTH_PROVIDERS: comma-separated lowercase provider names with no spaces, for example "google,github"
+  #   GITHUB_NAME: provider display/name string
+  #   GITHUB_CLIENT_ID: provider client ID string
+  #   GITHUB_SECRET: provider client secret string
+  #   GOOGLE_NAME: provider display/name string
+  #   GOOGLE_CLIENT_ID: provider client ID string
+  #   GOOGLE_SECRET: provider client secret string
+  #   CILOGON_NAME: provider display/name string
+  #   CILOGON_CLIENT_ID: provider client ID string
+  #   CILOGON_SECRET: provider client secret string
+  #   OIDC_NAME: OIDC provider ID/name string; its presence enables OIDC
+  #   OIDC_CLIENT_ID: OIDC client ID string
+  #   OIDC_SECRET: OIDC client secret string
+  #   OIDC_SERVER_URL: OIDC server URL
+  #
+  # iRODS settings (when the corresponding feature is enabled):
+  #   BRAINI_RODS: application-specific iRODS configuration string
+  #   NRC_MICROSCOPY_IRODS: application-specific iRODS configuration string
+  #   RODS_USERNAME: iRODS username string
+  #   RODS_PASSWORD: iRODS password string
+  #   IROD_COLLECTIONS: application-specific iRODS collection configuration string
+  #   IROD_ZONE: iRODS zone name string
+  #   IROD_HOST: iRODS hostname or IP address; omit this key when iRODS is disabled
+  #   IROD_PORT: decimal iRODS port number as a string
+  #   NFSRODS_HOST: NFS-RoDS hostname or IP address
+  values: {}
 
 networkPolicyLabels: {"role": "appstore"}
 
@@ -136,57 +237,22 @@ django:
   # Ex: [{"name": "Gitea", "url": "https://gitea.com"}]
   PRODUCT_LINKS: []
 
-  # -- user emails for oauth providers
-  AUTHORIZED_USERS: ""
-  # -- user emails to remove from an already-existing database
-  REMOVE_AUTHORIZED_USERS: ""
   # -- Specify the git branch to use for HeLx app specifications.  When
   # declaring 'tycho.externalAppRegistryRepo' leave this as an empty string.
   DOCKSTORE_APPS_BRANCH: "v1.6.0"
-  ###################################################
-  APPSTORE_DJANGO_USERNAME: "admin"
-  APPSTORE_DJANGO_PASSWORD: ""
+
   # -- show Django log in fields (true | false)
   ALLOW_DJANGO_LOGIN: ""
   # -- show SAML log in fields (true | false)
   ALLOW_SAML_LOGIN: ""
-  # -- Email Server host ie relay.unc.edu | relay.renci.org
-  EMAIL_HOST: ""
-  # -- Email Server port ie 25 or other.
-  EMAIL_PORT: ""
-  # -- Does the Email Server require TLS connection or not? Boolean (true | false)
-  EMAIL_USE_TLS: False
-  # -- email of account to use for outgoing emails
-  EMAIL_HOST_USER: ""
-  # -- password of account to use for outgoing emails
-  EMAIL_HOST_PASSWORD: ""
+
   # -- Specify URL to use for the "Image Download" link on the top part of website.
   IMAGE_DOWNLOAD_URL: ""
   # -- idle timeout for user web session
   SESSION_IDLE_TIMEOUT: "2592000" # 30 days
-  # -- list of appstore registration emails
-  RECIPIENT_EMAILS: ""
+
   # -- should be 'live' unless you are doing some kind of development
   DEV_PHASE: "live"
-  # -- allowed domains to make post requests to the appstore
-  CSRF_DOMAINS: "https://*.renci.org,https://*.renci.unc.edu"
-
-oauth:
-  # -- oauth providers separated by commas (google, github)
-  OAUTH_PROVIDERS: ""
-  GITHUB_NAME: ""
-  GITHUB_CLIENT_ID: ""
-  GITHUB_SECRET: ""
-  GOOGLE_NAME: ""
-  GOOGLE_CLIENT_ID: ""
-  GOOGLE_SECRET: ""
-  CILOGON_NAME: ""
-  CILOGON_CLIENT_ID: ""
-  CILOGON_SECRET: ""
-  OIDC_NAME: ""
-  OIDC_CLIENT_ID: ""
-  OIDC_SECRET: ""
-  OIDC_SERVER_URL: ""
 
 saml:
   cache:
@@ -209,25 +275,15 @@ saml:
   PROVIDER_NAME: "Single Sign-On"
 
 irods:
-  # -- enable irods support (true | false)
+  # -- enable branded iRODS support; provide its environment variables through
+  # the selected appstore Secret.
   enabled: false
-  BRAINI_RODS: ""
-  NRC_MICROSCOPY_IRODS: ""
-  RODS_USERNAME: ""
-  RODS_PASSWORD: ""
-  IROD_COLLECTIONS: ""
-  IROD_ZONE: ""
 
-
+# Non-secret configuration for the optional NFS-RoDS integration. Its appstore
+# connection settings and credentials belong in the selected appstore Secret.
 irodsUnbranded:
   enabled: false
-  RODS_USERNAME: ""
-  RODS_PASSWORD: ""
-  IROD_ZONE: ""
-  IROD_PORT: ""
-  IROD_HOST: ""
   IROD_USER_VALUES: {}
-  NFSRODS_HOST: ""
 
 atlas:
   # -- Disabling will turn off the creation of secrets/configmaps for Atlas
@@ -353,17 +409,14 @@ tycho:
   # "nvidia.com/gpu", but other types exist, such as "nvidia.com/mig-1g.5gb"
   # and other manufacturers have their own types.
   GPUResourceName: "nvidia.com/gpu"
-  # -- Enable/disable the external app registry file for Tycho.  Set
-  # 'django.DOCKSTORE_APPS_BRANCH' to an empty string when when using an
-  # external app registry.
+  # -- Enable/disable the external app registry file for Tycho.
   externalAppRegistryEnabled: false
   # -- Can be set to a git repo URL for fetching the app registry file or
-  # defaults file.  Something in the form of 
+  # defaults file.  Something in the form of
   # 'https://github.com/helxplatform/helx-apps/raw'.
   externalAppRegistryRepo: "https://github.com/helxplatform/helx-apps/raw"
-  # -- The branch that would be appended to 'externalAppRegistryRepo' to
-  # retrieve the app registry and defaults files.  The full URL, if using the
-  # externalAppRegistryRepo example for the app registry file would be 
+  # -- The branch that is appended to externalAppRegistryRepo when the external
+  # app registry is enabled. The full URL, using the repository below, would be
   # 'https://github.com/helxplatform/helx-apps/raw/master/app-registry.yaml'.
   # The default value is the AppVersion of this chart prefixed with a 'v'
   # (ex. v2.0.0).

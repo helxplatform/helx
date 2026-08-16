@@ -11,7 +11,7 @@ appstore-sockets:
   enabled: true
 helx-ldap:
   # -- enable/disable deployment of the HeLx LDAP service
-  enabled: false
+  enabled: true
 backup-pvc-cronjob:
   # -- enable/disable deployment of backup-pvc-cronjob
   enabled: false
@@ -31,13 +31,13 @@ nfsrods:
   enabled: false
 nginx:
   # -- enable/disable deployment of nginx
-  enabled: true
+  enabled: false
 pod-reaper:
   # -- enable/disable deployment of pod-reaper
   enabled: true
 resty:
-  # -- enable/disable deployment of nginx
-  enabled: false
+  # -- enable/disable deployment of resty
+  enabled: true
 search:
   # -- enable/disable deployment of search
   enabled: false

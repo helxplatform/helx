@@ -20,9 +20,10 @@
 Session.vim
 .netrwhist
 
-# Chart dependencies
+# Helm
 **/charts/*.tgz
 *.tgz
+.helm-ls-cache
 
 .history
 

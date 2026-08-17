@@ -1,0 +1,100 @@
+# Default values for helx-ldap.
+
+openldap:
+  # Keep the service name stable for HeLx consumers, including appstore's
+  # default ldap://openldap URI.
+  fullnameOverride: openldap
+
+  replicaCount: 1
+
+  global:
+    ldapDomain: example.org
+    # The Secret must contain LDAP_ADMIN_PASSWORD and
+    # LDAP_CONFIG_ADMIN_PASSWORD. Keep credentials out of chart values.
+    existingSecret: openldap-credentials
+
+  # The develop configuration intentionally permits anonymous LDAP binds. The
+  # anonymous-access ACL below still controls what anonymous users can read.
+  env:
+    LDAP_ALLOW_ANON_BINDING: "yes"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500M
+    limits:
+      cpu: "1"
+      memory: 500M
+
+  # On OpenShift, set podSecurityContext.enabled to false so the SCC can
+  # allocate the pod security context. This is the wrapper equivalent of the
+  # develop branch's generated fsGroup: null value.
+
+  persistence:
+    enabled: true
+
+  replication:
+    enabled: false
+
+  # These optional upstream components are not part of the HeLx LDAP service.
+  phpldapadmin:
+    enabled: false
+  ltb-passwd:
+    enabled: false
+  test:
+    enabled: false
+
+configuration:
+  # Apply the HeLx cn=config LDIFs as a Helm post-install/post-upgrade Job.
+  enabled: true
+
+  # The config administrator DN used by the upstream chart by default.
+  configDN: cn=admin,cn=config
+
+  # These are derived from openldap.global.ldapDomain and adminUser when empty.
+  # Set them explicitly when the LDAP deployment uses custom DNs.
+  baseDN: ""
+  adminDN: ""
+
+  # Apply the develop branch's anonymous-read ACL. This exposes userPassword
+  # hashes to anonymous readers and should be disabled if that behavior is not
+  # required. Set openldap.env.LDAP_ALLOW_ANON_BINDING to "no" as well when
+  # disabling anonymous access.
+  anonymousAccess:
+    enabled: true
+
+  # The Job connects to openldap.fullnameOverride by default. Set this only
+  # when the service name is intentionally different from the chart name.
+  serviceName: ""
+
+  # By default the Job uses the same image as the OpenLDAP dependency. The
+  # image must contain /bin/sh, ldapsearch, and ldapmodify.
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+
+  memberofModulePath: /opt/bitnami/openldap/lib/openldap/memberof.so
+
+  # Override this only when the Secret used by the OpenLDAP chart is not the
+  # Secret containing LDAP_CONFIG_ADMIN_PASSWORD.
+  existingSecret: ""
+
+  job:
+    backoffLimit: 6
+    activeDeadlineSeconds: 300
+    ttlSecondsAfterFinished: 300
+    securityContext:
+      runAsUser: 1001
+      runAsGroup: 1001
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    podSecurityContext:
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault

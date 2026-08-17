@@ -1,0 +1,54 @@
+# Agent guidance for helx
+
+## Repository layout
+
+- This is a monorepo. Application and Helm sources live under `services/`; do not
+  restructure service directories without asking for approval.
+- Buildable image services are:
+  - `services/appstore` (`appstore` image)
+  - `services/appstore-prepuller/controller` (`appstore-prepuller` image)
+  - `services/appstore-sockets` (`appstore-sockets/server` and `appstore-sockets/monitoring` images)
+  - `services/ui` (`helx-ui` image, but we call it `ui` everywhere else in this repo)
+  - `services/user-mutator` (`user-mutator` image)
+- Other service directories are chart-only or utility/source-only. Helm charts
+  may be at the service root or under `services/<service>/chart/`.
+- The umbrella chart is `deploy/helm/helx-chart`.
+
+## CI and image publishing
+
+- Shared image build logic is in `.github/actions/build-service/action.yml`.
+  Keep per-service workflows thin and reuse this action.
+- Feature-branch image tags are
+  `test_<sanitized-branch-name>_<short-sha>`.
+- `develop` uses `develop_<short-sha>`. `main` and `master` calculate the next
+  version from existing `v*` Git tags, publish `v<semver>` plus a short-SHA
+  traceability tag, and create the Git version tag after successful builds.
+  Commit prefixes `breaking:`/`major:` cause major bumps; `feat:`/`feature:`/
+  `minor:` cause minor bumps; other commits cause patch bumps.
+- Images and BuildKit cache layers are pushed only to
+  `containers.renci.org/helxplatform/<image>`. Required image secrets are
+  `CONTAINERHUB_USERNAME` and `CONTAINERHUB_PASSWORD`; Docker Hub is not used.
+  However, even though the prefix of these variables is `CONTAINERHUB_`, the actual
+  name of the registry is Harbor. Please use that name when referring to the registry
+  itself.
+
+## Helm charts
+
+- `.github/workflows/publish-charts.yml` detects changed chart roots, runs
+  dependency update and `helm lint --with-subcharts`, packages the chart, and
+  pushes it to `oci://ghcr.io/helxplatform/helm-charts/`.
+- Chart versions are immutable in OCI registries. Bump `version:` in
+  `Chart.yaml` for chart changes that have already been published.
+- `helx-chart` dependencies use the GHCR OCI registry, not the old GitHub Pages
+  repository. OCI consumers need GHCR registry authentication.
+- Chart-only changes should not trigger an image build; image workflows exclude
+  nested `chart/` paths.
+
+## Validation and safety
+
+- Use `helm lint` on the affected chart, then the complete chart set when
+  practical. Dependency archives are not checked in; CI runs
+  `helm dependency update` before linting.
+- Validate workflow/action YAML and inspect project diagnostics after edits.
+- Preserve unrelated user changes, including untracked directories such as
+  `deployments/argocd/`; do not commit or create branches unless requested.

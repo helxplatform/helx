@@ -1,390 +1,180 @@
-# HELX LDAP Repository
+# helx-ldap
 
-## Overview
-This repository, named **helx-ldap**, contains scripts and configuration files for 
-deploying **OpenLDAP** as part of a Kubernetes infrastructure. The deployment 
-focuses on handling per-user specialization within Kubernetes clusters, storing 
-user information in LDAP for managing access and resource provisioning. The 
-repository also includes tools for automating the generation of configuration 
-files necessary for the deployment and setup of OpenLDAP.
+This service provides the HeLx LDAP deployment and the tools used to administer
+LDAP users and groups.
 
-## Contents
-- Python scripts for automating the generation of configuration and Helm values
-  files.
-- Example configuration files that can be customized and deployed.
-- Makefile for automating tasks such as generating configuration files and 
-  deploying LDAP.
+## Repository layout
 
-## Quickstart
+- `chart/` is the Helm wrapper chart. It wraps the pinned
+  `openldap-stack-ha` dependency and applies the HeLx-specific LDAP
+  configuration as a Helm hook.
+- `scripts/` contains optional Python administration utilities for querying and
+  changing LDAP users, groups, and entries.
+- `test/users.yaml` contains sample input for the user-management scripts.
 
-This Quickstart guide should help you set up the administrative environment,
-install and configure the LDAP server, provide connectivity to it (via 
-port-forward) install extensions and configure to HeLx users, and verify
-functionality by adding a test user.  Follow the steps below to get the
-project up and running using the provided Makefile targets and default settings.
+The LDIF files used during deployment are packaged under
+`chart/files/ldif/`. The chart is now the source of truth for the deployment
+configuration.
 
-### Prerequisites
+## Deploying LDAP
 
-Ensure you have the following installed on your machine:
+The recommended deployment is through the umbrella chart in
+`deploy/helm/helx-chart`. The target Kubernetes namespace must already exist;
+the smoke-test script does not create namespaces.
 
-- **Python 3.x**
-- **Helm** (for deploying OpenLDAP)
-- **kubectl** (for interacting with your Kubernetes cluster)
+From the repository root:
 
-### Step 1: Install Python Dependencies
+```sh
+NAMESPACE=ai-sb-test
 
-Use pip to install the required Python packages:
+helm registry login ghcr.io
+export LDAP_ADMIN_PASSWORD='choose-an-admin-password'
+export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
 
-```
-pip install -r requirements.txt
+bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
 
-### Step 2: Deploy OpenLDAP with Helm
+The script creates or updates the `openldap-credentials` Secret, prepares the
+Helm dependencies, installs only the `helx-ldap` service, and waits for the
+OpenLDAP StatefulSet and configuration hook. The same configuration Job runs
+on upgrades.
 
-Add the Helm repository and deploy OpenLDAP using the following Makefile 
-targets:
+The Secret must contain these keys:
 
-```
-make helm_add  # Add the Helm repository for OpenLDAP
-make helm_deploy  # Deploy OpenLDAP to your Kubernetes cluster
-```
+- `LDAP_ADMIN_PASSWORD`
+- `LDAP_CONFIG_ADMIN_PASSWORD`
 
-### Step 3: Port-forward the OpenLDAP Service
+Do not put these credentials in Helm values or commit them to the repository.
 
-Port-forward the OpenLDAP service to your local machine on port 5389:
+## What the wrapper chart configures
 
-```
-kubectl port-forward svc/openldap 5389:389
-```
+The wrapper chart deploys the pinned `openldap-stack-ha` chart and applies the
+following HeLx-specific configuration in a hardened
+`post-install,post-upgrade` Job:
 
-### Step 4: Apply LDAP Overlays and Extensions
+1. Loads and enables the `memberOf` module and overlay.
+2. Applies the configured anonymous-access ACL when enabled.
+3. Installs the `helxUser` schema, including:
+   - `runAsUser`
+   - `runAsGroup`
+   - `fsGroup`
+   - `supplementalGroups`
+   - `userAlias`
 
-Run the following Makefile targets to set up the necessary LDAP extensions 
-and overlays:
+The Job waits for LDAP readiness, discovers the generated MDB database DN and
+schema DN, and is idempotent across upgrades. Existing installations with the
+former `kubernetesSC` schema must be migrated explicitly because the old and
+new object classes use the same OID.
 
-```
-make apply_memberof  # Apply the memberOf overlay to OpenLDAP
-make apply_kubernetes_sc  # Apply the Kubernetes security context overlay
-```
+The chart defaults preserve the current `develop` branch behavior, including:
 
-### Step 5: List Existing LDAP Users
+```yaml
+openldap:
+  env:
+    LDAP_ALLOW_ANON_BINDING: "yes"
 
-You can list the existing LDAP users with the following script:
-
-```
-./scripts/get_ldap_users.py  # This will list all users using default settings
-```
-
-### Step 6: Set New LDAP Users
-
-To create new users from a YAML file, use the set_ldap_users.py script. 
-You can find an example YAML file under test/users.yaml.
-
-```
-./scripts/set_ldap_users.py test/users.yaml
-```
-
-### Step 7: Verify the New Users
-
-After setting new users, list them again to verify the users were created 
-successfully:
-
-```
-./scripts/get_ldap_users.py  # Verify that the new users have been added
+configuration:
+  anonymousAccess:
+    enabled: true
 ```
 
-### Summary of Steps
+This is security-sensitive: the bundled anonymous ACL permits anonymous reads
+of `userPassword` hashes. Treat that as a compatibility default, not a
+production security baseline. For a fresh hardened deployment, use:
 
-1. Install dependencies: pip install -r requirements.txt
-2. Add the Helm repository: make helm_add
-3. Deploy OpenLDAP: make helm_deploy
-4. Port-forward OpenLDAP: kubectl port-forward svc/openldap 5389:389
-5. Apply the memberOf overlay: make apply_memberof
-6. Apply the Kubernetes SC overlay: make apply_kubernetes_sc
-7. List users: ./scripts/get_ldap_users.py
-8. Add users from a YAML file: ./scripts/set_ldap_users.py test/users.yaml
-9. Verify users: ./scripts/get_ldap_users.py
-
-
-## Configuration Files and Scripts
-
-### `helx_ldap_config.yaml`
-The **`helx_ldap_config.yaml`** file is generated using the Python script 
-`generate_helx_ldap_config.py`. It stores important LDAP-related configurations, 
-including:
-- **LDAP Server URL**: The address of the LDAP server.
-- **Admin Bind DN**: The Distinguished Name used by the admin to bind to the 
-  LDAP server for performing administrative tasks.
-- **Config DN**: The DN used for accessing the `cn=config` tree, where the LDAP 
-  server's internal configuration is managed.
-- **Admin Password** and **Config Password**: The passwords for the admin and 
-  config DNs are securely stored in this file.
-
-This YAML file is central to both the LDAP deployment and for generating other 
-necessary configuration files.
-
-### `openldap_values.yaml`
-The **`openldap_values.yaml`** file is a Helm values file used to deploy 
-OpenLDAP via Helm charts. It specifies settings like:
-- **Replica Count**: Number of replicas to run for OpenLDAP.
-- **Admin and Config Passwords**: These are fetched from `helx_ldap_config.yaml`
-  and inserted into this file for use in the OpenLDAP Helm deployment.
-- **Persistence and Replication** settings to manage OpenLDAP’s data storage and 
-  redundancy.
-
-This file is generated by the Python script `generate_openldap_values.py` and 
-allows the automatic deployment of OpenLDAP using Helm.
-
-### Python Scripts
-1. **`generate_helx_ldap_config.py`**: This script prompts the user for LDAP 
-   configuration settings, including server URL, admin DN, config DN, and 
-   optionally generates random passwords for the admin and config users. The 
-   generated settings are stored in the `helx_ldap_config.yaml` file.
-   
-2. **`generate_openldap_values.py`**: This script reads the LDAP settings from 
-   `helx_ldap_config.yaml` and generates the `openldap_values.yaml` Helm values 
-   file, used for deploying OpenLDAP via a Helm chart. 
-
-### Makefile
-The **Makefile** automates several tasks in this repository, including:
-- **`make openldap_values.yaml`**: Generates the Helm values file 
-  (`openldap_values.yaml`) using the Python script.
-- **`make clean`**: Cleans up generated files such as `helx_ldap_config.yaml` 
-  and `openldap_values.yaml`.
-
-
-## Automating OpenLDAP Deployment Using Helm
-
-To deploy OpenLDAP using Helm and the values file `openldap_values.yaml`, follow 
-the steps below. The Helm chart we use is referred to simply as **openldap**, 
-though it originates from [Artifact Hub](https://artifacthub.io/packages/helm/helm-openldap/openldap-stack-ha).
-
-### Prerequisites:
-- **Helm** installed on your system.
-- Access to a Kubernetes cluster with the proper context set.
-- The `openldap_values.yaml` file generated using the scripts provided in this 
-  repository.
-
-### Steps for Deployment:
-
-1. **Add the OpenLDAP Helm Repository**:
-   Add the repository where the Helm chart is hosted:
-   ```
-   helm repo add openldap https://jp-gouin.github.io/helm-openldap/
-   ```
-
-2. **Update the Helm Repository**:
-   Ensure you have the latest charts:
-   ```
-   helm repo update
-   ```
-
-3. **Deploy OpenLDAP**:
-   Deploy OpenLDAP using the values file you generated:
-   ```
-   helm install openldap openldap/openldap-stack-ha -f openldap_values.yaml
-   ```
-
-4. **Verify the Deployment**:
-   After deployment, verify the OpenLDAP pods are running:
-   ```
-   kubectl get pods
-   ```
-
-### Makefile support:
-This process is automated by the Makefile targets `helm_repo_add` and
-`helm_deploy`
-```
-make helm_repo_add
-make helm_deploy
+```yaml
+helx-ldap:
+  openldap:
+    env:
+      LDAP_ALLOW_ANON_BINDING: "no"
+  configuration:
+    anonymousAccess:
+      enabled: false
 ```
 
-### Accessing OpenLDAP via Port-Forwarding
+Disabling the setting after the permissive ACL has already been applied does
+not currently remove that ACL; existing installations require an explicit ACL
+migration.
 
-Once OpenLDAP is deployed in the Kubernetes cluster, you can forward the LDAP 
-service port to your local machine to interact with it. By default, OpenLDAP 
-uses port **389** for LDAP, but since ports below **1024** require elevated 
-permissions, we will forward the service to port **5389** on your local machine.
+For custom LDAP naming contexts, configure `openldap.global.ldapDomain`, or
+set `configuration.baseDN` and `configuration.adminDN` explicitly. The
+configuration Job uses the OpenLDAP dependency image by default, which must
+contain `/bin/sh`, `awk`, `sed`, `grep`, `ldapsearch`, and `ldapmodify`.
 
-#### Port-Forwarding the OpenLDAP Service
+## Chart development
 
-To allow convenient administrative local connectivity, forward the LDAP port
-to **5389** locally, run the following command:
+From the repository root:
 
-```
-kubectl port-forward svc/openldap 5389:389
-```
+```sh
+make -C services/helx-ldap chart_dependencies
+make -C services/helx-ldap chart_lint
 
-## Generic LDIF-Applying Script
-
-The script `apply_ldif_files.py` allows you to apply multiple LDIF files in a 
-specified directory in a **bottom-up** order. This is particularly useful when 
-you have dependencies among your LDIF files, such as module loading or schema 
-extensions, which need to be applied before the main overlay or configuration.
-
-### Script Overview
-
-The script uses the following steps:
-
-1. **Load LDAP Configuration**: The LDAP configuration (such as server URL, bind 
-   DN, and password) is read from the `helx_ldap_config.yaml` file.
-   
-2. **Directory Traversal**: The script traverses the directory tree rooted at 
-   the provided directory in a bottom-up order (applying dependencies first).
-
-3. **Apply LDIF Files**: Each `.ldif` file in the directory tree is applied to 
-   the LDAP server using the `ldapmodify` command.
-
-## Enabling the `memberOf` Overlay in OpenLDAP
-
-The **`memberOf`** overlay in OpenLDAP provides automatic management of 
-group membership information in user entries. When the overlay is enabled, 
-any group membership changes (such as adding a user to a group) will 
-automatically reflect in the user's `memberOf` attribute, which lists all 
-groups the user is a member of.
-
-This functionality is particularly useful for environments that frequently 
-query group membership from the user entries, as it eliminates the need to 
-manually track which groups a user belongs to.
-
-## `memberOf` Overlay
-
-To enable the `memberOf` overlay, the following steps are required:
-
-1. **Load the `memberOf` Module**: The `memberof` module must be loaded into 
-   the OpenLDAP server to make the overlay available.
-   
-2. Apply the memberOf Overlay: After the module is loaded, the memberOf overlay
-   must be configured for the specific database where user and group entries
-   are stored. The overlay ensures that the memberOf attribute is automatically
-   maintained for any changes to group membership.
-
-### Makefile support
-
-This is automated using the `apply_memberof` target
-```
-make apply_memberof
+# Only when intentionally changing dependency versions:
+make -C services/helx-ldap chart_update_dependencies
 ```
 
-## `kubernetesSC` user extension
+Equivalent direct commands are:
 
-The user definition (inetOrgUser) has been extended to also include a
-Kubernetes SecurityContext and PodSecurityContext indended to modify a
-pod on behalf of a user.  This is done with LDIF as well.
+```sh
+helm dependency build services/helx-ldap/chart
+helm lint services/helx-ldap/chart --with-subcharts
 
-### Applying Kubernetes SC LDIFs
-
-In addition to managing the `memberOf` overlay, the repository also includes 
-LDIF files related to Kubernetes service account configuration. These LDIF 
-files are located in the `ldif/kubernetesSC` directory and can be processed 
-using the same generic LDIF-applying script.
-
-### Makefile Support
-
-The `apply_kubernetes_sc` Makefile target automates the process of applying 
-these LDIF files. It uses the same generic script (`apply_ldif_files.py`) but 
-starts in the `ldif/kubernetesSC` directory.
-```
-make apply_kubernetes_sc
+# Only when intentionally changing dependency versions:
+helm dependency update services/helx-ldap/chart
 ```
 
-## General Use Scripts
+The umbrella chart's LDAP-only render can be checked with:
 
-### `get_ldap_dn.py` Script
-
-The `get_ldap_dn.py` script retrieves all Distinguished Names (DNs) from an 
-LDAP server. It can be used to connect to an LDAP server, perform a search 
-from a specified base DN, and return a list of all DNs found in that subtree.
-
-The script accepts connection details either from the command-line arguments 
-or from an optional `helx_ldap_config.yaml` file. Command-line arguments 
-always take precedence over configuration values if both are provided.
-
-#### Usage
-
-You can run the script by specifying the LDAP server URL, bind DN, password, 
-and search base either via command-line options or by using the configuration 
-file:
-
-```
-scripts/get_ldap_dn.py --ldap-server <LDAP_SERVER_URL> --bind-password <BIND_PASSWORD>
+```sh
+helm template helx deploy/helm/helx-chart \
+  --namespace ai-sb-test \
+  --values deploy/helm/helx-chart/examples/ldap-test-values.yaml
 ```
 
-### `delete_ldap_user.py` Script
+## Accessing LDAP
 
-The `delete_ldap_user.py` script is designed to delete a single LDAP entry 
-specified by its Distinguished Name (DN). It connects to an LDAP server, binds 
-with the provided credentials, and deletes the specified user or entry.
+Forward the LDAP service to a local port:
 
-The script supports connection details either passed via command-line arguments 
-or from an optional `helx_ldap_config.yaml` configuration file. Command-line 
-arguments take precedence if both sources are provided.
-
-#### Usage
-
-You can run the script by specifying the DN of the entry to delete and either 
-providing the LDAP server credentials via arguments or relying on the 
-configuration file:
-
-```
-scripts/delete_ldap_user.py <DN> --ldap-server <LDAP_SERVER_URL> --bind-password <BIND_PASSWORD>
+```sh
+kubectl -n ai-sb-test port-forward svc/openldap 5389:389
 ```
 
-### `uuid_to_oid.py` Script
+The administration scripts use `ldap3` and are not part of the Helm install.
+Install their Python dependencies when needed:
 
-The `uuid_to_oid.py` script generates a random UUID (Universally Unique 
-Identifier) and converts it to an OID (Object Identifier) in dotted decimal 
-format. The UUID is generated using Python's built-in `uuid` module, and the 
-OID is constructed by appending the UUID's integer representation to the prefix 
-`2.25`.
-
-This script can be used to create unique identifiers in the OID format, which 
-is often used in network management, X.500 directories, and other similar 
-applications.
-
-### Usage
-
-Run the script directly to generate a UUID and its corresponding OID:
-
-```
-scripts/uuid_to_oid.py
+```sh
+python3 -m pip install -r services/helx-ldap/requirements.txt
 ```
 
-### LDAP User Retrieval Script
+Most administration scripts accept connection arguments such as
+`--ldap-server`, `--bind-dn`, and `--bind-password`; several also support a
+user-supplied YAML configuration file through `--config`. Run a script with
+`--help` to see its exact interface. The repository no longer generates an
+administration configuration file, so provide connection details explicitly
+or maintain that local file outside version control.
 
-The `get_ldap_users.py` script retrieves and displays user details from an LDAP 
-server, including group memberships. The script can output user details in 
-either text or YAML format. It is intended for use in environments where LDAP 
-is used for directory services and requires authentication and access to user 
-data.
+Examples, run from `services/helx-ldap` after port-forwarding:
 
-#### Usage
+```sh
+python scripts/get_ldap_dn.py \
+  --ldap-server ldap://127.0.0.1:5389 \
+  --bind-dn 'cn=admin,dc=example,dc=org' \
+  --bind-password '<password>' \
+  --search-base 'dc=example,dc=org'
 
-To run the script, provide connection details for the LDAP server, including 
-the server URL, bind DN, and password. You can specify these details as 
-command-line arguments or load them from a configuration file 
-(`helx_ldap_config.yaml`).
+python scripts/get_ldap_users.py \
+  --ldap-server ldap://127.0.0.1:5389 \
+  --bind-dn 'cn=admin,dc=example,dc=org' \
+  --bind-password '<password>' \
+  --output-format yaml
 
-#### Example Command
-
+python scripts/set_ldap_users.py test/users.yaml \
+  --ldap-server ldap://127.0.0.1:5389 \
+  --bind-dn 'cn=admin,dc=example,dc=org' \
+  --bind-password '<password>' \
+  --user-base 'ou=users,dc=example,dc=org' \
+  --group-base 'ou=groups,dc=example,dc=org'
 ```
-./scripts/get_ldap_users.py --output-format yaml
-```
-### LDAP User Creation Script
 
-The `create_ldap_user.py` script allows you to create or update LDAP users 
-from a YAML file and manage their group memberships. The script connects to an 
-LDAP server, ensuring that users and groups are properly configured.
-
-#### Usage
-
-To run the script, you can either specify the necessary LDAP connection 
-details via command-line arguments or use a configuration file 
-(`helx_ldap_config.yaml`). Command-line arguments will take precedence 
-over values in the config file.
-
-#### Example Command
-
-```
-./scripts/create_ldap_user.py users.yaml --user-base "ou=users,dc=example,dc=org" --group-base "ou=groups,dc=example,dc=org" users.yaml
-```
+Use caution with administration and deletion scripts; they modify or remove
+LDAP entries.

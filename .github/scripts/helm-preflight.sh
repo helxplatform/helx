@@ -2,10 +2,7 @@
 set -euo pipefail
 
 chart_field() {
-  local field=$1
-  local chart_dir=$2
-  awk -v field="$field" '$1 == field ":" { gsub(/["'\'']/, "", $2); print $2; exit }' \
-    "$chart_dir/Chart.yaml"
+  python3 .github/scripts/ci.py chart-field "$2" "$1"
 }
 
 validate_inputs() {

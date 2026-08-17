@@ -1,139 +1,106 @@
-# HeLx monorepo CI/CD
+# HeLx CI/CD
 
-This directory contains the shared GitHub Actions implementation for validating
-service images and Helm charts, publishing immutable artifacts, and recording a
-compatible set of component versions as a marked monorepo release.
+The repository uses two GitHub Actions workflows:
 
-## Implementation map
+- [`workflows/ci.yml`](workflows/ci.yml) validates pull requests, non-`main`
+  pushes, and manual image builds without registry credentials.
+- [`workflows/publish.yml`](workflows/publish.yml) serializes publication from
+  `main`, reconciles immutable artifacts, and optionally creates a release.
 
-Each executable has a short `main` flow and delegates individual policies to
-named functions:
+The workflows deliberately show the publication order in YAML. Custom code is
+limited to metadata validation, matrix generation, release-manifest generation,
+and Helm dependency assembly that cannot be expressed safely in workflow YAML.
 
-- `helm-select-charts.sh` resolves the comparison baseline and selects direct and
-  reverse-dependent charts.
-- `helm-build-chart.sh` prepares locked dependencies, lints, and packages one
-  chart.
-- `helm-preflight.sh` distinguishes a missing chart from an existing identical or
-  conflicting immutable version.
-- `helm_metadata.py` parses and validates the limited Helm dependency metadata
-  needed by those shell scripts.
-- `release_lib.py` owns release baselines, semantic deltas, release invariants,
-  image build decisions, and monorepo tag selection.
-- `release-plan.py` is the planning command-line entry point;
-  `release-baseline.py` exposes baseline lookup to chart selection.
-- `release-promote.py` validates matrix-job digest handoffs, preflights registry
-  state, promotes semantic tags, and materializes the compatibility manifest.
+## Workflow order
 
-The shell files contain command orchestration; structured metadata and release
-policy live in unit-tested Python functions.
+```mermaid
+flowchart TD
+    Test[Validate CI configuration and versions] --> Common[Lint or publish helx-common]
+    Common --> Services[Validate or publish every service chart]
+    Services --> Umbrella[Validate or publish the umbrella chart]
+    Common --> Images[Validate changed images]
+    Umbrella --> ProductionImages[Publish or reuse semantic image tags]
+    ProductionImages --> Decision{Umbrella version increased?}
+    Decision -->|No| Done[Publication complete]
+    Decision -->|Yes| Release[Create manifest, tag, and GitHub Release]
+```
 
-## Release flow
+`helx-common` is always processed first. If it cannot be built, linted, or
+published, no service chart, umbrella chart, image, or release proceeds. This is
+intentional because any chart may consume the shared library from the OCI
+registry.
 
-For `main`, publication is serialized in this order:
+## CI validation
 
-1. `Publish-Helm-Charts` determines chart changes relative to the last successful
-   marked monorepo release (or the current push range before the first release).
-2. Every selected chart and its local reverse dependents are built and linted.
-3. Directly changed service charts are published or verified as already identical.
-4. The umbrella chart is published only after all selected service charts succeed.
-5. A successful Helm run triggers `Build-Protected-Services` for the same commit.
-6. Changed images are built under immutable `staging_<full-commit-sha>` tags.
-7. The release job verifies the registry staging digest against the digest returned
-   by each build job, promotes semantic image tags, and verifies unchanged images.
-8. Only then does CI create the marked annotated Git tag and GitHub Release.
+`CI` runs on every pull request, every non-`main` branch push, and manual
+dispatch. Its stable branch-protection result is `CI gate`.
 
-The final Git tag therefore identifies a commit whose selected charts and images
-have completed publication. Publication jobs are FIFO and are not intentionally
-cancelled or replaced by newer protected-branch pushes.
+It performs these checks:
 
-`develop` follows the same Helm-success gate, then builds all configured images
-under `develop_<full-commit-sha>`. It does not create semantic image tags, a Git
-tag, or a GitHub Release.
+1. install the pinned CI dependency from [`requirements-ci.txt`](requirements-ci.txt);
+2. run the focused tests for [`scripts/ci.py`](scripts/ci.py);
+3. validate every chart, lockfile, image definition, Dockerfile, and local
+   dependency path;
+4. require chart `version` increases when an existing chart directory changes;
+5. require `appVersion` increases when an image's source changes;
+6. run `actionlint` against the workflows;
+7. lint and package `deploy/helm/helx-common/chart`;
+8. lint and package every discovered `services/*/chart`;
+9. lint and package `deploy/helm/helx-chart`; and
+10. build only affected images without logging in or pushing.
 
-## Image validation and publication
+All charts are validated instead of maintaining a changed-chart dependency
+planner. The repository currently has few enough charts that the simpler,
+predictable behavior is preferable to optimizing individual lint jobs.
 
-The buildable image definitions are centralized in
-[`release/components.json`](release/components.json):
+Manual dispatch accepts one image target or `all`. The target list and all
+build metadata come from [`ci/images.json`](ci/images.json); there are no
+per-service workflows or shell `case` mappings.
 
-| Source | Registry repository |
-| --- | --- |
-| `services/appstore` | `containers.renci.org/helxplatform/appstore` |
-| `services/appstore-prepuller/controller` | `containers.renci.org/helxplatform/appstore-prepuller` |
-| `services/appstore-sockets` | `containers.renci.org/helxplatform/appstore-sockets/server` |
-| `services/appstore-sockets/monitoring` | `containers.renci.org/helxplatform/appstore-sockets/monitoring` |
-| `services/ui` | `containers.renci.org/helxplatform/helx-ui` |
-| `services/user-mutator` | `containers.renci.org/helxplatform/user-mutator` |
+## Helm charts
 
-Pull requests and non-protected branch pushes run credential-free Docker builds
-for the affected service. These builds use a local `test_<branch>_<short-sha>` tag
-only as a BuildKit label; they do **not** log in or push an image. Manual image
-runs are also validation-only and cannot choose an arbitrary registry tag.
+### Layout
 
-All image logic is implemented by
-[`actions/build-service/action.yml`](actions/build-service/action.yml). Pushed
-builds include provenance and SBOM attestations. Feature validation uses the
-GitHub Actions cache; protected builds use the service's Harbor build cache.
+CI discovers:
 
-### Image version rules
+```text
+deploy/helm/helx-common/chart   shared library, always first
+deploy/helm/helx-chart          umbrella, always last
+services/*/chart                service charts
+```
 
-For a component with an image:
+Adding a service chart under that layout automatically adds it to validation and
+publication.
 
-- source changes require an increase to the chart's `appVersion`;
-- the semantic image tag is `v<appVersion>`;
-- semantic tags are never overwritten with another digest;
-- chart-only files excluded by `components.json` must also be excluded from the
-  Docker build context (for example with `.dockerignore`);
-- changing shared image-build/release code rebuilds all images, but does not
-  create new semantic tags for components whose `appVersion` is unchanged.
+### Dependency rules
 
-Harbor should additionally enforce immutable semantic tags. Promotion is
-necessarily a sequence of registry operations rather than a cross-repository
-transaction, but CI preflights every promotion before creating any tag and is
-idempotent when rerun with the same staged digests.
+- A chart with dependencies must commit `Chart.lock`.
+- `Chart.yaml` and `Chart.lock` must contain identical dependency
+  name/version/repository tuples.
+- Repository-owned dependencies should use
+  `oci://ghcr.io/helxplatform/helm-charts` in committed metadata.
+- Generated `charts/` directories and dependency archives are not committed.
+- CI assembles the exact lock locally: if a repository chart with the locked
+  name and version is present, CI packages that source; otherwise it pulls the
+  locked external or OCI artifact.
 
-## Helm chart validation and publication
+The exact-version local substitution is what allows a pull request to validate a
+new `helx-common` or service version before it exists in GHCR. It does not change
+committed dependency metadata and never substitutes a different local version.
 
-Service chart roots are discovered from `services/*/chart/Chart.yaml`; the
-umbrella chart is `deploy/helm/helx-chart`. A newly added service chart therefore
-does not need to be added to a hardcoded CI matrix. Manual validation accepts
-`all` or a discovered chart directory.
+### Publication
 
-Chart behavior by event:
+Every `main` publication reconciles all charts rather than selecting changed
+charts from Git history:
 
-| Event | Validate | Publish |
-| --- | --- | --- |
-| Pull request | Changed charts and local reverse dependents | Never |
-| Non-protected branch push | Changed charts and local reverse dependents | Never |
-| Manual dispatch | Requested chart/reverse dependents, or all | Never |
-| `develop` push | Changed charts/reverse dependents | Never |
-| `main` push | Changes accumulated since the last marked release | Directly changed charts |
+1. publish or reuse `helx-common`;
+2. publish or reuse every service chart, with bounded parallelism; and
+3. publish or reuse the umbrella chart.
 
-A change to Helm CI itself validates every chart but publishes none unless chart
-source also changed. Local `file://` reverse dependents are added to validation,
-so a library-chart change also checks its consumers.
-
-The reusable implementation is
-[`actions/publish-charts/action.yml`](actions/publish-charts/action.yml), with
-scripts under [`scripts/`](scripts/). Helm is pinned to `3.18.6`.
-
-### Dependency and lockfile rules
-
-- Every chart declaring dependencies must commit `Chart.lock`.
-- CI uses `helm dependency build`, not `helm dependency update`, so it does not
-  silently recalculate dependency versions.
-- `helm lint --with-subcharts` is intentionally not used. Each repository-owned
-  chart is validated directly, and enabling that flag caused unrelated duplicate
-  linting/failures in parent charts.
-- For umbrella validation, matching service dependencies from the checkout are
-  packaged locally first. This permits validation before a newly bumped service
-  version exists in GHCR while preserving the umbrella's locked versions.
-- Selected service charts publish before the umbrella chart.
-
-Chart versions in GHCR are immutable. CI first compares the local package with an
-existing package of the same name/version by recursively unpacking dependency
-archives. An identical package is safely reused, which makes a full retry after
-partial publication possible. Different content under an existing version fails
-closed; increment `version` in `Chart.yaml`.
+Chart versions are immutable. [`scripts/helm-preflight.sh`](scripts/helm-preflight.sh)
+normalizes local and existing packages, including nested dependency archives.
+An identical version is reused; different content under an existing version
+fails and requires a `Chart.yaml` version increase.
 
 Charts publish to:
 
@@ -141,164 +108,132 @@ Charts publish to:
 oci://ghcr.io/helxplatform/helm-charts
 ```
 
-Publication uses the job-scoped `GITHUB_TOKEN`; no personal GHCR token is
-required.
+Publication uses the job-scoped `GITHUB_TOKEN` with `packages: write` only in
+chart publication jobs.
 
-## Marked monorepo releases
+## Container images
 
-Release planning is implemented in
-[`release/release_lib.py`](release/release_lib.py) and configured by
-[`release/components.json`](release/components.json).
+[`ci/images.json`](ci/images.json) is the only image-build inventory. It records
+source paths, chart ownership, contexts, Dockerfiles, and Harbor repositories
+for:
 
-A release baseline must be:
+- appstore;
+- appstore-prepuller;
+- appstore-sockets server and monitoring;
+- UI; and
+- user-mutator.
 
-- an annotated `v<semver>` Git tag;
-- an ancestor of the commit being released; and
-- contain the exact marker line `helx-monorepo-release` plus an embedded,
-  checksummed compatibility manifest.
+Pull requests build affected images with the GitHub Actions cache and no Harbor
+credentials. Chart-only changes are excluded from image-source detection.
 
-The repository `v*` Git tag namespace is reserved exclusively for these
-monorepo compatibility releases. Every `v<semver>` Git tag must be annotated and
-contain the release marker and embedded manifest; an unmarked or lightweight
-`v*` tag is a policy violation that stops release planning. Individual service
-versions belong in chart metadata, OCI chart versions, and container-image tags,
-not repository Git tags. Historical tags in the separate service repositories
-are unaffected.
+On `main`, publication reconciles every configured semantic image reference:
 
-The first marked monorepo release is configured as `v4.5.7`, continuing the
-existing umbrella `4.5.6` lineage. Before that first release only, existing
-semantic image tags are adopted at their current digest and missing tags are
-filled from the staged build. If `v4.5.7` becomes occupied before bootstrap,
-change `initial_version` rather than deleting or overwriting the tag.
+```text
+containers.renci.org/helxplatform/<repository>:v<chart-appVersion>
+```
 
-After bootstrap, the monorepo version bump is the highest semantic delta among
-all component chart versions and application versions since the previous marked
-release:
+[`actions/build-service/action.yml`](actions/build-service/action.yml) first
+inspects the semantic reference. An existing immutable tag is reused; a missing
+tag is built and pushed directly with provenance and SBOM attestations. There
+are no staging tags, promotion jobs, or digest artifacts passed between jobs.
+Harbor must enforce immutability for semantic `v*` tags.
 
-- any major component delta -> monorepo major;
-- otherwise, any minor delta -> monorepo minor;
-- otherwise -> monorepo patch;
-- component or image removal -> monorepo major;
-- documentation/CI-only changes with no component delta -> monorepo patch.
+`appstore-prepuller` and `user-mutator` are still validated and published, but
+they are not included in a compatibility release until the umbrella chart locks
+them as dependencies.
 
-For example, if `user-mutator` changes from `1.7.2` to `1.7.3` and all other
-component versions remain unchanged, `v4.1.6` advances to `v4.1.7`.
+## Releases
 
-Each GitHub Release attaches `helx-release-manifest.json`, which records every
-component's chart version, `appVersion`, component version, semantic image ref,
-and immutable image digest ref. The same manifest is embedded in the annotated
-Git tag.
+The version in `deploy/helm/helx-chart/Chart.yaml` is the authoritative HeLx
+release version. A normal `main` push creates a release only when that value
+increases. Documentation, CI-only, and independent component changes do not
+consume release versions.
 
-## Required repository configuration
+The release tag is `v<umbrella-version>`. It is annotated with a concise message
+and must either be absent or already point to the same commit. The full
+compatibility data is attached to the GitHub Release as
+`helx-release-manifest.json`; it is not duplicated inside the Git tag.
 
-### GitHub environments and Harbor secrets
+The manifest is derived from:
 
-Create these GitHub environments:
+- the umbrella chart name and version;
+- the exact dependency tuples and digest in the umbrella `Chart.lock`;
+- metadata read from the exact packaged dependency archives; and
+- registry digests resolved from semantic image tags for locked dependencies.
 
-- `harbor-staging`
-- `harbor-production`
+It therefore records the umbrella's deployable dependency set, not every latest
+chart in the checkout.
 
-Define both secrets in each environment:
+Manual `Publish` dispatch can set `release-current` to repair or create the
+release for the current umbrella version. It cannot supply an arbitrary version.
+If the tag exists at another commit, publication fails rather than moving it.
+
+Moving the umbrella chart into its current path does not itself create a
+release. Make the next release explicit by increasing its chart version.
+
+## Repository configuration
+
+Define these repository-level GitHub Actions secrets:
 
 ```text
 CONTAINERHUB_USERNAME
 CONTAINERHUB_PASSWORD
 ```
 
-Use different Harbor service accounts and repository/tag permissions where
-possible:
+No GitHub environment is required. The Harbor account should be able to inspect
+and push the configured image
+repositories and build-cache tags, but it should not be able to overwrite
+semantic tags.
 
-- `harbor-staging`: push `develop_*` and build-cache tags only;
-- `harbor-production`: push `staging_*`, semantic `v*`, and production build
-  caches.
+GitHub Actions must be allowed to grant:
 
-Only trusted protected branches trigger workflows that can access these
-environments. Optional required reviewers can be configured on
-`harbor-production`; note that matrix staging builds will each reference that
-environment.
+- `packages: write` to chart publication jobs; and
+- `contents: write` to the optional release job.
 
-The repository Actions policy must allow the workflow's explicit permissions:
+Protect `main` and other integration branches with pull requests, current-branch
+requirements, restricted force pushes/deletions, and the `CI gate` required
+check. Protect `.github/**` with a certain user list once the CI maintainers are
+known. Publication uses one `publish-main` concurrency group and does not cancel a
+running publication. GitHub Actions may replace an older pending run with a
+newer one; this is safe because every run reconciles the complete immutable
+chart and image inventory.
 
-- `packages: write` for GHCR chart publication;
-- `contents: write` for the final annotated tag and GitHub Release.
+## Adding a chart or image
 
-### Branch and tag protection
+For a chart:
 
-Use GitHub rulesets for `main` and `develop`:
+1. place service chart code under `services/<name>/chart`;
+2. use strict `x.y.z` chart versions;
+3. commit `Chart.lock` whenever dependencies are declared; and
+4. add a values override under `helm/lint-values/<chart-name>.yaml` only when
+   default values cannot be linted safely.
 
-1. require pull requests;
-2. require the relevant chart/image validation checks;
-3. require branches to be current before merge;
-4. restrict force pushes and deletions;
-5. restrict bypasses;
-6. reserve `v*` tags for GitHub Actions and permit it to create marked releases.
+For an image:
 
-GitHub does not provide a standalone “lock this directory” switch. Protect CI
-source with `CODEOWNERS` plus a rule requiring CODEOWNER approval. Once the real
-owner is known, add an entry such as:
+1. add its chart, source paths, context, Dockerfile, and relative Harbor
+   repository to `ci/images.json`;
+2. ensure the chart defines strict `x.y.z` `appVersion` metadata;
+3. exclude chart-only files from both the CI source definition and Docker build
+   context; and
+4. make the image a locked umbrella dependency if it belongs in compatibility
+   releases.
 
-```text
-/.github/ @your-org/ci-maintainers
-```
+No new workflow is required.
 
-Do not use that placeholder literally. GitHub Enterprise rulesets can add more
-restrictive path-based policies, but `CODEOWNERS` plus protected-branch review is
-the portable baseline.
+## Local checks
 
-The workflow files must be present on the default branch. In particular,
-`workflow_run` only triggers `Build-Protected-Services` from workflow definitions
-known to the default branch, which is why merging the CI-only PR before resuming
-the secrets PR is the safe rollout order.
-
-## CI-only branch contents
-
-A separate CI PR is the recommended rollout. Include:
-
-- `.github/**`;
-- `services/appstore/chart/.gitignore` and the committed
-  `services/appstore/chart/Chart.lock`;
-- quoted `services/nfs-server/chart/Chart.yaml` `appVersion` metadata;
-- the UI chart/image repository alignment changes;
-- the appstore-prepuller chart/default image-tag alignment changes;
-- `chart/` exclusions in `services/appstore/.dockerignore` and
-  `services/appstore-sockets/.dockerignore`.
-
-Do **not** include the current `secrets-options` umbrella dependency changes that
-refer to unpublished `appstore:6.0.0` and `appstore-sockets:3.0.0`, or the LDAP and
-Argo CD work, in that CI-only PR. Start the CI branch from the current default
-branch and apply only the files above. After it merges, rebase or merge that
-change back into `secrets-options`.
-
-## Adding or changing a component
-
-When adding a buildable image or release-manifest component:
-
-1. add/update its chart metadata and committed lockfile;
-2. add the component/image definition to `release/components.json`;
-3. add a credential-free image validation workflow if it builds an image;
-4. ensure chart-only files are outside or ignored by the Docker context;
-5. update this README's image table;
-6. run the release unit tests and chart selector simulations.
-
-Adding a chart-only `services/<name>/chart` is automatically discovered for Helm
-validation/publication, but it still needs a `components.json` entry if it must
-appear in the compatibility manifest.
-
-## Local validation
-
-Useful focused checks are:
+Install the one Python dependency and run focused checks:
 
 ```bash
-bash -n .github/scripts/helm-*.sh
-python3 -m unittest discover -s .github/release -p 'test_*.py'
+python3 -m pip install -r .github/requirements-ci.txt
 python3 -m unittest discover -s .github/scripts -p 'test_*.py'
-python3 .github/scripts/release-plan.py --mode release --output /tmp/release-plan.json
+python3 .github/scripts/ci.py validate-config
+python3 .github/scripts/ci.py check-versions --base HEAD^
+bash -n .github/scripts/helm-build-chart.sh .github/scripts/helm-preflight.sh
+bash .github/scripts/helm-build-chart.sh deploy/helm/helx-common/chart
+bash .github/scripts/helm-build-chart.sh deploy/helm/helx-chart
 git diff --check
 ```
 
-Run `actionlint` when available. The installed version must understand GitHub's
-`concurrency.queue: max`; older `actionlint` releases may report that supported
-field as unknown.
-
-Service-specific ESLint, UI, Django, and other language-level test coverage is
-intentionally outside this rollout and should be added in a subsequent change.
+Run `actionlint` 1.7.12 or newer for workflow validation. The workflow pins the
+official 1.7.12 Linux archive checksum.

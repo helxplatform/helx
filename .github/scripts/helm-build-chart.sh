@@ -1,214 +1,113 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly COMMON_CHART="deploy/helm/helx-common/chart"
+
 chart_field() {
-  local field=$1
-  local chart=$2
-  awk -v field="$field" '$1 == field ":" { gsub(/["'\'']/, "", $2); print $2; exit }' \
-    "$chart/Chart.yaml"
-}
-
-validate_chart_dir() {
-  local chart_dir=$1
-
-  if [[ "$chart_dir" == *".."* ]]; then
-    echo "::error::Chart path may not traverse upward: $chart_dir"
-    exit 1
-  fi
-  if [[ ! -f "$chart_dir/Chart.yaml" ]]; then
-    echo "::error::No Chart.yaml found in $chart_dir"
-    exit 1
-  fi
-}
-
-has_dependencies() {
-  awk '
-    /^dependencies:[[:space:]]*($|#)/ { in_dependencies=1; next }
-    in_dependencies && /^[^[:space:]#]/ { in_dependencies=0 }
-    in_dependencies && /^[[:space:]]*-[[:space:]]+name:/ { found=1 }
-    END { exit(found ? 0 : 1) }
-  ' "$1/Chart.yaml"
-}
-
-require_dependency_lock() {
-  local chart=$1
-  local message=$2
-
-  if [[ ! -f "$chart/Chart.lock" ]]; then
-    echo "::error file=$chart/Chart.yaml::$message"
-    exit 1
-  fi
-}
-
-register_locked_http_repositories() {
-  local dependency_chart=$1
-  local repository repository_alias
-  local repository_index=0
-
-  # Register only lockfile URLs; dependency build must not recalculate versions.
-  while IFS= read -r repository; do
-    case "$repository" in
-      http://*|https://*)
-        repository_index=$((repository_index + 1))
-        repository_alias=$(printf 'ci-%s-%d' "$dependency_chart" "$repository_index" | tr '/_' '--')
-        helm repo add "$repository_alias" "$repository" --force-update
-        ;;
-    esac
-  done < <(
-    awk '$1 == "repository:" { gsub(/["'\'']/, "", $2); if (!seen[$2]++) print $2 }' \
-      "$dependency_chart/Chart.lock"
-  )
-}
-
-build_dependencies() {
-  local dependency_chart=$1
-
-  if ! has_dependencies "$dependency_chart"; then
-    return
-  fi
-
-  require_dependency_lock \
-    "$dependency_chart" \
-    "Chart declares dependencies but $dependency_chart/Chart.lock is missing. Commit a lockfile generated for these dependencies."
-  register_locked_http_repositories "$dependency_chart"
-
-  echo "Building dependencies from $dependency_chart/Chart.lock"
-  helm dependency build "$dependency_chart"
+  python3 .github/scripts/ci.py chart-field "$1" "$2"
 }
 
 locked_dependencies() {
-  local umbrella=$1
-
-  python3 .github/scripts/helm_metadata.py locked-dependencies \
-    "$umbrella/Chart.yaml" "$umbrella/Chart.lock"
+  python3 .github/scripts/ci.py locked-dependencies "$1"
 }
 
-find_local_dependency_source() {
-  local umbrella=$1
-  local name=$2
-  local version=$3
-  local repository=$4
-  local source_file candidate source_name source_version
+find_local_chart() {
+  local name=$1
+  local version=$2
+  local chart_file candidate
+  local -a chart_files=("$COMMON_CHART/Chart.yaml" services/*/chart/Chart.yaml)
 
-  if [[ "$repository" == file://* ]]; then
-    python3 .github/scripts/helm_metadata.py resolve-file "$umbrella" "$repository"
-    return
-  fi
-
-  for source_file in services/*/chart/Chart.yaml; do
-    candidate=${source_file%/Chart.yaml}
-    source_name=$(chart_field name "$candidate")
-    source_version=$(chart_field version "$candidate")
-    if [[ "$source_name" == "$name" && "$source_version" == "$version" ]]; then
+  for chart_file in "${chart_files[@]}"; do
+    [[ -f "$chart_file" ]] || continue
+    candidate=${chart_file%/Chart.yaml}
+    if [[ "$(chart_field "$candidate" name)" == "$name" && \
+          "$(chart_field "$candidate" version)" == "$version" ]]; then
       printf '%s\n' "$candidate"
-      return
+      return 0
     fi
   done
   return 0
 }
 
-package_local_dependency() {
-  local umbrella=$1
-  local source=$2
-  local name=$3
-  local version=$4
+resolve_file_dependency() {
+  local chart_dir=$1
+  local repository=$2
+  local relative=${repository#file://}
 
-  if [[ ! -f "$source/Chart.yaml" ]]; then
-    echo "::error::Locked local dependency $name:$version does not exist at $source"
-    exit 1
+  if [[ ! -d "$chart_dir/$relative" ]]; then
+    echo "::error::Local dependency does not exist: $chart_dir/$relative" >&2
+    return 1
   fi
-  if [[ "$(chart_field name "$source")" != "$name" || \
-        "$(chart_field version "$source")" != "$version" ]]; then
-    echo "::error::Local dependency $source does not match locked $name:$version"
-    exit 1
-  fi
-
-  build_dependencies "$source"
-  helm package "$source" --destination "$umbrella/charts"
+  (cd "$chart_dir/$relative" && pwd)
 }
 
-pull_locked_dependency() {
-  local umbrella=$1
+pull_dependency() {
+  local destination=$1
   local name=$2
   local version=$3
   local repository=$4
-  local repository_alias=$5
+  local alias=$5
 
   case "$repository" in
     oci://*)
-      helm pull "${repository%/}/$name" --version "$version" --destination "$umbrella/charts"
+      helm pull "${repository%/}/$name" --version "$version" --destination "$destination"
       ;;
     http://*|https://*)
-      helm repo add "$repository_alias" "$repository" --force-update
-      helm pull "$repository_alias/$name" --version "$version" --destination "$umbrella/charts"
+      helm repo add "$alias" "$repository" --force-update
+      helm pull "$alias/$name" --version "$version" --destination "$destination"
       ;;
     *)
-      echo "::error::Unsupported locked dependency repository for $name: $repository"
-      exit 1
+      echo "::error::Unsupported dependency repository for $name: $repository" >&2
+      return 1
       ;;
   esac
 }
 
-assemble_umbrella_dependencies() {
-  local umbrella=$1
-  local name version repository source repository_alias
+prepare_dependencies() {
+  local chart_dir=$1
+  local rows name version repository source alias
   local repository_index=0
-  local dependency_count=0
 
-  require_dependency_lock \
-    "$umbrella" \
-    "Chart declares dependencies but $umbrella/Chart.lock is missing. Commit the lockfile."
+  # Always remove stale vendored archives, including when a chart no longer has dependencies.
+  mkdir -p "$chart_dir/charts"
+  find "$chart_dir/charts" -maxdepth 1 -type f -name '*.tgz' -delete
 
-  mkdir -p "$umbrella/charts"
-  find "$umbrella/charts" -maxdepth 1 -type f -name '*.tgz' -delete
+  # This command also verifies that Chart.lock exactly matches Chart.yaml.
+  rows=$(locked_dependencies "$chart_dir")
+  [[ -n "$rows" ]] || return 0
 
-  # Prefer matching local service sources; pull only dependencies unavailable locally.
   while IFS=$'\t' read -r name version repository; do
-    dependency_count=$((dependency_count + 1))
-    source=$(find_local_dependency_source "$umbrella" "$name" "$version" "$repository")
+    [[ -n "$name" ]] || continue
+    source=""
+    if [[ "$repository" == file://* ]]; then
+      source=$(resolve_file_dependency "$chart_dir" "$repository")
+    else
+      source=$(find_local_chart "$name" "$version")
+    fi
 
     if [[ -n "$source" ]]; then
-      package_local_dependency "$umbrella" "$source" "$name" "$version"
+      prepare_dependencies "$source"
+      helm package "$source" --destination "$chart_dir/charts"
       continue
     fi
 
-    repository_alias=""
-    if [[ "$repository" == http://* || "$repository" == https://* ]]; then
-      repository_index=$((repository_index + 1))
-      repository_alias="umbrella-ci-$repository_index"
-    fi
-    pull_locked_dependency "$umbrella" "$name" "$version" "$repository" "$repository_alias"
-  done < <(locked_dependencies "$umbrella")
-
-  if ((dependency_count == 0)); then
-    echo "::error::No valid locked umbrella dependencies were assembled"
-    exit 1
-  fi
-}
-
-prepare_dependencies() {
-  local chart_dir=$1
-
-  if [[ "$chart_dir" == "deploy/helm/helx-chart" ]]; then
-    assemble_umbrella_dependencies "$chart_dir"
-  else
-    build_dependencies "$chart_dir"
-  fi
+    repository_index=$((repository_index + 1))
+    alias="ci-${repository_index}-$(printf '%s' "$name" | tr '/_' '--')"
+    pull_dependency "$chart_dir/charts" "$name" "$version" "$repository" "$alias"
+  done <<< "$rows"
 }
 
 lint_chart() {
   local chart_dir=$1
   local chart_name=$2
-  local lint_values=".github/helm/lint-values/$chart_name.yaml"
-  local -a lint_args=("$chart_dir")
+  local values_file=".github/helm/lint-values/$chart_name.yaml"
+  local -a arguments=("$chart_dir")
 
-  if [[ -f "$lint_values" ]]; then
-    lint_args+=(--values "$lint_values")
-  fi
-  helm lint "${lint_args[@]}"
+  [[ -f "$values_file" ]] && arguments+=(--values "$values_file")
+  helm lint "${arguments[@]}"
 }
 
-package_and_emit_outputs() {
+package_chart() {
   local chart_dir=$1
   local chart_name=$2
   local chart_version=$3
@@ -217,10 +116,10 @@ package_and_emit_outputs() {
   package_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/helm-package.XXXXXX")
   helm package "$chart_dir" --destination "$package_dir"
   package="$package_dir/$chart_name-$chart_version.tgz"
-  if [[ ! -f "$package" ]]; then
-    echo "::error::helm package did not create the expected archive $package"
-    exit 1
-  fi
+  [[ -f "$package" ]] || {
+    echo "::error::helm package did not create $package" >&2
+    return 1
+  }
 
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
@@ -237,18 +136,16 @@ main() {
   local chart_dir=${1:?usage: helm-build-chart.sh CHART_DIR}
   local chart_name chart_version
 
-  validate_chart_dir "$chart_dir"
-  prepare_dependencies "$chart_dir"
-
-  chart_name=$(chart_field name "$chart_dir")
-  chart_version=$(chart_field version "$chart_dir")
-  if [[ -z "$chart_name" || -z "$chart_version" ]]; then
-    echo "::error file=$chart_dir/Chart.yaml::Chart name and version are required"
+  [[ "$chart_dir" != *..* && -f "$chart_dir/Chart.yaml" ]] || {
+    echo "::error::Invalid chart directory: $chart_dir" >&2
     exit 1
-  fi
+  }
 
+  chart_name=$(chart_field "$chart_dir" name)
+  chart_version=$(chart_field "$chart_dir" version)
+  prepare_dependencies "$chart_dir"
   lint_chart "$chart_dir" "$chart_name"
-  package_and_emit_outputs "$chart_dir" "$chart_name" "$chart_version"
+  package_chart "$chart_dir" "$chart_name" "$chart_version"
 }
 
 main "$@"

@@ -1,0 +1,19 @@
+{{- if .Values.configuration.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "helx-ldap.fullname" . }}-ldif
+  labels:
+    {{- include "helx-ldap.labels" . | nindent 4 }}
+data:
+  memberof-module.ldif: |-
+    {{- .Files.Get "files/ldif/memberof/module/load_memberof_module.ldif" | nindent 4 }}
+  memberof-overlay.ldif: |-
+    {{- .Files.Get "files/ldif/memberof/memberof_overlay.ldif" | nindent 4 }}
+  anonymous-access.ldif: |-
+    {{- .Files.Get "files/ldif/anon/access.ldif" | nindent 4 }}
+  helx-user-attributes.ldif: |-
+    {{- .Files.Get "files/ldif/helxUser/attrs/helxUserAttributes.ldif" | nindent 4 }}
+  helx-user-object-class.ldif: |-
+    {{- .Files.Get "files/ldif/helxUser/helxUser.ldif" | nindent 4 }}
+{{- end }}

@@ -1,0 +1,132 @@
+# Default values for helx-ldap.
+
+secret:
+  # -- Name of a caller-managed Secret containing LDAP_ADMIN_PASSWORD and
+  # LDAP_CONFIG_ADMIN_PASSWORD. The existing Secret mode remains the default so
+  # upgrades do not attempt to adopt the historically pre-created Secret.
+  # Set this to "" to use secret.values or secret.externalSecret instead.
+  existingSecret: openldap-credentials
+
+  # -- Key/value pairs used to create the chart-managed OpenLDAP credentials
+  # Secret when secret.existingSecret is empty and externalSecret is disabled.
+  # Required keys:
+  #   LDAP_ADMIN_PASSWORD: password for the LDAP directory administrator
+  #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
+  # Argo CD users should provide stable encrypted values or select ESO mode.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the OpenLDAP credentials Secret.
+  # This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to
+    # openldap.global.existingSecret.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- helx-ldap has no differently named legacy Secret to migrate. Existing
+    # installations should continue using existingSecret mode unless ownership
+    # is intentionally transferred.
+    enabled: false
+
+openldap:
+  # Keep the service name stable for HeLx consumers, including appstore's
+  # default ldap://openldap URI.
+  fullnameOverride: openldap
+
+  replicaCount: 1
+
+  global:
+    ldapDomain: example.org
+    # -- Secret name consumed by the upstream OpenLDAP chart. This is target-name
+    # compatibility plumbing for the dependency, not a fourth ownership mode.
+    # It must match secret.existingSecret or secret.externalSecret.targetName
+    # when either is set. Chart-managed and default ESO modes create this name.
+    existingSecret: openldap-credentials
+
+  # The develop configuration intentionally permits anonymous LDAP binds. The
+  # anonymous-access ACL below still controls what anonymous users can read.
+  env:
+    LDAP_ALLOW_ANON_BINDING: "yes"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 500M
+    limits:
+      cpu: "1"
+      memory: 500M
+
+  # On OpenShift, set podSecurityContext.enabled to false so the SCC can
+  # allocate the pod security context. This is the wrapper equivalent of the
+  # develop branch's generated fsGroup: null value.
+
+  persistence:
+    enabled: true
+
+  replication:
+    enabled: false
+
+  # These optional upstream components are not part of the HeLx LDAP service.
+  phpldapadmin:
+    enabled: false
+  ltb-passwd:
+    enabled: false
+  test:
+    enabled: false
+
+configuration:
+  # Apply the HeLx cn=config LDIFs as a Helm post-install/post-upgrade Job.
+  enabled: true
+
+  # The config administrator DN used by the upstream chart by default.
+  configDN: cn=admin,cn=config
+
+  # These are derived from openldap.global.ldapDomain and adminUser when empty.
+  # Set them explicitly when the LDAP deployment uses custom DNs.
+  baseDN: ""
+  adminDN: ""
+
+  # Apply the develop branch's anonymous-read ACL. This exposes userPassword
+  # hashes to anonymous readers and should be disabled if that behavior is not
+  # required. Set openldap.env.LDAP_ALLOW_ANON_BINDING to "no" as well when
+  # disabling anonymous access.
+  anonymousAccess:
+    enabled: true
+
+  # The Job connects to openldap.fullnameOverride by default. Set this only
+  # when the service name is intentionally different from the chart name.
+  serviceName: ""
+
+  # By default the Job uses the same image as the OpenLDAP dependency. The
+  # image must contain /bin/sh, ldapsearch, and ldapmodify.
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+
+  memberofModulePath: /opt/bitnami/openldap/lib/openldap/memberof.so
+
+  job:
+    backoffLimit: 6
+    activeDeadlineSeconds: 300
+    ttlSecondsAfterFinished: 300
+    securityContext:
+      runAsUser: 1001
+      runAsGroup: 1001
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+    podSecurityContext:
+      fsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault

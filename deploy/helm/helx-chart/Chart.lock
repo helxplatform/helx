@@ -1,0 +1,36 @@
+dependencies:
+- name: appstore
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 5.1.4
+- name: appstore-sockets
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 2.1.0
+- name: backup-pvc-cronjob
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 0.2.1
+- name: helx-ldap
+  repository: file://../../../services/helx-ldap/chart
+  version: 0.1.3
+- name: image-utils
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 1.0.0
+- name: nfs-server
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 0.2.5
+- name: nfsrods
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 2.0.4
+- name: pod-reaper
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 0.2.5
+- name: resty
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 1.0.5
+- name: search
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 7.0.0
+- name: ui
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 1.6.0
+digest: sha256:59d5bcbd96fb37727060ffedf4b99b12ff493635454602d6e175fe7bfdb1815f
+generated: "2026-08-16T00:25:59.212575-04:00"

@@ -1,0 +1,65 @@
+{
+  "registry": "containers.renci.org/helxplatform",
+  "images": [
+    {
+      "name": "appstore",
+      "component": "appstore",
+      "chart": "services/appstore/chart",
+      "repository": "appstore",
+      "context": "services/appstore",
+      "dockerfile": "services/appstore/Dockerfile",
+      "sources": ["services/appstore"],
+      "excludes": ["services/appstore/chart"]
+    },
+    {
+      "name": "appstore-prepuller",
+      "component": "appstore-prepuller",
+      "chart": "services/appstore-prepuller/chart",
+      "repository": "appstore-prepuller",
+      "context": "services/appstore-prepuller/controller",
+      "dockerfile": "services/appstore-prepuller/controller/Dockerfile",
+      "sources": ["services/appstore-prepuller"],
+      "excludes": ["services/appstore-prepuller/chart"]
+    },
+    {
+      "name": "appstore-sockets-server",
+      "component": "appstore-sockets",
+      "chart": "services/appstore-sockets/chart",
+      "repository": "appstore-sockets/server",
+      "context": "services/appstore-sockets",
+      "dockerfile": "services/appstore-sockets/Dockerfile",
+      "sources": ["services/appstore-sockets"],
+      "excludes": ["services/appstore-sockets/chart"]
+    },
+    {
+      "name": "appstore-sockets-monitoring",
+      "component": "appstore-sockets",
+      "chart": "services/appstore-sockets/chart",
+      "repository": "appstore-sockets/monitoring",
+      "context": "services/appstore-sockets/monitoring",
+      "dockerfile": "services/appstore-sockets/monitoring/Dockerfile",
+      "sources": ["services/appstore-sockets"],
+      "excludes": ["services/appstore-sockets/chart"]
+    },
+    {
+      "name": "ui",
+      "component": "ui",
+      "chart": "services/ui/chart",
+      "repository": "helx-ui",
+      "context": "services/ui",
+      "dockerfile": "services/ui/Dockerfile",
+      "sources": ["services/ui"],
+      "excludes": ["services/ui/chart"]
+    },
+    {
+      "name": "user-mutator",
+      "component": "user-mutator",
+      "chart": "services/user-mutator/chart",
+      "repository": "user-mutator",
+      "context": "services/user-mutator",
+      "dockerfile": "services/user-mutator/Dockerfile",
+      "sources": ["services/user-mutator"],
+      "excludes": ["services/user-mutator/chart"]
+    }
+  ]
+}

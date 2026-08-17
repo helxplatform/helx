@@ -1,0 +1,69 @@
+apiVersion: v2
+name: helx
+description: A Helm chart for deploying HeLx to Kubernetes.
+# A chart can be either an 'application' or a 'library' chart.
+#
+# Application charts are a collection of templates that can be packaged into versioned archives
+# to be deployed.
+#
+# Library charts provide useful utilities or functions for the chart developer. They're included as
+# a dependency of application charts to inject those utilities and functions into the rendering
+# pipeline. Library charts do not define any templates and therefore cannot be deployed.
+type: application
+# This is the chart version. This version number should be incremented each time you make changes
+# to the chart and its templates, including the app version.
+version: 4.5.6
+
+# This is the version number of the application being deployed. This version number should be
+# incremented each time you make changes to the application.
+appVersion: 3.6.4
+
+dependencies:
+  # - name: ambassador
+  #   condition: ambassador.enabled
+  #   version: "^0.2.0"
+  #   repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: appstore
+    condition: appstore.enabled
+    version: "5.1.4"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: appstore-sockets
+    condition: appstore-sockets.enabled
+    version: "2.1.0"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: backup-pvc-cronjob
+    condition: backup-pvc-cronjob.enabled
+    version: "0.2.1"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: helx-ldap
+    condition: helx-ldap.enabled
+    version: "0.1.3"
+    repository: "file://../../../services/helx-ldap/chart"
+  - name: image-utils
+    condition: image-utils.enabled
+    version: "1.0.0"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: nfs-server
+    condition: nfs-server.enabled
+    version: "0.2.5"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: nfsrods
+    condition: nfsrods.enabled
+    version: "2.0.4"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: pod-reaper
+    condition: pod-reaper.enabled
+    version: "0.2.5"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: resty
+    condition: resty.enabled
+    version: "1.0.5"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: search
+    condition: search.enabled
+    version: "7.0.0"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: ui
+    condition: ui.enabled
+    version: "1.6.0"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"

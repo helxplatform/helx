@@ -1,0 +1,265 @@
+{{- if .Values.configuration.enabled }}
+{{- $credentialsSecret := include "helx-ldap.credentialsSecret" . -}}
+{{- $serviceName := default (default "openldap" .Values.openldap.fullnameOverride) .Values.configuration.serviceName -}}
+{{- $imageRepository := default .Values.openldap.image.repository .Values.configuration.image.repository -}}
+{{- $imageTag := default .Values.openldap.image.tag .Values.configuration.image.tag -}}
+{{- $imagePullPolicy := default .Values.openldap.image.pullPolicy .Values.configuration.image.pullPolicy -}}
+{{- $baseDN := include "helx-ldap.baseDN" . -}}
+{{- $adminDN := include "helx-ldap.adminDN" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "helx-ldap.fullname" . }}-configure
+  labels:
+    {{- include "helx-ldap.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.configuration.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.configuration.job.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.configuration.job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "helx-ldap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: configuration
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        {{- toYaml .Values.configuration.job.podSecurityContext | nindent 8 }}
+      containers:
+        - name: configure
+          image: "{{ $imageRepository }}:{{ $imageTag }}"
+          imagePullPolicy: {{ $imagePullPolicy }}
+          command:
+            - /bin/sh
+            - /usr/local/bin/configure.sh
+          env:
+            - name: LDAP_URI
+              value: "ldap://{{ $serviceName }}:389"
+            - name: LDAP_CONFIG_DN
+              value: {{ .Values.configuration.configDN | quote }}
+            - name: LDAP_MEMBEROF_MODULE_PATH
+              value: {{ .Values.configuration.memberofModulePath | quote }}
+            - name: LDAP_BASE_DN
+              value: {{ $baseDN | quote }}
+            - name: LDAP_ADMIN_DN
+              value: {{ $adminDN | quote }}
+            - name: LDAP_ANONYMOUS_ACCESS_ENABLED
+              value: {{ .Values.configuration.anonymousAccess.enabled | quote }}
+            - name: LDAP_PASSWORD_FILE
+              value: /run/secrets/ldap/config-password
+          securityContext:
+            {{- toYaml .Values.configuration.job.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: configure-script
+              mountPath: /usr/local/bin/configure.sh
+              subPath: configure.sh
+              readOnly: true
+            - name: ldif
+              mountPath: /ldif
+              readOnly: true
+            - name: ldap-credentials
+              mountPath: /run/secrets/ldap
+              readOnly: true
+      volumes:
+        - name: configure-script
+          configMap:
+            name: {{ include "helx-ldap.fullname" . }}-configure
+            defaultMode: 0555
+        - name: ldif
+          configMap:
+            name: {{ include "helx-ldap.fullname" . }}-ldif
+        - name: ldap-credentials
+          secret:
+            secretName: {{ $credentialsSecret }}
+            defaultMode: 0440
+            items:
+              - key: LDAP_CONFIG_ADMIN_PASSWORD
+                path: config-password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "helx-ldap.fullname" . }}-configure
+  labels:
+    {{- include "helx-ldap.labels" . | nindent 4 }}
+data:
+  configure.sh: |-
+    #!/bin/sh
+    set -eu
+
+    : "${LDAP_URI:?LDAP_URI is required}"
+    : "${LDAP_CONFIG_DN:?LDAP_CONFIG_DN is required}"
+    : "${LDAP_MEMBEROF_MODULE_PATH:?LDAP_MEMBEROF_MODULE_PATH is required}"
+    : "${LDAP_BASE_DN:?LDAP_BASE_DN is required}"
+    : "${LDAP_ADMIN_DN:?LDAP_ADMIN_DN is required}"
+    : "${LDAP_ANONYMOUS_ACCESS_ENABLED:?LDAP_ANONYMOUS_ACCESS_ENABLED is required}"
+    : "${LDAP_PASSWORD_FILE:?LDAP_PASSWORD_FILE is required}"
+
+    ldap_search() {
+      ldapsearch -LLL -o ldif-wrap=no \
+        -H "$LDAP_URI" \
+        -D "$LDAP_CONFIG_DN" \
+        -y "$LDAP_PASSWORD_FILE" \
+        "$@"
+    }
+
+    ldap_modify() {
+      ldapmodify \
+        -H "$LDAP_URI" \
+        -D "$LDAP_CONFIG_DN" \
+        -y "$LDAP_PASSWORD_FILE"
+    }
+
+    echo "Waiting for LDAP at ${LDAP_URI}..."
+    attempt=0
+    until ldap_search -b "" -s base "(objectClass=*)" namingContexts >/dev/null 2>&1; do
+      attempt=$((attempt + 1))
+      if [ "$attempt" -ge 60 ]; then
+        echo "LDAP did not become ready within 300 seconds" >&2
+        exit 1
+      fi
+      sleep 5
+    done
+
+    # Discover the MDB database instead of assuming the upstream chart uses
+    # olcDatabase={2}mdb. Search the config tree broadly and parse the
+    # olcDatabase attribute locally so this also works when the generated
+    # cn=config layout or database ordering differs.
+    database_entries="$(ldap_search \
+      -b cn=config \
+      -s sub \
+      '(objectClass=*)' \
+      dn olcDatabase 2>&1)" || {
+      echo "LDAP database discovery query failed:" >&2
+      printf '%s\n' "$database_entries" >&2
+      exit 1
+    }
+    database_dn="$(printf '%s\n' "$database_entries" | awk '
+      /^dn: / {
+        entry_dn = $0
+        sub(/^dn: /, "", entry_dn)
+      }
+      /^olcDatabase: / && /mdb/ {
+        print entry_dn
+        exit
+      }
+    ')"
+
+    if [ -z "$database_dn" ]; then
+      echo "Could not find an MDB database below cn=config. LDAP returned:" >&2
+      printf '%s\n' "$database_entries" | sed -n '1,80p' >&2
+      exit 1
+    fi
+    echo "Using LDAP database ${database_dn}"
+
+    if ! ldap_search -b cn=module{0},cn=config -s base olcModuleLoad \
+      | grep -Fq "$LDAP_MEMBEROF_MODULE_PATH"; then
+      echo "Loading memberof module..."
+      sed "s#^olcModuleLoad: .*#olcModuleLoad: ${LDAP_MEMBEROF_MODULE_PATH}#" \
+        /ldif/memberof-module.ldif | ldap_modify
+    else
+      echo "memberof module is already loaded"
+    fi
+
+    overlay_dn="olcOverlay=memberof,${database_dn}"
+    if ! ldap_search -b "$overlay_dn" -s base objectClass olcOverlay >/dev/null 2>&1; then
+      echo "Installing memberof overlay..."
+      sed "s#olcDatabase={2}mdb,cn=config#${database_dn}#" \
+        /ldif/memberof-overlay.ldif | ldap_modify
+    else
+      echo "memberof overlay is already installed"
+    fi
+
+    if [ "$LDAP_ANONYMOUS_ACCESS_ENABLED" = "true" ]; then
+      if ! ldap_search -b "$database_dn" -s base olcAccess \
+        | grep -Fq "by anonymous read"; then
+        echo "Applying anonymous-access ACLs (userPassword hashes will be readable anonymously)..."
+        sed \
+          -e "s#olcDatabase={2}mdb,cn=config#${database_dn}#g" \
+          -e "s#cn=admin,dc=example,dc=org#${LDAP_ADMIN_DN}#g" \
+          -e "s#dc=example,dc=org#${LDAP_BASE_DN}#g" \
+          /ldif/anonymous-access.ldif | ldap_modify
+      else
+        echo "anonymous-access ACLs are already installed"
+      fi
+    else
+      echo "Anonymous-access ACLs are disabled"
+    fi
+
+    # The develop schema uses the helxUser object class and has the same OID
+    # as the former kubernetesSC class. Do not attempt an unsafe in-place
+    # replacement on an installation that still has the legacy schema.
+    legacy_schema="$(ldap_search \
+      -b cn=schema,cn=config \
+      -s sub \
+      '(|(cn=kubernetesSC)(olcObjectClasses=*kubernetesSC*))' \
+      dn cn olcObjectClasses 2>/dev/null || true)"
+    if printf '%s\n' "$legacy_schema" | grep -Fq "kubernetesSC"; then
+      echo "The legacy kubernetesSC schema is installed; migrate it before enabling the helxUser schema" >&2
+      exit 1
+    fi
+
+    find_helx_schema_dn() {
+      ldap_search \
+        -b cn=schema,cn=config \
+        -s one \
+        '(&(objectClass=olcSchemaConfig)(|(cn=helxUser)(olcAttributeTypes=*userAlias*)))' \
+        dn | awk '/^dn: / { sub(/^dn: /, ""); print; exit }'
+    }
+
+    helx_schema_dn="$(find_helx_schema_dn)"
+    helx_schema_ldif=""
+    if [ -n "$helx_schema_dn" ]; then
+      helx_schema_ldif="$(ldap_search -b "$helx_schema_dn" -s base olcAttributeTypes olcObjectClasses)"
+    fi
+
+    missing_attribute=0
+    partial_attribute=0
+    for attribute in runAsUser runAsGroup fsGroup supplementalGroups userAlias; do
+      if printf '%s\n' "$helx_schema_ldif" | grep -Fq "NAME '${attribute}'"; then
+        partial_attribute=1
+      else
+        missing_attribute=1
+      fi
+    done
+
+    if [ "$missing_attribute" -eq 1 ]; then
+      if [ "$partial_attribute" -eq 1 ]; then
+        echo "helxUser schema is only partially installed; refusing to add duplicate attributes" >&2
+        exit 1
+      fi
+      echo "Installing helxUser schema attributes..."
+      ldap_modify < /ldif/helx-user-attributes.ldif
+      helx_schema_dn="$(find_helx_schema_dn)"
+    else
+      echo "helxUser schema attributes are already installed"
+    fi
+
+    if [ -z "$helx_schema_dn" ]; then
+      echo "Could not find the generated helxUser schema DN below cn=schema,cn=config" >&2
+      exit 1
+    fi
+
+    helx_schema_ldif="$(ldap_search -b "$helx_schema_dn" -s base olcAttributeTypes olcObjectClasses)"
+    if ! printf '%s\n' "$helx_schema_ldif" | grep -Fq "NAME 'helxUser'"; then
+      echo "Installing helxUser object class..."
+      awk -v schema_dn="$helx_schema_dn" '
+        BEGIN { replaced = 0 }
+        /^dn: / && !replaced {
+          print "dn: " schema_dn
+          replaced = 1
+          next
+        }
+        { print }
+      ' /ldif/helx-user-object-class.ldif | ldap_modify
+    else
+      echo "helxUser object class is already installed"
+    fi
+
+    echo "LDAP configuration completed successfully"
+{{- end }}

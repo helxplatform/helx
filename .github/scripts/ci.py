@@ -501,7 +501,7 @@ def image_matrix(
 
 def empty_image() -> dict[str, Any]:
     return {
-        "name": "__none__",
+        "name": "none changed",
         "component": "",
         "chart": "",
         "repository": "",
@@ -750,10 +750,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             write_github_outputs(
                 output_path(ROOT, args.github_output),
-                {
-                    "matrix": compact_json(selected or [empty_image()]),
-                    "has-images": str(bool(selected)).lower(),
-                },
+                {"matrix": compact_json(selected or [empty_image()])},
             )
         elif args.command == "chart-matrix":
             write_github_outputs(

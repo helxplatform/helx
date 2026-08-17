@@ -172,7 +172,7 @@ class ImageMatrixTests(TempTreeTest):
 
     def test_empty_matrix_sentinel_has_blank_required_fields(self) -> None:
         sentinel = ci.empty_image()
-        self.assertEqual(sentinel["name"], "__none__")
+        self.assertEqual(sentinel["name"], "none changed")
         self.assertEqual(sentinel["repository"], "")
         self.assertEqual(sentinel["tag"], "")
 

@@ -87,6 +87,9 @@ publication.
 The exact-version local substitution is what allows a pull request to validate a
 new `helx-common` or service version before it exists in GHCR. It does not change
 committed dependency metadata and never substitutes a different local version.
+If no exact local chart exists, validation authenticates to GHCR with the
+read-only job `GITHUB_TOKEN` and pulls the version recorded in `Chart.lock`.
+`publish: false` prevents a push; it does not disable dependency resolution.
 
 ### Publication
 
@@ -108,8 +111,9 @@ Charts publish to:
 oci://ghcr.io/helxplatform/helm-charts
 ```
 
-Publication uses the job-scoped `GITHUB_TOKEN` with `packages: write` only in
-chart publication jobs.
+Validation uses the job-scoped `GITHUB_TOKEN` with `packages: read` for locked
+OCI dependencies. Publication chart jobs elevate that permission to
+`packages: write`.
 
 ## Container images
 
@@ -124,7 +128,9 @@ for:
 - user-mutator.
 
 Pull requests build affected images with the GitHub Actions cache and no Harbor
-credentials. Chart-only changes are excluded from image-source detection.
+credentials. Chart-only changes are excluded from image-source detection. When
+no image sources changed, the matrix runs one clearly labeled no-op job so the
+workflow remains successful without showing an unresolved matrix expression.
 
 On `main`, publication reconciles every configured semantic image reference:
 

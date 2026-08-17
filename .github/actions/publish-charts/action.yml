@@ -14,13 +14,11 @@ inputs:
     required: false
     default: oci://ghcr.io/helxplatform/helm-charts
   registry-username:
-    description: GHCR username used only for publication
-    required: false
-    default: ''
+    description: GHCR username used for dependency pulls and optional publication
+    required: true
   registry-token:
-    description: GHCR token used only for publication
-    required: false
-    default: ''
+    description: GHCR token used for dependency pulls and optional publication
+    required: true
 
 outputs:
   package:
@@ -47,8 +45,7 @@ runs:
       with:
         version: v3.18.6
 
-    - name: Log in to GHCR
-      if: inputs.publish == 'true'
+    - name: Log in to GHCR for chart dependencies
       shell: bash
       env:
         REGISTRY_TOKEN: ${{ inputs.registry-token }}

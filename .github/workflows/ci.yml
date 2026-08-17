@@ -29,6 +29,7 @@ concurrency:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   COMMON_CHART: deploy/helm/helx-common/chart
@@ -98,6 +99,8 @@ jobs:
         with:
           chart-dir: ${{ env.COMMON_CHART }}
           publish: 'false'
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
 
   plan-charts:
     name: Plan service charts
@@ -144,6 +147,8 @@ jobs:
         with:
           chart-dir: ${{ matrix.chart }}
           publish: 'false'
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
 
   validate-umbrella:
     name: Validate umbrella chart
@@ -164,6 +169,8 @@ jobs:
         with:
           chart-dir: ${{ env.UMBRELLA_CHART }}
           publish: 'false'
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
 
   plan-images:
     name: Plan images
@@ -172,7 +179,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
-      has-images: ${{ steps.plan.outputs.has-images }}
     steps:
       - name: Check out complete history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -207,11 +213,10 @@ jobs:
           fi
 
   validate-images:
-    name: Validate ${{ matrix.image.name }} image
+    name: Validate images (${{ matrix.image.name }})
     needs:
       - validate-common
       - plan-images
-    if: needs.plan-images.outputs.has-images == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -219,12 +224,17 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: No affected images
+        if: matrix.image.repository == ''
+        run: echo 'No image source changes require a build.'
       - name: Check out complete history
+        if: matrix.image.repository != ''
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate image without registry credentials
+        if: matrix.image.repository != ''
         uses: ./.github/actions/build-service
         with:
           repository: containers.renci.org/helxplatform/${{ matrix.image.repository }}

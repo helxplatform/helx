@@ -1,4 +1,0 @@
-dn: olcOverlay=memberof,olcDatabase={2}mdb,cn=config
-changetype: add
-objectClass: olcOverlayConfig
-olcOverlay: memberof

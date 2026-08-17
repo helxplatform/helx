@@ -19,7 +19,7 @@ APPSTORE_SOCKETS_BRANCH   ?= master
 UI_PREFIX                 ?= services/ui
 UI_BRANCH                 ?= develop
 HELX_LDAP_PREFIX          ?= services/helx-ldap
-HELX_LDAP_BRANCH          ?= master
+HELX_LDAP_BRANCH          ?= develop
 APPSTORE_PREPULLER_PREFIX ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH ?= main
 USER_MUTATOR_PREFIX       ?= services/user-mutator
@@ -55,7 +55,7 @@ help:
 	@echo '  make pull-appstore-sockets   Pull appstore-sockets/master into services/appstore-sockets'
 	@echo '  make pull-appstore-sockets-chart Pull appstore-sockets-chart/master into services/appstore-sockets/chart'
 	@echo '  make pull-ui                 Pull ui/develop into services/ui'
-	@echo '  make pull-helx-ldap          Pull helx-ldap/master into services/helx-ldap'
+	@echo '  make pull-helx-ldap          Pull helx-ldap/develop into services/helx-ldap'
 	@echo '  make pull-appstore-prepuller Pull appstore-prepuller/main'
 	@echo '  make pull-user-mutator       Pull user-mutator/master'
 	@echo '  make pull-appstore-chart     Pull appstore-chart/main'

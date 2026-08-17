@@ -282,8 +282,9 @@ jobs:
       - name: Log in to GHCR for umbrella dependencies
         shell: bash
         env:
+          REGISTRY_USERNAME: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ github.token }}
-        run: printf '%s' "$REGISTRY_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        run: printf '%s' "$REGISTRY_TOKEN" | helm registry login ghcr.io --username "$REGISTRY_USERNAME" --password-stdin
 
       - name: Build umbrella and materialize chart archives
         run: bash .github/scripts/helm-build-chart.sh "$UMBRELLA_CHART"

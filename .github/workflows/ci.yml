@@ -213,7 +213,7 @@ jobs:
           fi
 
   validate-images:
-    name: Validate images (${{ matrix.image.name }})
+    name: ${{ matrix.image.job_name }}
     needs:
       - validate-common
       - plan-images
@@ -260,9 +260,32 @@ jobs:
       - name: Require every CI job to pass
         shell: bash
         env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          SELF_TEST: ${{ needs.self-test.result }}
+          COMMON: ${{ needs.validate-common.result }}
+          CHART_PLAN: ${{ needs.plan-charts.result }}
+          CHARTS: ${{ needs.validate-charts.result }}
+          UMBRELLA: ${{ needs.validate-umbrella.result }}
+          IMAGE_PLAN: ${{ needs.plan-images.result }}
+          IMAGES: ${{ needs.validate-images.result }}
         run: |
           set -euo pipefail
-          for result in $RESULTS; do
-            [[ "$result" == success || "$result" == skipped ]] || exit 1
+          statuses=(
+            "Self-test CI|$SELF_TEST"
+            "Validate common chart|$COMMON"
+            "Plan service charts|$CHART_PLAN"
+            "Validate service charts|$CHARTS"
+            "Validate umbrella chart|$UMBRELLA"
+            "Plan images|$IMAGE_PLAN"
+            "Build images|$IMAGES"
+          )
+          failed=0
+          for status in "${statuses[@]}"; do
+            name=${status%%|*}
+            result=${status#*|}
+            printf '%-28s %s\n' "$name" "$result"
+            if [[ "$result" != success && "$result" != skipped ]]; then
+              echo "::error::$name finished with result: $result"
+              failed=1
+            fi
           done
+          exit "$failed"

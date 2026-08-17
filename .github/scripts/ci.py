@@ -491,6 +491,7 @@ def image_matrix(
     matrix: list[dict[str, Any]] = []
     for image in selected:
         entry = dict(image)
+        entry["job_name"] = f"Build {image['name']} image"
         data = read_yaml(chart_file(_configured_path(root, image["chart"], f"{image['name']}.chart")))
         app_version = metadata_value(data, "appVersion", str(chart_file(image["chart"])))
         SemVer.parse(app_version, f"{image['component']} appVersion")
@@ -502,6 +503,7 @@ def image_matrix(
 def empty_image() -> dict[str, Any]:
     return {
         "name": "none changed",
+        "job_name": "No images to build",
         "component": "",
         "chart": "",
         "repository": "",

@@ -87,9 +87,9 @@ publication.
 The exact-version local substitution is what allows a pull request to validate a
 new `helx-common` or service version before it exists in GHCR. It does not change
 committed dependency metadata and never substitutes a different local version.
-If no exact local chart exists, validation authenticates to GHCR with the
-read-only job `GITHUB_TOKEN` and pulls the version recorded in `Chart.lock`.
-`publish: false` prevents a push; it does not disable dependency resolution.
+If no exact local chart exists, validation authenticates to GHCR with the job
+`GITHUB_TOKEN` and pulls the version recorded in `Chart.lock`. `publish: false`
+prevents a push; it does not disable dependency resolution.
 
 ### Publication
 
@@ -111,9 +111,10 @@ Charts publish to:
 oci://ghcr.io/helxplatform/helm-charts
 ```
 
-Validation uses the job-scoped `GITHUB_TOKEN` with `packages: read` for locked
-OCI dependencies. Publication chart jobs elevate that permission to
-`packages: write`.
+Validation grants the job-scoped `GITHUB_TOKEN` `packages: read` for locked OCI
+dependencies. Publication chart jobs elevate that permission to
+`packages: write`. Personal package access is not inherited by `GITHUB_TOKEN`:
+it represents the workflow repository, not the person who triggered the run.
 
 ## Container images
 
@@ -179,17 +180,12 @@ release. Make the next release explicit by increasing its chart version.
 
 ## Repository configuration
 
-Define these repository-level GitHub Actions secrets:
+Define these repository-level GitHub Actions secrets for Harbor:
 
 ```text
 CONTAINERHUB_USERNAME
 CONTAINERHUB_PASSWORD
 ```
-
-No GitHub environment is required. The Harbor account should be able to inspect
-and push the configured image
-repositories and build-cache tags, but it should not be able to overwrite
-semantic tags.
 
 GitHub Actions must be allowed to grant:
 

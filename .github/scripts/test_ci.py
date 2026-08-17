@@ -161,6 +161,10 @@ class ImageMatrixTests(TempTreeTest):
         with patch.object(ci, "changed_paths", return_value=["services/api/worker/job.py"]):
             matrix = ci.image_matrix(self.root, base="base", config_path=self.config)
         self.assertEqual([item["name"] for item in matrix], ["api", "worker"])
+        self.assertEqual(
+            [item["job_name"] for item in matrix],
+            ["Build api image", "Build worker image"],
+        )
         self.assertEqual({item["tag"] for item in matrix}, {"v3.4.5"})
 
     def test_shared_build_changes_select_every_image(self) -> None:
@@ -173,6 +177,7 @@ class ImageMatrixTests(TempTreeTest):
     def test_empty_matrix_sentinel_has_blank_required_fields(self) -> None:
         sentinel = ci.empty_image()
         self.assertEqual(sentinel["name"], "none changed")
+        self.assertEqual(sentinel["job_name"], "No images to build")
         self.assertEqual(sentinel["repository"], "")
         self.assertEqual(sentinel["tag"], "")
 

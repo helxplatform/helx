@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "marker": "helx-monorepo-release",
+  "registry": "containers.renci.org/helxplatform",
+  "initial_version": "4.5.7",
+  "bootstrap_behavior": "The first marked monorepo release is v4.5.7, continuing the current umbrella chart 4.5.6 lineage. The repository v* Git tag namespace is reserved for CI-created monorepo releases; service versions belong in chart metadata and artifact tags instead. Bootstrap builds every configured staging image. For each semantic service image tag, an existing registry digest is preserved and recorded without overwrite; only a missing semantic tag is supplied from staging. If v4.5.7 is unexpectedly occupied, investigate the policy violation rather than skipping to another version.",
+  "rebuild_all_paths": [
+    ".github/actions/build-service",
+    ".github/release",
+    ".github/scripts/release-",
+    ".github/workflows/build-release.yml"
+  ],
+  "components": [
+    {
+      "name": "ambassador",
+      "chart": "services/ambassador/chart/Chart.yaml"
+    },
+    {
+      "name": "appstore",
+      "chart": "services/appstore/chart/Chart.yaml",
+      "image_sources": ["services/appstore"],
+      "image_excludes": ["services/appstore/chart"],
+      "images": [
+        {
+          "name": "appstore",
+          "app_name": "appstore",
+          "repository": "appstore",
+          "context": "./services/appstore",
+          "dockerfile": "./services/appstore/Dockerfile"
+        }
+      ]
+    },
+    {
+      "name": "appstore-prepuller",
+      "chart": "services/appstore-prepuller/chart/Chart.yaml",
+      "image_sources": ["services/appstore-prepuller"],
+      "image_excludes": ["services/appstore-prepuller/chart"],
+      "images": [
+        {
+          "name": "appstore-prepuller",
+          "app_name": "appstore-prepuller",
+          "repository": "appstore-prepuller",
+          "context": "./services/appstore-prepuller/controller",
+          "dockerfile": "./services/appstore-prepuller/controller/Dockerfile"
+        }
+      ]
+    },
+    {
+      "name": "appstore-sockets",
+      "chart": "services/appstore-sockets/chart/Chart.yaml",
+      "image_sources": ["services/appstore-sockets"],
+      "image_excludes": ["services/appstore-sockets/chart"],
+      "images": [
+        {
+          "name": "appstore-sockets-server",
+          "app_name": "appstore-sockets",
+          "repository": "appstore-sockets/server",
+          "context": "./services/appstore-sockets",
+          "dockerfile": "./services/appstore-sockets/Dockerfile"
+        },
+        {
+          "name": "appstore-sockets-monitoring",
+          "app_name": "appstore-sockets",
+          "repository": "appstore-sockets/monitoring",
+          "context": "./services/appstore-sockets/monitoring",
+          "dockerfile": "./services/appstore-sockets/monitoring/Dockerfile"
+        }
+      ]
+    },
+    {
+      "name": "backup-pvc-cronjob",
+      "chart": "services/backup-pvc-cronjob/chart/Chart.yaml"
+    },
+    {
+      "name": "helx-common",
+      "chart": "services/helx-common/chart/Chart.yaml"
+    },
+    {
+      "name": "helx-ldap",
+      "chart": "services/helx-ldap/chart/Chart.yaml"
+    },
+    {
+      "name": "image-utils",
+      "chart": "services/image-utils/chart/Chart.yaml"
+    },
+    {
+      "name": "nfs-server",
+      "chart": "services/nfs-server/chart/Chart.yaml"
+    },
+    {
+      "name": "nfsrods",
+      "chart": "services/nfsrods/chart/Chart.yaml"
+    },
+    {
+      "name": "pod-reaper",
+      "chart": "services/pod-reaper/chart/Chart.yaml"
+    },
+    {
+      "name": "resty",
+      "chart": "services/resty/chart/Chart.yaml"
+    },
+    {
+      "name": "search",
+      "chart": "deploy/helm/helx-chart/Chart.yaml",
+      "dependency": "search",
+      "chart_change_mode": "version"
+    },
+    {
+      "name": "ui",
+      "chart": "services/ui/chart/Chart.yaml",
+      "image_sources": ["services/ui"],
+      "image_excludes": ["services/ui/chart"],
+      "images": [
+        {
+          "name": "ui",
+          "app_name": "ui",
+          "repository": "helx-ui",
+          "context": "./services/ui",
+          "dockerfile": "./services/ui/Dockerfile"
+        }
+      ]
+    },
+    {
+      "name": "user-mutator",
+      "chart": "services/user-mutator/chart/Chart.yaml",
+      "image_sources": ["services/user-mutator"],
+      "image_excludes": ["services/user-mutator/chart"],
+      "images": [
+        {
+          "name": "user-mutator",
+          "app_name": "user-mutator",
+          "repository": "user-mutator",
+          "context": "./services/user-mutator",
+          "dockerfile": "./services/user-mutator/Dockerfile"
+        }
+      ]
+    },
+    {
+      "name": "helx",
+      "chart": "deploy/helm/helx-chart/Chart.yaml"
+    }
+  ]
+}

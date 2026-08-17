@@ -1,0 +1,121 @@
+# Builds and lints one Helm chart, packages it in the job's temporary directory,
+# and publishes only when the caller explicitly opts in.
+name: Build-Helm-Chart
+description: Build, lint, package, and optionally publish a Helm chart
+
+inputs:
+  chart-dir:
+    description: Directory containing Chart.yaml
+    required: true
+  publish:
+    description: Push the packaged chart to the OCI registry
+    required: false
+    default: 'false'
+  registry:
+    description: OCI registry destination
+    required: false
+    default: oci://ghcr.io/helxplatform/helm-charts
+  registry-username:
+    description: Registry username; required when publish is true
+    required: false
+    default: ''
+  registry-token:
+    description: Registry token; required when publish is true
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Helm 3.18.6
+      uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4
+      with:
+        version: v3.18.6
+
+    - name: Validate publication inputs
+      shell: bash
+      env:
+        PUBLISH: ${{ inputs.publish }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_TOKEN: ${{ inputs.registry-token }}
+      run: |
+        set -euo pipefail
+        if [[ "$PUBLISH" != "true" && "$PUBLISH" != "false" ]]; then
+          echo "::error::publish must be either 'true' or 'false'"
+          exit 1
+        fi
+        if [[ "$PUBLISH" == "true" && ( -z "$REGISTRY_USERNAME" || -z "$REGISTRY_TOKEN" ) ]]; then
+          echo "::error::Registry credentials are required when publish is true"
+          exit 1
+        fi
+        if [[ -n "$REGISTRY_USERNAME" && -z "$REGISTRY_TOKEN" ]] || \
+           [[ -z "$REGISTRY_USERNAME" && -n "$REGISTRY_TOKEN" ]]; then
+          echo "::error::Supply both registry-username and registry-token, or neither"
+          exit 1
+        fi
+
+    - name: Authenticate to OCI registry
+      if: inputs.registry-username != '' && inputs.registry-token != ''
+      shell: bash
+      env:
+        OCI_REGISTRY: ${{ inputs.registry }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+        REGISTRY_TOKEN: ${{ inputs.registry-token }}
+      run: |
+        set -euo pipefail
+        registry_host=${OCI_REGISTRY#oci://}
+        registry_host=${registry_host%%/*}
+        printf '%s' "$REGISTRY_TOKEN" | helm registry login "$registry_host" \
+          --username "$REGISTRY_USERNAME" --password-stdin
+
+    - name: Build, lint, and package chart
+      id: chart
+      shell: bash
+      env:
+        CHART_DIR: ${{ inputs.chart-dir }}
+      run: bash .github/scripts/helm-build-chart.sh "$CHART_DIR"
+
+    - name: Verify version is publishable or already identical
+      id: preflight
+      if: inputs.publish == 'true'
+      shell: bash
+      env:
+        CHART_DIR: ${{ inputs.chart-dir }}
+        PACKAGE: ${{ steps.chart.outputs.package }}
+        OCI_REGISTRY: ${{ inputs.registry }}
+      run: bash .github/scripts/helm-preflight.sh "$OCI_REGISTRY" "$CHART_DIR" "$PACKAGE"
+
+    - name: Publish chart
+      if: inputs.publish == 'true' && steps.preflight.outputs.publish-needed == 'true'
+      shell: bash
+      env:
+        CHART_DIR: ${{ inputs.chart-dir }}
+        CHART_NAME: ${{ steps.chart.outputs.chart-name }}
+        CHART_VERSION: ${{ steps.chart.outputs.chart-version }}
+        PACKAGE: ${{ steps.chart.outputs.package }}
+        OCI_REGISTRY: ${{ inputs.registry }}
+      run: |
+        set -euo pipefail
+        helm push "$PACKAGE" "${OCI_REGISTRY%/}"
+        if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+          {
+            echo "### Published Helm chart"
+            echo
+            echo "- Chart: $CHART_NAME"
+            echo "- Version: $CHART_VERSION"
+            echo "- Source: $CHART_DIR"
+            echo "- Registry: ${OCI_REGISTRY%/}"
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Record idempotent publication skip
+      if: inputs.publish == 'true' && steps.preflight.outputs.publish-needed == 'false'
+      shell: bash
+      env:
+        CHART_NAME: ${{ steps.chart.outputs.chart-name }}
+        CHART_VERSION: ${{ steps.chart.outputs.chart-version }}
+      run: |
+        set -euo pipefail
+        if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+          echo "Reused identical existing chart: \`$CHART_NAME:$CHART_VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+        fi

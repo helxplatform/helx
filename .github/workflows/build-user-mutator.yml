@@ -1,0 +1,51 @@
+# Credential-free user-mutator image validation. Chart-only changes remain excluded.
+name: Build-User-Mutator
+
+on:
+  pull_request:
+    paths:
+      - 'services/user-mutator/**'
+      - '!services/user-mutator/chart/**'
+      - '.github/actions/build-service/**'
+      - '.github/actions/test-tag/**'
+      - '.github/workflows/build-user-mutator.yml'
+  push:
+    branches-ignore:
+      - main
+      - develop
+    paths:
+      - 'services/user-mutator/**'
+      - '!services/user-mutator/chart/**'
+      - '.github/actions/build-service/**'
+      - '.github/actions/test-tag/**'
+      - '.github/workflows/build-user-mutator.yml'
+    tags-ignore:
+      - '*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-user-mutator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Compute validation tag
+        id: tag
+        uses: ./.github/actions/test-tag
+
+      - name: Build user-mutator without publishing
+        uses: ./.github/actions/build-service
+        with:
+          app-name: user-mutator
+          image-name: user-mutator
+          tag: ${{ steps.tag.outputs.tag }}
+          push: 'false'

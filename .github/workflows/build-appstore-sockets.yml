@@ -1,0 +1,62 @@
+# Credential-free validation for both appstore-sockets images. Chart-only changes
+# remain excluded from image validation.
+name: Build-Appstore-Sockets
+
+on:
+  pull_request:
+    paths:
+      - 'services/appstore-sockets/**'
+      - '!services/appstore-sockets/chart/**'
+      - '.github/actions/build-service/**'
+      - '.github/actions/test-tag/**'
+      - '.github/workflows/build-appstore-sockets.yml'
+  push:
+    branches-ignore:
+      - main
+      - develop
+    paths:
+      - 'services/appstore-sockets/**'
+      - '!services/appstore-sockets/chart/**'
+      - '.github/actions/build-service/**'
+      - '.github/actions/test-tag/**'
+      - '.github/workflows/build-appstore-sockets.yml'
+    tags-ignore:
+      - '*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-appstore-sockets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Compute validation tag
+        id: tag
+        uses: ./.github/actions/test-tag
+
+      - name: Build appstore-sockets server without publishing
+        uses: ./.github/actions/build-service
+        with:
+          app-name: appstore-sockets
+          image-name: appstore-sockets/server
+          tag: ${{ steps.tag.outputs.tag }}
+          push: 'false'
+
+      - name: Build appstore-sockets monitoring without publishing
+        uses: ./.github/actions/build-service
+        with:
+          app-name: appstore-sockets
+          image-name: appstore-sockets/monitoring
+          context: ./services/appstore-sockets/monitoring
+          dockerfile: ./services/appstore-sockets/monitoring/Dockerfile
+          tag: ${{ steps.tag.outputs.tag }}
+          push: 'false'

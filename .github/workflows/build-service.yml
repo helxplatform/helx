@@ -1,0 +1,110 @@
+# Manual image validation only. This workflow never receives registry credentials
+# and cannot publish arbitrary or semantic tags.
+name: Build-Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Image to validate
+        required: true
+        type: choice
+        options:
+          - appstore
+          - appstore-prepuller
+          - appstore-sockets-server
+          - appstore-sockets-monitoring
+          - ui
+          - user-mutator
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-service:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Resolve target
+        env:
+          TARGET: ${{ inputs.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$TARGET" in
+            appstore)
+              {
+                echo 'SVC_APP=appstore'
+                echo 'SVC_IMAGE=appstore'
+                echo 'SVC_CONTEXT=./services/appstore'
+                echo 'SVC_DOCKERFILE=./services/appstore/Dockerfile'
+              } >> "$GITHUB_ENV"
+              ;;
+            appstore-prepuller)
+              {
+                echo 'SVC_APP=appstore-prepuller'
+                echo 'SVC_IMAGE=appstore-prepuller'
+                echo 'SVC_CONTEXT=./services/appstore-prepuller/controller'
+                echo 'SVC_DOCKERFILE=./services/appstore-prepuller/controller/Dockerfile'
+              } >> "$GITHUB_ENV"
+              ;;
+            appstore-sockets-server)
+              {
+                echo 'SVC_APP=appstore-sockets'
+                echo 'SVC_IMAGE=appstore-sockets/server'
+                echo 'SVC_CONTEXT=./services/appstore-sockets'
+                echo 'SVC_DOCKERFILE=./services/appstore-sockets/Dockerfile'
+              } >> "$GITHUB_ENV"
+              ;;
+            appstore-sockets-monitoring)
+              {
+                echo 'SVC_APP=appstore-sockets'
+                echo 'SVC_IMAGE=appstore-sockets/monitoring'
+                echo 'SVC_CONTEXT=./services/appstore-sockets/monitoring'
+                echo 'SVC_DOCKERFILE=./services/appstore-sockets/monitoring/Dockerfile'
+              } >> "$GITHUB_ENV"
+              ;;
+            ui)
+              {
+                echo 'SVC_APP=ui'
+                echo 'SVC_IMAGE=helx-ui'
+                echo 'SVC_CONTEXT=./services/ui'
+                echo 'SVC_DOCKERFILE=./services/ui/Dockerfile'
+              } >> "$GITHUB_ENV"
+              ;;
+            user-mutator)
+              {
+                echo 'SVC_APP=user-mutator'
+                echo 'SVC_IMAGE=user-mutator'
+                echo 'SVC_CONTEXT=./services/user-mutator'
+                echo 'SVC_DOCKERFILE=./services/user-mutator/Dockerfile'
+              } >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "::error::Unknown target: $TARGET"
+              exit 1
+              ;;
+          esac
+
+      - name: Compute non-publishing manual tag
+        id: tag
+        uses: ./.github/actions/test-tag
+        with:
+          prefix: manual
+
+      - name: Validate selected image without publishing
+        uses: ./.github/actions/build-service
+        with:
+          app-name: ${{ env.SVC_APP }}
+          image-name: ${{ env.SVC_IMAGE }}
+          context: ${{ env.SVC_CONTEXT }}
+          dockerfile: ${{ env.SVC_DOCKERFILE }}
+          tag: ${{ steps.tag.outputs.tag }}
+          push: 'false'

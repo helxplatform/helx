@@ -2,6 +2,7 @@
 .env.sample
 docker-compose.yml
 docker-compose.test.yml
+chart/
 appstore/tycho-registry.sqlite
 tycho-registry.sqlite
 appstore/DATABASE.sqlite3

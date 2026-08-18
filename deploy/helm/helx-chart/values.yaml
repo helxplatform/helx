@@ -47,6 +47,9 @@ search:
 ui:
   # -- enable/disable deployment of helx-ui
   enabled: true
+user-mutator:
+  # -- enable/disable deployment of the user-mutator admission webhook
+  enabled: true
 
 global:
   # tycho_api_service_name: helx-tycho-api

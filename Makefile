@@ -5,6 +5,7 @@ APPSTORE_URL          ?= https://github.com/helxplatform/appstore.git
 APPSTORE_SOCKETS_URL  ?= https://github.com/helxplatform/appstore-sockets.git
 UI_URL                ?= https://github.com/helxplatform/helx-ui.git
 HELX_LDAP_URL         ?= https://github.com/helxplatform/helx-ldap.git
+LDAP_SYNC_URL         ?= https://github.com/helxplatform/ldap-sync.git
 APPSTORE_PREPULLER_URL ?= https://github.com/helxplatform/appstore-prepuller.git
 USER_MUTATOR_URL      ?= https://github.com/helxplatform/user-mutator.git
 APPSTORE_CHART_URL          ?= https://github.com/helxplatform/appstore-chart.git
@@ -20,6 +21,8 @@ UI_PREFIX                 ?= services/ui
 UI_BRANCH                 ?= develop
 HELX_LDAP_PREFIX          ?= services/helx-ldap
 HELX_LDAP_BRANCH          ?= develop
+LDAP_SYNC_PREFIX          ?= services/ldap-sync
+LDAP_SYNC_BRANCH          ?= master
 APPSTORE_PREPULLER_PREFIX ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH ?= main
 USER_MUTATOR_PREFIX       ?= services/user-mutator
@@ -35,11 +38,12 @@ UI_CHART_BRANCH                ?= master
 
 .PHONY: help setup add-remotes add-subtrees \
         add-subtree-appstore add-subtree-appstore-sockets add-subtree-ui \
-        add-subtree-helx-ldap add-subtree-appstore-prepuller \
-        add-subtree-user-mutator add-subtree-appstore-chart \
-        add-subtree-appstore-sockets-chart add-subtree-ui-chart \
-        pull-appstore pull-appstore-sockets pull-appstore-sockets-chart \
-        pull-ui pull-helx-ldap pull-appstore-prepuller pull-user-mutator \
+        add-subtree-helx-ldap add-subtree-ldap-sync \
+        add-subtree-appstore-prepuller add-subtree-user-mutator \
+        add-subtree-appstore-chart add-subtree-appstore-sockets-chart \
+        add-subtree-ui-chart pull-appstore pull-appstore-sockets \
+        pull-appstore-sockets-chart pull-ui pull-helx-ldap pull-ldap-sync \
+        pull-appstore-prepuller pull-user-mutator \
         pull-appstore-chart pull-ui-chart pull-remotes pull-subtree
 
 #help: Show the available repository setup and subtree tasks
@@ -56,6 +60,7 @@ help:
 	@echo '  make pull-appstore-sockets-chart Pull appstore-sockets-chart/master into services/appstore-sockets/chart'
 	@echo '  make pull-ui                 Pull ui/develop into services/ui'
 	@echo '  make pull-helx-ldap          Pull helx-ldap/develop into services/helx-ldap'
+	@echo '  make pull-ldap-sync          Pull ldap-sync/master into services/ldap-sync'
 	@echo '  make pull-appstore-prepuller Pull appstore-prepuller/main'
 	@echo '  make pull-user-mutator       Pull user-mutator/master'
 	@echo '  make pull-appstore-chart     Pull appstore-chart/main'
@@ -89,6 +94,7 @@ add-remotes:
 	$(call ensure-remote,appstore-sockets,$(APPSTORE_SOCKETS_URL))
 	$(call ensure-remote,ui,$(UI_URL))
 	$(call ensure-remote,helx-ldap,$(HELX_LDAP_URL))
+	$(call ensure-remote,ldap-sync,$(LDAP_SYNC_URL))
 	$(call ensure-remote,appstore-prepuller,$(APPSTORE_PREPULLER_URL))
 	$(call ensure-remote,user-mutator,$(USER_MUTATOR_URL))
 	$(call ensure-remote,appstore-chart,$(APPSTORE_CHART_URL))
@@ -112,6 +118,7 @@ add-subtrees: add-remotes \
 	add-subtree-appstore-sockets-chart \
 	add-subtree-ui \
 	add-subtree-helx-ldap \
+	add-subtree-ldap-sync \
 	add-subtree-appstore-prepuller \
 	add-subtree-user-mutator \
 	add-subtree-appstore-chart \
@@ -136,6 +143,10 @@ add-subtree-ui: add-remotes
 # add-subtree-helx-ldap: Add the helx-ldap subtree
 add-subtree-helx-ldap: add-remotes
 	$(call add-subtree,$(HELX_LDAP_PREFIX),helx-ldap,$(HELX_LDAP_BRANCH))
+
+# add-subtree-ldap-sync: Add the ldap-sync subtree
+add-subtree-ldap-sync: add-remotes
+	$(call add-subtree,$(LDAP_SYNC_PREFIX),ldap-sync,$(LDAP_SYNC_BRANCH))
 
 # add-subtree-appstore-prepuller: Add the appstore-prepuller subtree
 add-subtree-appstore-prepuller: add-remotes
@@ -181,6 +192,10 @@ pull-ui: add-remotes
 pull-helx-ldap: add-remotes
 	git subtree pull --prefix="$(HELX_LDAP_PREFIX)" helx-ldap "$(HELX_LDAP_BRANCH)"
 
+# pull-ldap-sync: Pull the latest configured ldap-sync branch
+pull-ldap-sync: add-remotes
+	git subtree pull --prefix="$(LDAP_SYNC_PREFIX)" ldap-sync "$(LDAP_SYNC_BRANCH)"
+
 # pull-appstore-prepuller: Pull the latest configured appstore-prepuller branch
 pull-appstore-prepuller: add-remotes
 	git subtree pull --prefix="$(APPSTORE_PREPULLER_PREFIX)" appstore-prepuller "$(APPSTORE_PREPULLER_BRANCH)"
@@ -204,6 +219,7 @@ pull-remotes: pull-appstore \
 	pull-appstore-sockets-chart \
 	pull-ui \
 	pull-helx-ldap \
+	pull-ldap-sync \
 	pull-appstore-prepuller \
 	pull-user-mutator \
 	pull-appstore-chart \

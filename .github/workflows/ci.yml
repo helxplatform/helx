@@ -2,6 +2,11 @@ name: CI
 
 on:
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
   push:
     branches-ignore:
       - main
@@ -39,6 +44,7 @@ env:
 jobs:
   self-test:
     name: Self-test CI
+    if: github.event.action != 'edited' || github.event.changes.base.ref.from
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -62,16 +68,14 @@ jobs:
           set -euo pipefail
           python -m unittest discover -s .github/scripts -p 'test_*.py'
 
-      - name: Validate CI configuration and versions
-        shell: bash
+      - name: Validate CI configuration
+        run: python .github/scripts/ci.py validate-config
+
+      - name: Require release version increases
+        if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || format('{0}^', github.sha) }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "$BASE_SHA" =~ ^0+$ ]]; then BASE_SHA="origin/$DEFAULT_BRANCH"; fi
-          python .github/scripts/ci.py validate-config
-          python .github/scripts/ci.py check-versions --base "$BASE_SHA"
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python .github/scripts/ci.py check-versions --base "$BASE_SHA"
 
       - name: Install actionlint 1.7.12
         shell: bash

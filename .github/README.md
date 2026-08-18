@@ -27,7 +27,7 @@ flowchart TD
 
 `helx-common` is always processed first. If it cannot be built, linted, or
 published, no service chart, umbrella chart, image, or release proceeds. This is
-intentional because any chart may consume the shared library from the OCI
+intentional because services' chart will consume the shared library from the OCI
 registry.
 
 ## CI validation
@@ -41,8 +41,10 @@ It performs these checks:
 2. run the focused tests for [`scripts/ci.py`](scripts/ci.py);
 3. validate every chart, lockfile, image definition, Dockerfile, and local
    dependency path;
-4. require chart `version` increases when an existing chart directory changes;
-5. require `appVersion` increases when an image's source changes;
+4. for pull requests targeting `main`, require chart `version` increases when an
+   existing chart directory changes;
+5. for pull requests targeting `main`, require `appVersion` increases when an
+   image's source changes;
 6. run `actionlint` against the workflows;
 7. lint and package `deploy/helm/helx-common/chart`;
 8. lint and package every discovered `services/*/chart`;
@@ -52,6 +54,13 @@ It performs these checks:
 All charts are validated instead of maintaining a changed-chart dependency
 planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
+
+Version increases are a publication-boundary policy, so they are not required on
+pull requests into `develop`, branch pushes, or manual validation runs. They are
+required before merging into the default `main` branch and are checked again by
+the `Publish` workflow as a defensive measure. Changing a pull request's base
+branch emits a new `edited` run with the current base; rerunning an older workflow
+instead reuses that run's original commit and event payload.
 
 Manual dispatch accepts one image target or `all`. The target list and all
 build metadata come from [`ci/images.json`](ci/images.json); there are no

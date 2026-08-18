@@ -1,9 +1,0 @@
-dependencies:
-- name: imagepullsecret-patcher
-  repository: https://helxplatform.github.io/imagepullsecret-patcher/charts
-  version: 0.1.4
-- name: kubernetes-image-puller
-  repository: https://helxplatform.github.io/helm-charts
-  version: 1.0.0
-digest: sha256:23e66d5d7b87746941f6a3ccd2124494a83e68a3d7bfc6aff46c535c4c124295
-generated: "2026-08-17T11:45:59.129738-04:00"

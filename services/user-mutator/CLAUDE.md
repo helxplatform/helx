@@ -95,7 +95,9 @@ Edit `config.env` to customize:
 **chart/** - Helm chart for deployment
 - Deploys webhook server as Kubernetes Deployment
 - Creates Service, ServiceAccount, RBAC resources
-- Mounts TLS certificates and configuration
+- Uses the `helx-common` library for the webhook TLS and optional LDAP password Secret contracts
+- Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration
+- The parent chart owns dependency locking; do not create `chart/Chart.lock`
 
 ### Core Workflow
 
@@ -170,7 +172,10 @@ volumeMounts:
       "group_base_dn": "ou=groups,dc=example,dc=com"
     }
   },
-  "secrets": {"cert": "user-mutator-cert-tls"}
+  "secrets": {
+    "cert": "<resolved webhook TLS Secret>",
+    "ldap-password": "<resolved LDAP password Secret when LDAP is enabled>"
+  }
 }
 ```
 
@@ -190,6 +195,10 @@ volumes:
 secretsFrom:
   - secretName: user-credentials
 ```
+
+The chart generates the runtime `secrets` map from the known contracts plus `config.additionalSecrets`. Configure webhook TLS through top-level `secret`, LDAP credentials through `ldap.secret`, and unknown caller-managed contracts through `config.additionalSecrets`. The aliases `cert` and `ldap-password` are reserved.
+
+Both known contracts support existing Secret, chart-managed values, and External Secrets Operator modes. Their backward-compatible defaults reference `user-mutator-cert-tls` and `user-mutator-ldap-password`; managed/default targets are `<fullname>-tls` and `<fullname>-ldap-password` respectively. The LDAP contract is only rendered and mounted when `config.features.ldap` is enabled.
 
 ### LDAP Integration
 

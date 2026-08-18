@@ -1,4 +1,5 @@
 {{- if .Values.config.enabled }}
+{{- $secretNames := include "user-mutator.effectiveSecretNames" . | fromYaml }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -18,7 +19,7 @@ data:
       },
       "features": {{ toPrettyJson .Values.config.features | nindent 8 }},
       "maps": {{ toPrettyJson .Values.config.maps | nindent 8 }},
-      "secrets": {{ toPrettyJson .Values.config.secrets | nindent 8 }}
+      "secrets": {{ toPrettyJson $secretNames | nindent 8 }}
     }
 {{- if .Values.config.features.ldap }}
 ---

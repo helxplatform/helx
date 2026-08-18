@@ -82,30 +82,78 @@ tolerations: []
 affinity: {}
 
 
-#  configure optional features 
-# 
-#  By default there are no features enabled, so features is by default set to {}
-# 
-# example features:
-#
-#  To enable ldap, add a feature named ldap defining the host port and administrative
-#  login, and also specify the ldap password
-#
-#  features:
-#    ldap:
-#      host: "ldap.example.org"
-#      port: 389
-#      username: "cn=admin,dc=example,dc=org"
-#      user_base_dn: "ou=users,dc=example,dc=org"
-#      group_base_dn: "ou=groups,dc=example,dc=org"
-#  secrets:
-#    ldap-password: <ldapSecret>
+# Webhook TLS Secret contract. The caller-managed historical Secret remains the
+# default for backward compatibility. Set existingSecret to "" to select either
+# chart-managed values or External Secrets Operator mode.
+secret:
+  # -- Name of a caller-managed TLS Secret. Mutually exclusive with
+  # secret.externalSecret.enabled.
+  existingSecret: user-mutator-cert-tls
 
+  # -- Plaintext values for the chart-managed TLS Secret. tls.crt and tls.key
+  # are required in managed mode; ca.crt is optional.
+  values: {}
 
+  # -- Configure an ExternalSecret to populate the webhook TLS Secret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to <fullname>-tls.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- Automatic migration is not supported because the historical TLS Secret
+    # is created and owned outside Helm.
+    enabled: false
+
+ldap:
+  secret:
+    # -- Name of a caller-managed Secret containing the password key. This
+    # contract is only rendered and mounted when config.features.ldap is enabled.
+    existingSecret: user-mutator-ldap-password
+
+    # -- Plaintext values for the chart-managed LDAP Secret. password is
+    # required in managed mode.
+    values: {}
+
+    # -- Configure an ExternalSecret to populate the LDAP password Secret.
+    externalSecret:
+      enabled: false
+      # -- Optional ESO target Secret name. Defaults to
+      # <fullname>-ldap-password.
+      targetName: ""
+      refreshInterval: 1h
+      secretStoreRef:
+        name: vault
+        kind: SecretStore
+      remoteRef: ""
+
+    migration:
+      # -- Automatic migration is not supported because the historical LDAP
+      # Secret is created and owned outside Helm.
+      enabled: false
+
+# Configure optional features. To enable LDAP, provide its connection settings;
+# doing so also activates the ldap.secret contract above.
+#
+# features:
+#   ldap:
+#     host: "ldap.example.org"
+#     port: 389
+#     username: "cn=admin,dc=example,dc=org"
+#     user_base_dn: "ou=users,dc=example,dc=org"
+#     group_base_dn: "ou=groups,dc=example,dc=org"
 config:
   enabled: true
   maps:
     user-profiles: user-profiles
   features: {}
-  secrets:
-    cert: user-mutator-cert-tls
+  # -- Unknown, caller-managed Secret contracts to expose to the application.
+  # Keys become config.json secret aliases and mount directory names; values are
+  # Secret resource names. The reserved keys cert and ldap-password cannot be
+  # overridden here.
+  additionalSecrets: {}

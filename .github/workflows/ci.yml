@@ -8,10 +8,8 @@ on:
       - reopened
       - edited
   push:
-    branches-ignore:
-      - main
-    tags-ignore:
-      - '*'
+    branches:
+      - develop
   workflow_dispatch:
     inputs:
       target:

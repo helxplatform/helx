@@ -32,8 +32,9 @@ registry.
 
 ## CI validation
 
-`CI` runs on every pull request, every non-`main` branch push, and manual
-dispatch. Its stable branch-protection result is `CI gate`.
+`CI` runs on every pull request, pushes to `develop`, and manual dispatch. Pull
+request runs validate proposed merges, while the `develop` push run confirms the
+actual integration-branch tip. Its stable branch-protection result is `CI gate`.
 
 It performs these checks:
 
@@ -56,9 +57,9 @@ planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
 
 Version increases are a publication-boundary policy, so they are not required on
-pull requests into `develop`, branch pushes, or manual validation runs. They are
-required before merging into the default `main` branch and are checked again by
-the `Publish` workflow as a defensive measure. Changing a pull request's base
+pull requests into `develop`, `develop` push runs, or manual validation runs.
+They are required before merging into the default `main` branch and are checked
+again by the `Publish` workflow as a defensive measure. Changing a pull request's base
 branch emits a new `edited` run with the current base; rerunning an older workflow
 instead reuses that run's original commit and event payload.
 

@@ -1,107 +1,60 @@
-# helx-ldap Helm chart
+# helx-ldap
 
-This chart wraps the upstream `openldap-stack-ha` chart and adds the HeLx LDAP
-configuration required by the `memberOf` overlay, anonymous-access ACLs, and the
-`helxUser` schema used by the current user-management scripts. The schema includes
-`runAsUser`, `runAsGroup`, `fsGroup`, `supplementalGroups`, and `userAlias`.
+![Version: 0.1.4](https://img.shields.io/badge/Version-0.1.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.6.9](https://img.shields.io/badge/AppVersion-2.6.9-informational?style=flat-square)
 
-The OpenLDAP deployment is always included when this wrapper chart is enabled.
-The HeLx-specific `cn=config` changes run as a Helm `post-install,post-upgrade`
-Job after LDAP becomes ready. The Job is idempotent for a completed configuration,
-discovers the MDB database DN instead of assuming `olcDatabase={2}mdb`, and
-locates the generated `helxUser` schema DN dynamically.
+HeLx LDAP deployment and configuration
 
-By default, anonymous binding and the develop branch's anonymous-read ACL are
-enabled. The ACL permits anonymous reads of user password hashes, so disable both
-`configuration.anonymousAccess.enabled` and
-`openldap.env.LDAP_ALLOW_ANON_BINDING` when that behavior is not required.
+## Requirements
 
-## Credentials
+| Repository | Name | Version |
+|------------|------|---------|
+| https://jp-gouin.github.io/helm-openldap/ | openldap(openldap-stack-ha) | 4.3.3 |
+| oci://ghcr.io/helxplatform/helm-charts | helx-common | 0.1.0 |
 
-The selected Secret must contain these keys:
+## Values
 
-- `LDAP_ADMIN_PASSWORD`
-- `LDAP_CONFIG_ADMIN_PASSWORD`
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| configuration.adminDN | string | `""` |  |
+| configuration.anonymousAccess.enabled | bool | `true` |  |
+| configuration.baseDN | string | `""` |  |
+| configuration.configDN | string | `"cn=admin,cn=config"` |  |
+| configuration.enabled | bool | `true` |  |
+| configuration.image.pullPolicy | string | `""` |  |
+| configuration.image.repository | string | `""` |  |
+| configuration.image.tag | string | `""` |  |
+| configuration.job.activeDeadlineSeconds | int | `300` |  |
+| configuration.job.backoffLimit | int | `6` |  |
+| configuration.job.podSecurityContext.fsGroup | int | `1001` |  |
+| configuration.job.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
+| configuration.job.securityContext.allowPrivilegeEscalation | bool | `false` |  |
+| configuration.job.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
+| configuration.job.securityContext.runAsGroup | int | `1001` |  |
+| configuration.job.securityContext.runAsNonRoot | bool | `true` |  |
+| configuration.job.securityContext.runAsUser | int | `1001` |  |
+| configuration.job.securityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
+| configuration.job.ttlSecondsAfterFinished | int | `300` |  |
+| configuration.memberofModulePath | string | `"/opt/bitnami/openldap/lib/openldap/memberof.so"` |  |
+| configuration.serviceName | string | `""` |  |
+| openldap.env.LDAP_ALLOW_ANON_BINDING | string | `"yes"` |  |
+| openldap.fullnameOverride | string | `"openldap"` |  |
+| openldap.global.existingSecret | string | `"openldap-credentials"` | Secret name consumed by the upstream OpenLDAP chart. This is target-name compatibility plumbing for the dependency, not a fourth ownership mode. It must match secret.existingSecret or secret.externalSecret.targetName when either is set. Chart-managed and default ESO modes create this name. |
+| openldap.global.ldapDomain | string | `"example.org"` |  |
+| openldap.ltb-passwd.enabled | bool | `false` |  |
+| openldap.persistence.enabled | bool | `true` |  |
+| openldap.phpldapadmin.enabled | bool | `false` |  |
+| openldap.replicaCount | int | `1` |  |
+| openldap.replication.enabled | bool | `false` |  |
+| openldap.resources.limits.cpu | string | `"1"` |  |
+| openldap.resources.limits.memory | string | `"500M"` |  |
+| openldap.resources.requests.cpu | string | `"500m"` |  |
+| openldap.resources.requests.memory | string | `"500M"` |  |
+| openldap.test.enabled | bool | `false` |  |
+| secret.existingSecret | string | `"openldap-credentials"` | Name of a caller-managed Secret containing LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. The existing Secret mode remains the default so upgrades do not attempt to adopt the historically pre-created Secret. Set this to "" to use secret.values or secret.externalSecret instead. |
+| secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the OpenLDAP credentials Secret. This is mutually exclusive with secret.existingSecret. |
+| secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to openldap.global.existingSecret. |
+| secret.migration.enabled | bool | `false` | helx-ldap has no differently named legacy Secret to migrate. Existing installations should continue using existingSecret mode unless ownership is intentionally transferred. |
+| secret.values | object | `{}` | Key/value pairs used to create the chart-managed OpenLDAP credentials Secret when secret.existingSecret is empty and externalSecret is disabled. Required keys:   LDAP_ADMIN_PASSWORD: password for the LDAP directory administrator   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator Argo CD users should provide stable encrypted values or select ESO mode. |
 
-The chart supports three mutually exclusive ownership modes under `secret`.
-
-### Existing Secret (backward-compatible default)
-
-The default continues to use the historically pre-created
-`openldap-credentials` Secret without managing it:
-
-```yaml
-secret:
-  existingSecret: openldap-credentials
-```
-
-### Chart-managed Secret
-
-Clear `existingSecret` and provide stable values. Existing Secret data is
-preserved during upgrades, and values only fill missing keys.
-
-```yaml
-secret:
-  existingSecret: ""
-  values:
-    LDAP_ADMIN_PASSWORD: replace-me
-    LDAP_CONFIG_ADMIN_PASSWORD: replace-me
-```
-
-### External Secrets Operator
-
-Clear `existingSecret`, enable ESO, and identify the backend object to extract:
-
-```yaml
-secret:
-  existingSecret: ""
-  externalSecret:
-    enabled: true
-    remoteRef: helx/openldap
-    secretStoreRef:
-      name: vault
-      kind: SecretStore
-```
-
-`openldap.global.existingSecret` is compatibility plumbing required by the
-upstream chart and defaults to `openldap-credentials`. If either
-`secret.existingSecret` or `secret.externalSecret.targetName` uses a custom
-name, set `openldap.global.existingSecret` to the same name. The chart fails
-rendering when these names differ rather than deploying OpenLDAP with a broken
-Secret reference.
-
-The chart does not automatically adopt the historical Secret. Keep existing
-installations in existing-Secret mode unless ownership is intentionally being
-transferred. Do not commit plaintext `secret.values`; for GitOps deployments,
-ESO backed by Vault is the recommended mode.
-
-## Dependency preparation
-
-From the repository root:
-
-```sh
-helm dependency build services/helx-ldap/chart
-```
-
-Use `helm dependency update services/helx-ldap/chart` only when intentionally
-changing the dependency versions; review the resulting `Chart.lock` before
-committing it. The wrapper chart uses the upstream chart version `4.3.3` and
-the shared `helx-common` library for Secret resources. The configuration Job
-uses the same image as the OpenLDAP dependency by default; that image must contain
-`/bin/sh`, `awk`, `sed`, `grep`, `ldapsearch`, and `ldapmodify`.
-
-The current wrapper defaults also preserve the develop deployment's OpenLDAP
-resources and `LDAP_ALLOW_ANON_BINDING=yes` setting. On OpenShift, use the
-upstream value below so the SCC assigns the filesystem group, matching the
-legacy generator's `openshift: true` behavior:
-
-```yaml
-openldap:
-  podSecurityContext:
-    enabled: false
-```
-
-`configuration.baseDN` and `configuration.adminDN` can override the values
-derived from the OpenLDAP domain and admin user. Existing installations with
-the former `kubernetesSC` schema must be migrated explicitly before enabling
-this chart version because both schemas use the same OID.
+----------------------------------------------
+Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)

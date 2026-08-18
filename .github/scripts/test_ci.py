@@ -86,12 +86,12 @@ class ConfigValidationTests(TempTreeTest):
             ci.exact_locked_dependencies(parent.parent)
         self.assertTrue(child.is_file())
 
-    def test_full_validation_checks_canonical_images_and_unique_charts(self) -> None:
+    def test_full_validation_checks_image_definitions_and_unique_charts(self) -> None:
         self.write_chart("services/app/chart", name="app", app_version="2.0.0")
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
         self.write_chart("deploy/helm/helx-chart", name="helx")
         images = []
-        for index, name in enumerate(sorted(ci.CANONICAL_IMAGES)):
+        for index, name in enumerate(("app", "worker")):
             source = f"sources/{index}"
             self.write(f"{source}/Dockerfile", "FROM scratch\n")
             self.write(f"{source}/chart-only/keep", "")
@@ -108,7 +108,7 @@ class ConfigValidationTests(TempTreeTest):
                 }
             )
         config = self.write(
-            ".github/ci/images.json",
+            ".github/ci/images.yaml",
             json.dumps({"registry": ci.REGISTRY, "images": images}),
         )
         charts = ci.validate_config(self.root, config)
@@ -118,13 +118,56 @@ class ConfigValidationTests(TempTreeTest):
         with self.assertRaisesRegex(ci.CIError, "duplicated"):
             ci.validate_config(self.root, config)
 
+    def test_service_defaults_and_variants_expand_to_normalized_images(self) -> None:
+        images = ci.expand_service_images(
+            {
+                "appstore": {},
+                "appstore-prepuller": {
+                    "context": "controller",
+                    "dockerfile": "controller/Dockerfile",
+                },
+                "appstore-sockets": {
+                    "images": {
+                        "server": {},
+                        "monitoring": {
+                            "context": "monitoring",
+                            "dockerfile": "monitoring/Dockerfile",
+                        },
+                    }
+                },
+                "ldap-sync": {},
+                "ui": {"repository": "helx-ui"},
+            }
+        )
+        by_name = {image["name"]: image for image in images}
+
+        self.assertEqual(by_name["ldap-sync"]["component"], "ldap-sync")
+        self.assertEqual(by_name["ldap-sync"]["chart"], "services/ldap-sync/chart")
+        self.assertEqual(by_name["ldap-sync"]["context"], "services/ldap-sync")
+        self.assertEqual(by_name["ldap-sync"]["dockerfile"], "services/ldap-sync/Dockerfile")
+        self.assertEqual(by_name["ldap-sync"]["sources"], ["services/ldap-sync"])
+        self.assertEqual(by_name["ldap-sync"]["excludes"], ["services/ldap-sync/chart"])
+        self.assertEqual(
+            by_name["appstore-prepuller"]["context"],
+            "services/appstore-prepuller/controller",
+        )
+        self.assertEqual(
+            by_name["appstore-sockets-monitoring"]["repository"],
+            "appstore-sockets/monitoring",
+        )
+        self.assertEqual(
+            by_name["appstore-sockets-server"]["dockerfile"],
+            "services/appstore-sockets/Dockerfile",
+        )
+        self.assertEqual(by_name["ui"]["repository"], "helx-ui")
+
 
 class ImageMatrixTests(TempTreeTest):
     def setUp(self) -> None:
         super().setUp()
         self.write_chart("services/api/chart", name="api", app_version="3.4.5")
         self.config = self.write(
-            "images.json",
+            "images.yaml",
             json.dumps(
                 {
                     "registry": ci.REGISTRY,
@@ -225,7 +268,7 @@ class ManifestTests(TempTreeTest):
             "apiVersion: v2\nname: appstore\nversion: 5.1.4\nappVersion: 4.4.1\n",
         )
         config = self.write(
-            "images.json",
+            "images.yaml",
             json.dumps(
                 {
                     "registry": ci.REGISTRY,

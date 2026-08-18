@@ -1,3 +1,0 @@
-secret:
-  values:
-    PUBLISHER_SECRET: lint-only-publisher-secret

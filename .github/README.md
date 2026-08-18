@@ -63,9 +63,9 @@ again by the `Publish` workflow as a defensive measure. Changing a pull request'
 branch emits a new `edited` run with the current base; rerunning an older workflow
 instead reuses that run's original commit and event payload.
 
-Manual dispatch accepts one image target or `all`. The target list and all
-build metadata come from [`ci/images.json`](ci/images.json); there are no
-per-service workflows or shell `case` mappings.
+Manual dispatch accepts one image target or `all`. The target is validated against
+the normalized image inventory generated from [`ci/images.yaml`](ci/images.yaml);
+there are no per-service workflows or shell `case` mappings.
 
 ## Helm charts
 
@@ -128,13 +128,18 @@ it represents the workflow repository, not the person who triggered the run.
 
 ## Container images
 
-[`ci/images.json`](ci/images.json) is the only image-build inventory. It records
-source paths, chart ownership, contexts, Dockerfiles, and Harbor repositories
-for:
+[`ci/images.yaml`](ci/images.yaml) is the only image-build inventory. It lists
+image-bearing services and exceptional variants; the planner expands each entry
+using the documented service defaults into source paths, chart ownership,
+contexts, Dockerfiles, and Harbor repositories for:
+
+The mapping intentionally contains only services that produce container images;
+chart-only services remain covered by generic Helm chart discovery.
 
 - appstore;
 - appstore-prepuller;
 - appstore-sockets server and monitoring;
+- ldap-sync;
 - UI; and
 - user-mutator.
 
@@ -222,15 +227,19 @@ For a chart:
 
 For an image:
 
-1. add its chart, source paths, context, Dockerfile, and relative Harbor
-   repository to `ci/images.json`;
-2. ensure the chart defines strict `x.y.z` `appVersion` metadata;
-3. exclude chart-only files from both the CI source definition and Docker build
-   context; and
-4. make the image a locked umbrella dependency if it belongs in compatibility
+1. follow the conventional service layout described in
+   [`ci/images.yaml`](ci/images.yaml) whenever possible;
+2. add the service to the `services` mapping in `ci/images.yaml`, using only
+   overrides for non-standard paths, repositories, or image variants;
+3. ensure the chart defines strict `x.y.z` `appVersion` metadata;
+4. exclude chart-only files from the Docker build context; and
+5. make the image a locked umbrella dependency if it belongs in compatibility
    releases.
 
-No new workflow is required.
+A service with an `images` mapping creates multiple image targets from one
+chart. This is the intended way to represent services such as
+`appstore-sockets`; it does not need a separate workflow. No new workflow is
+required.
 
 ## Local checks
 

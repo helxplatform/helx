@@ -3,13 +3,13 @@
 # without putting synthetic credentials in rendered manifests.
 appstore:
   enabled: true
-  secret:
-    existingSecret: helx-ci-appstore
+  # appstore 5.1.4 performs a cluster lookup when this is empty. Supplying a
+  # CI-only value keeps offline umbrella lint deterministic.
+  django:
+    APPSTORE_DJANGO_PASSWORD: lint-only-admin-password
 
 appstore-sockets:
   enabled: true
-  secret:
-    existingSecret: helx-ci-appstore-sockets
 
 helx-ldap:
   enabled: true

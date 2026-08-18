@@ -16,15 +16,7 @@ on:
         description: Image target to validate
         required: true
         default: all
-        type: choice
-        options:
-          - all
-          - appstore
-          - appstore-prepuller
-          - appstore-sockets-server
-          - appstore-sockets-monitoring
-          - ui
-          - user-mutator
+        type: string
 
 concurrency:
   group: ci-${{ github.ref }}

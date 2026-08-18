@@ -1,6 +1,0 @@
-secret:
-  values:
-    SECRET_KEY: lint-only-secret-key
-    APPSTORE_DJANGO_USERNAME: lint-admin
-    APPSTORE_DJANGO_PASSWORD: lint-only-admin-password
-    PG_DB_PASSWORD: lint-only-database-password

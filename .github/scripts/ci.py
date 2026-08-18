@@ -18,18 +18,11 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-IMAGES_FILE = Path(".github/ci/images.json")
+IMAGES_FILE = Path(".github/ci/images.yaml")
 UMBRELLA_DIR = Path("deploy/helm/helx-chart")
 COMMON_DIR = Path("deploy/helm/helx-common/chart")
 REGISTRY = "containers.renci.org/helxplatform"
-CANONICAL_IMAGES = {
-    "appstore",
-    "appstore-prepuller",
-    "appstore-sockets-server",
-    "appstore-sockets-monitoring",
-    "ui",
-    "user-mutator",
-}
+
 SEMVER_RE = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
@@ -38,7 +31,7 @@ SEMVER_RE = re.compile(
 DIGEST_RE = re.compile(r"^Digest:\s*(sha256:[0-9a-f]{64})\s*$", re.MULTILINE)
 REBUILD_ALL_IMAGE_PATHS = (
     ".github/actions/build-service",
-    ".github/ci/images.json",
+    ".github/ci/images.yaml",
     ".github/scripts/ci.py",
     ".github/workflows/ci.yml",
 )
@@ -226,19 +219,112 @@ def _configured_path(root: Path, value: Any, label: str) -> Path:
     return root.joinpath(*pure.parts)
 
 
+IMAGE_OVERRIDE_FIELDS = frozenset(REQUIRED_IMAGE_FIELDS)
+
+
+def _simple_name(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CIError(f"{label} must be a non-empty name")
+    pure = PurePosixPath(value)
+    if pure.is_absolute() or len(pure.parts) != 1 or pure.parts[0] in {".", ".."}:
+        raise CIError(f"{label} must be a single path component: {value!r}")
+    return pure.parts[0]
+
+
+def _service_path(service: str, value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CIError(f"{label} must be a non-empty path relative to services/{service}")
+    pure = PurePosixPath(value)
+    if pure.is_absolute() or ".." in pure.parts:
+        raise CIError(f"{label} must stay within services/{service}: {value!r}")
+    return (PurePosixPath("services") / service / pure).as_posix()
+
+
+def _image_overrides(values: dict[str, Any], label: str) -> dict[str, Any]:
+    unknown = set(values) - IMAGE_OVERRIDE_FIELDS
+    if unknown:
+        fields = ", ".join(sorted(unknown))
+        raise CIError(f"{label} contains unsupported image fields: {fields}")
+    return values
+
+
+def _expand_service_image(
+    service: str,
+    variant: str | None,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    _image_overrides(values, f"service {service!r}")
+    name = service if variant is None else f"{service}-{variant}"
+    repository = service if variant is None else f"{service}/{variant}"
+    image: dict[str, Any] = {
+        "name": values.get("name", name),
+        "component": values.get("component", service),
+        "chart": _service_path(service, values.get("chart", "chart"), f"{service}.chart"),
+        "repository": values.get("repository", repository),
+        "context": _service_path(service, values.get("context", "."), f"{service}.context"),
+        "dockerfile": _service_path(
+            service, values.get("dockerfile", "Dockerfile"), f"{service}.dockerfile"
+        ),
+    }
+    for field, default in (("sources", ["."]), ("excludes", ["chart"])):
+        raw = values.get(field, default)
+        if not isinstance(raw, list) or not all(isinstance(item, str) and item for item in raw):
+            raise CIError(f"service {service!r} field {field!r} must be a list of relative paths")
+        image[field] = [_service_path(service, item, f"{service}.{field}") for item in raw]
+    return image
+
+
+def expand_service_images(services: Any) -> list[dict[str, Any]]:
+    if not isinstance(services, dict) or not services:
+        raise CIError("Image configuration must define a non-empty 'services' mapping")
+    images: list[dict[str, Any]] = []
+    for raw_service, raw_values in services.items():
+        service = _simple_name(raw_service, "image service")
+        if raw_values is None:
+            raw_values = {}
+        if not isinstance(raw_values, dict):
+            raise CIError(f"service {service!r} must be a mapping")
+        values = dict(raw_values)
+        variants = values.pop("images", None)
+        if variants is None:
+            images.append(_expand_service_image(service, None, values))
+            continue
+        if not isinstance(variants, dict) or not variants:
+            raise CIError(f"service {service!r} 'images' must be a non-empty mapping")
+        _image_overrides(values, f"service {service!r}")
+        for raw_variant, raw_variant_values in variants.items():
+            variant = _simple_name(raw_variant, f"service {service!r} image variant")
+            if raw_variant_values is None:
+                raw_variant_values = {}
+            if not isinstance(raw_variant_values, dict):
+                raise CIError(f"service {service!r} image {variant!r} must be a mapping")
+            merged = dict(values)
+            merged.update(raw_variant_values)
+            images.append(_expand_service_image(service, variant, merged))
+    return images
+
+
 def load_images_config(path: Path) -> dict[str, Any]:
     try:
-        config = json.loads(path.read_text(encoding="utf-8"))
+        config = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise CIError(f"Image configuration does not exist: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise CIError(f"Could not parse JSON in {path}: {exc}") from exc
-    if not isinstance(config, dict) or not isinstance(config.get("images"), list):
-        raise CIError(f"{path} must contain an object with an 'images' array")
+    except yaml.YAMLError as exc:
+        raise CIError(f"Could not parse YAML in {path}: {exc}") from exc
+    if not isinstance(config, dict):
+        raise CIError(f"{path} must contain a top-level YAML mapping")
     if not isinstance(config.get("registry"), str) or not config["registry"].strip():
         raise CIError(f"{path} must define a non-empty top-level 'registry'")
+    if "services" in config:
+        images = expand_service_images(config["services"])
+    elif isinstance(config.get("images"), list):
+        # Keep accepting normalized image data for focused helper tests and
+        # gradual migration of external callers.
+        images = config["images"]
+    else:
+        raise CIError(f"{path} must define a 'services' mapping or normalized 'images' array")
     names: set[str] = set()
-    for index, image in enumerate(config["images"], start=1):
+    for index, image in enumerate(images, start=1):
         if not isinstance(image, dict):
             raise CIError(f"{path} image #{index} must be an object")
         missing = [field for field in REQUIRED_IMAGE_FIELDS if field not in image]
@@ -253,7 +339,7 @@ def load_images_config(path: Path) -> dict[str, Any]:
                 isinstance(item, str) and item for item in image[field]
             ):
                 raise CIError(f"Image {name!r} field {field!r} must be a list of paths")
-    return config
+    return {"registry": config["registry"], "images": images}
 
 
 def validate_images(root: Path, config_path: Path) -> dict[str, Any]:
@@ -261,13 +347,7 @@ def validate_images(root: Path, config_path: Path) -> dict[str, Any]:
     errors: list[str] = []
     if config["registry"] != REGISTRY:
         errors.append(f"registry must be {REGISTRY!r}, not {config['registry']!r}")
-    names = {image["name"] for image in config["images"]}
-    if names != CANONICAL_IMAGES:
-        errors.append(
-            "configured image names must be exactly "
-            + ", ".join(sorted(CANONICAL_IMAGES))
-            + f" (got {', '.join(sorted(names))})"
-        )
+
     for image in config["images"]:
         name = image["name"]
         try:
@@ -739,7 +819,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "validate-config":
             charts = validate_config(ROOT)
-            print(f"Validated {len(charts)} charts and {len(CANONICAL_IMAGES)} images")
+            image_count = len(load_images_config(ROOT / IMAGES_FILE)["images"])
+            print(f"Validated {len(charts)} charts and {image_count} images")
         elif args.command == "check-versions":
             check_versions(ROOT, args.base)
             print("Version checks passed")

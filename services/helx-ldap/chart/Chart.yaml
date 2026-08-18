@@ -11,7 +11,7 @@ appVersion: "2.6.9"
 dependencies:
   - name: helx-common
     version: "0.1.0"
-    repository: "file://../../helx-common/chart"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: openldap-stack-ha
     alias: openldap
     version: "4.3.3"

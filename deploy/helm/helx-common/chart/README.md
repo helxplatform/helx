@@ -4,17 +4,20 @@ Shared Helm library templates for HeLx service charts.
 
 ## Consuming the library
 
-Add the local library dependency to a service chart:
+Add the published library dependency to a service chart:
 
 ```yaml
 dependencies:
   - name: helx-common
     version: "0.1.0"
-    repository: "file://../../helx-common/chart"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
 ```
 
-`helm dependency update` packages the library into the published service chart,
-so installations do not depend on the monorepo path.
+Commit the resulting `Chart.lock`, but do not commit generated dependency
+archives under `charts/`. CI publishes `helx-common` before service charts. For
+pull requests and first publication of a new version, CI substitutes an exact
+name-and-version match from this repository while assembling dependencies; the
+committed metadata remains OCI-based.
 
 ## Secret helpers
 

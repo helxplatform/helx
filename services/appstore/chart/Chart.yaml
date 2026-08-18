@@ -21,7 +21,7 @@ appVersion: 4.4.1
 dependencies:
   - name: helx-common
     version: "0.1.0"
-    repository: "file://../../helx-common/chart"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: postgresql
     condition: postgresql.enabled
     version: "16.7.26"

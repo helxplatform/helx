@@ -8,5 +8,3 @@ env/
 charts
 *.tgz
 
-Chart.lock
-

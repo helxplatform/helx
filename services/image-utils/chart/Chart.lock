@@ -1,9 +1,0 @@
-dependencies:
-- name: helx-common
-  repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 0.1.0
-- name: kubernetes-image-puller
-  repository: https://helxplatform.github.io/helm-charts
-  version: 1.0.0
-digest: sha256:b60c8bbda1d5589126b0a14fd73a50829762e38a25604588f5b84de62e0ccdf7
-generated: "2026-08-18T03:53:46Z"

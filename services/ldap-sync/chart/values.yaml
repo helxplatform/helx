@@ -1,0 +1,142 @@
+# Default values for ldap-sync.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: containers.renci.org/helxplatform/ldap-sync
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 5500
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+resources:
+  limits:
+    cpu: 1
+    memory: "1G"
+  requests:
+    cpu: 1
+    memory: "1G"
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+loglevel: "info"
+config:
+  hooks: []
+  hookRetry:
+    maxRetries: 10
+    initialDelayMs: 100
+    maxDelayMs: 30000
+  source:
+    url: ""
+    bindDN: "cn=admin,dc=example,dc=org"
+    bindPassword: ""
+    baseDN: "dc=example,dc=org"
+  target:
+    url: ""
+    bindDN: "cn=admin,dc=example,dc=org"
+    bindPassword: ""
+    baseDN: "dc=example,dc=org"
+  plugins:
+    # Creates a PVC in the release namespace for every synced group
+    # entry. When enabled, the chart also installs a Role/RoleBinding
+    # granting the service account get/list/create on PVCs.
+    pvcGroup:
+      enabled: true
+      storageClass: ""
+      size: 10Gi
+      accessModes:
+        - ReadWriteMany
+
+# PostgreSQL configuration
+postgres:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 8Gi
+  auth:
+    # Username for the database
+    username: ldapsync
+    # Database name
+    database: ldapsync
+    # Use the auto-generated secret with lookup function for password persistence
+    # IMPORTANT: Set this to "<your-release-name>-postgres" on install
+    # Example: --set postgres.auth.existingSecret=my-release-postgres
+    # For release name "ldap-sync", this default works
+    existingSecret: "ldap-sync-postgres"
+    secretKeys:
+      adminPasswordKey: postgres-password
+  # SSL mode for PostgreSQL connection (disable, require, verify-ca, verify-full)
+  sslmode: disable
+  config:
+    # postgres 14+ stores passwords as scram-sha-256 by default.
+    # The cloudpirates chart's default pg_hba.conf uses md5 for remote connections,
+    # which cannot verify a scram-sha-256 hash — remote auth fails even though the
+    # readiness probe (127.0.0.1 = trust) passes. Override to scram-sha-256.
+    pgHbaConfig: |
+      local   all             all                                     trust
+      host    all             all             127.0.0.1/32            trust
+      host    all             all             ::1/128                 trust
+      local   replication     all                                     trust
+      host    replication     all             127.0.0.1/32            trust
+      host    replication     all             ::1/128                 trust
+      host    all             all             all                     scram-sha-256
+  # Additional PostgreSQL configuration can be added here
+  # For example, resource limits, custom configuration, etc.

@@ -52,6 +52,24 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
+Name of the chart-managed proxy-admin Secret.
+*/}}
+{{- define "nfsrods.managedSecretName" -}}
+{{- printf "%s-secrets" (include "nfsrods.fullname" .) -}}
+{{- end -}}
+
+{{/*
+Resolve the proxy-admin Secret selected by the three-mode Secret contract.
+*/}}
+{{- define "nfsrods.secretName" -}}
+{{- include "helx-common.secret.name.v1" (dict
+  "defaultName" (include "nfsrods.managedSecretName" .)
+  "existingSecret" .Values.secret.existingSecret
+  "externalSecret" .Values.secret.externalSecret
+) -}}
+{{- end -}}
+
+{{/*
 Create the name of the service account to use
 */}}
 {{- define "nfsrods.serviceAccountName" -}}

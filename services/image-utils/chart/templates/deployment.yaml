@@ -1,0 +1,83 @@
+{{- $patcher := index .Values "imagepullsecret-patcher" -}}
+{{- if $patcher.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "image-utils.imagepullsecret-patcher.fullname" . }}
+  labels:
+    {{- include "image-utils.imagepullsecret-patcher.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $patcher.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "image-utils.imagepullsecret-patcher.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with $patcher.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "image-utils.imagepullsecret-patcher.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: true
+      {{- with $patcher.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "image-utils.imagepullsecret-patcher.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml $patcher.podSecurityContext | nindent 8 }}
+      containers:
+        - name: imagepullsecret-patcher
+          securityContext:
+            {{- toYaml $patcher.securityContext | nindent 12 }}
+          image: "{{ $patcher.image.repository }}:{{ default "0.0.15" $patcher.image.tag }}"
+          imagePullPolicy: {{ $patcher.image.pullPolicy }}
+          env:
+            - name: CONFIG_FORCE
+              value: {{ $patcher.config.force | quote }}
+            - name: CONFIG_DEBUG
+              value: {{ $patcher.config.debug | quote }}
+            - name: CONFIG_MANAGEDONLY
+              value: {{ $patcher.config.managedonly | quote }}
+            - name: CONFIG_RUNONCE
+              value: {{ $patcher.config.runonce | quote }}
+            - name: CONFIG_SERVICEACCOUNTS
+              value: {{ $patcher.config.serviceaccounts | quote }}
+            - name: CONFIG_ALLSERVICEACCOUNT
+              value: {{ $patcher.config.allserviceaccount | quote }}
+            - name: CONFIG_DOCKERCONFIGJSONPATH
+              value: {{ $patcher.config.dockerconfigjsonpath | quote }}
+            - name: CONFIG_SECRETNAME
+              value: {{ $patcher.config.secretname | quote }}
+            - name: CONFIG_EXCLUDED_NAMESPACES
+              value: {{ $patcher.config.excludednamespaces | quote }}
+            - name: CONFIG_LOOP_DURATION
+              value: {{ $patcher.config.loopduration | quote }}
+          volumeMounts:
+            - name: src-dockerconfigjson
+              mountPath: /app/secrets
+              readOnly: true
+          resources:
+            {{- toYaml $patcher.resources | nindent 12 }}
+      volumes:
+        - name: src-dockerconfigjson
+          secret:
+            secretName: {{ include "image-utils.sourceRegistrySecretName" . }}
+            items:
+              - key: .dockerconfigjson
+                path: .dockerconfigjson
+      {{- with $patcher.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $patcher.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $patcher.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end -}}

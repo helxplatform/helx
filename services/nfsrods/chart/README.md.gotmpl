@@ -3,9 +3,28 @@
 
 {{ template "chart.versionBadge" .  }}{{ template "chart.typeBadge" .  }}{{ template "chart.appVersionBadge" .  }}
 
+{{ template "chart.requirementsSection" . }}
+
 `nfsrods` works by creating a fake PersistentVolume which acts as a pointer to the `nfsrods` Service IP. When a pod mounts the `nfsrods` PersistentVolume, kubelet will send NFS commands to the service IP listed in the PersistentVolume. Since Helm ensures the `service.ip` is the same in the Service and the PersistentVolume, the NFS traffic can flow as if talking to any other external NFS server.
 
 NOTE: The PersistentVolume and Claim are set be retained if the helm chart is uninstalled. This allows for non-cluster-admins to re-deploy since they do not have the permission to create and delete PersistentVolumes.
+
+## Proxy-admin credentials
+
+The final `server.json` requires these Secret keys:
+
+- `IRODS_PROXY_ADMIN_USERNAME`
+- `IRODS_PROXY_ADMIN_PASSWORD`
+
+Configure exactly one of the helx-common ownership modes:
+
+1. Leave `secret.existingSecret` empty and `secret.externalSecret.enabled` false, then provide both keys through `secret.values` for a chart-managed Secret.
+2. Set `secret.existingSecret` to a caller-managed Secret containing both keys.
+3. Enable `secret.externalSecret` and configure its backend reference so External Secrets Operator creates a Secret containing both keys.
+
+No legacy Secret migration is performed. The ConfigMap contains only the nonsecret base `server.json`. A Python init container reads that base and the selected Secret, inserts `proxy_admin_account`, and writes the completed file to an `emptyDir` mounted by the main container. `exports` and `log4j.properties` remain mounted directly from the ConfigMap.
+
+Because the credentials are assembled by an init container, a running Pod must be restarted after the selected Secret changes. ESO users can configure their preferred Secret-reloader annotation through `podAnnotations`, or perform a rollout as part of credential rotation.
 
 {{ template "chart.valuesSection" . }}
 

@@ -11,6 +11,11 @@ spec:
       {{- include "nfsrods.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configs-configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       labels:
         {{- include "nfsrods.selectorLabels" . | nindent 8 }}
     spec:
@@ -20,6 +25,71 @@ spec:
     {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: generate-server-json
+          image: "{{ .Values.serverJsonInit.image.repository }}:{{ .Values.serverJsonInit.image.tag }}"
+          imagePullPolicy: {{ .Values.serverJsonInit.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.serverJsonInit.securityContext | nindent 12 }}
+          command:
+            - python
+            - -c
+          args:
+            - |
+              import json
+              import os
+              from pathlib import Path
+
+              source = Path("/server-json-base/server.json")
+              target = Path("/server-json/server.json")
+              temporary_target = target.with_suffix(".tmp")
+
+              with source.open(encoding="utf-8") as stream:
+                  config = json.load(stream)
+
+              if not isinstance(config, dict):
+                  raise ValueError("server.json must contain a JSON object")
+
+              irods_client = config.get("irods_client")
+              if not isinstance(irods_client, dict):
+                  raise ValueError("server.json must contain an irods_client object")
+
+              username = os.environ.get("IRODS_PROXY_ADMIN_USERNAME")
+              password = os.environ.get("IRODS_PROXY_ADMIN_PASSWORD")
+              if not username or not password:
+                  raise ValueError("proxy-admin credentials must be non-empty")
+
+              irods_client["proxy_admin_account"] = {
+                  "username": username,
+                  "password": password,
+              }
+
+              with temporary_target.open("w", encoding="utf-8") as stream:
+                  json.dump(config, stream, indent=4)
+                  stream.write("\n")
+              # Secret volumes use world-readable file modes by default. Match
+              # that behavior so a non-root main container can read this pod-local
+              # generated file without requiring a shared fsGroup.
+              temporary_target.chmod(0o644)
+              temporary_target.replace(target)
+          env:
+            - name: IRODS_PROXY_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nfsrods.secretName" . }}
+                  key: IRODS_PROXY_ADMIN_USERNAME
+            - name: IRODS_PROXY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nfsrods.secretName" . }}
+                  key: IRODS_PROXY_ADMIN_PASSWORD
+          volumeMounts:
+            - name: server-json-base-vol
+              mountPath: /server-json-base/server.json
+              subPath: server.json
+              readOnly: true
+            - name: server-json-vol
+              mountPath: /server-json
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -56,6 +126,7 @@ spec:
           - name: server-json-vol
             mountPath: /nfsrods_config/server.json
             subPath: server.json
+            readOnly: true
       volumes:
         - name: exports-vol
           configMap:
@@ -65,10 +136,12 @@ spec:
           configMap:
             name: configs-configmap
             defaultMode: 0644
-        - name: server-json-vol
+        - name: server-json-base-vol
           configMap:
             name: configs-configmap
             defaultMode: 0644
+        - name: server-json-vol
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

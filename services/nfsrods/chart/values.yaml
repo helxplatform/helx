@@ -14,6 +14,49 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
+secret:
+  # -- Name of a caller-managed Secret containing IRODS_PROXY_ADMIN_USERNAME and
+  # IRODS_PROXY_ADMIN_PASSWORD. When set, the chart does not create or manage a
+  # Secret.
+  existingSecret: ""
+
+  # -- Key/value pairs used to create the chart-managed proxy-admin Secret when
+  # secret.existingSecret is empty and secret.externalSecret is disabled.
+  # Required keys:
+  #   IRODS_PROXY_ADMIN_USERNAME: iRODS proxy administrator username
+  #   IRODS_PROXY_ADMIN_PASSWORD: iRODS proxy administrator password
+  # Argo CD users should provide stable encrypted values or select an external
+  # ownership mode.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the proxy-admin Secret. This is
+  # mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to <fullname>-secrets.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- No legacy Secret migration is performed. Existing installations must
+    # select one of the three supported ownership modes explicitly.
+    enabled: false
+
+serverJsonInit:
+  image:
+    repository: python
+    tag: "3.12-alpine"
+    pullPolicy: IfNotPresent
+  securityContext: {}
+
+# -- Additional annotations for the nfsrods Pod. A Secret-reloader annotation
+# can be supplied here when automatic restarts after ESO rotation are required.
+podAnnotations: {}
+
 podSecurityContext: {}
   # fsGroup: 2000
 
@@ -65,7 +108,7 @@ server:
   nfs_server:
     port: 2049
     irods_mount_point: /ExampleZone
-    user_information_refresh_time_in_milliseconds: "3600000"
+    user_information_refresh_time_in_milliseconds: 3600000
     file_information_refresh_time_in_milliseconds: 1000
     user_access_refresh_time_in_milliseconds: 1000
     object_type_refresh_time_in_milliseconds: 300000
@@ -81,9 +124,6 @@ server:
     default_resource: demoResc
     ssl_negotiation_policy: CS_NEG_REFUSE
     connection_timeout_in_seconds: 600
-    proxy_admin_account:
-      username: user
-      password: password
 
 global:
   stdnfsPvc: stdnfs

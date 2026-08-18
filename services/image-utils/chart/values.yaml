@@ -1,4 +1,90 @@
+secret:
+  # -- Name of a caller-managed source registry credential Secret containing
+  # .dockerconfigjson. When set, the chart does not create or manage a Secret.
+  existingSecret: ""
+
+  # -- Key/value pairs used to create the chart-managed source registry
+  # credential Secret when existingSecret is empty and externalSecret is
+  # disabled. Required key: .dockerconfigjson. The value must be a Docker config
+  # JSON document. Prefer encrypted values, ESO, or existingSecret in production.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the source registry credential
+  # Secret. This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to image-pull-secret.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
 imagepullsecret-patcher:
   enabled: false
+
+  replicaCount: 1
+
+  image:
+    repository: helxplatform/imagepullsecret-patcher
+    pullPolicy: IfNotPresent
+    # -- Overrides the patcher's historical app version.
+    tag: "0.0.15"
+
+  imagePullSecrets: []
+
+  nameOverride: ""
+  fullnameOverride: ""
+
+  serviceAccount:
+    # -- Specifies whether a service account should be created.
+    create: true
+    # -- Annotations to add to the service account.
+    annotations: {}
+    # -- Service account name. Generated from the release name when empty and
+    # create is true; defaults to default when create is false.
+    name: ""
+
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+
+  resources:
+    limits:
+      cpu: 0.2
+      memory: 30Mi
+    requests:
+      cpu: 0.1
+      memory: 15Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  config:
+    # -- Overwrite destination secrets when they do not match.
+    force: true
+    # -- Show DEBUG logs.
+    debug: false
+    # -- Only modify secrets created by imagepullsecret-patcher.
+    managedonly: false
+    # -- Run the update loop once, allowing for external scheduling.
+    runonce: false
+    # -- Comma-separated list of service accounts to patch.
+    serviceaccounts: default
+    # -- List and patch all service accounts, ignoring serviceaccounts.
+    allserviceaccount: false
+    # -- Path at which the selected source Secret's .dockerconfigjson key is
+    # mounted. This is passed to CONFIG_DOCKERCONFIGJSONPATH.
+    dockerconfigjsonpath: "/app/secrets/.dockerconfigjson"
+    # -- Destination Secret name propagated to namespaces. This is independent
+    # of the source Secret selected through the top-level secret block.
+    secretname: "image-pull-secret"
+    # -- Comma-separated namespaces excluded from processing.
+    excludednamespaces: ""
+    # -- How often namespaces are checked, as a Go duration string.
+    loopduration: "10s"
+
 kubernetes-image-puller:
   enabled: false

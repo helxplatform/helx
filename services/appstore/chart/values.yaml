@@ -76,6 +76,15 @@ secret:
   # variables. Optional keys should be omitted unless the corresponding feature is
   # enabled.
   #
+  # The chart computes and injects these database settings directly from Helm
+  # values/templates; *do not* put them in the Secret:
+  #   PG_DB_ENGINE: always "postgresql"
+  #   PG_DB_DATABASE: derived from postgresql.global.postgresql.auth.database
+  #   PG_DB_USERNAME: derived from postgresql.global.postgresql.auth.username
+  #   PG_DB_HOST: derived from the release name and PostgreSQL service name
+  #   PG_DB_PORT: derived from db.port, normally "5432"
+  #   POSTGRES_ENABLED: "true" when postgresql.enabled is true, otherwise "false"
+  #
   # Required for a normal appstore deployment:
   #   SECRET_KEY: non-empty random string; 50 characters is the historical chart length, but the app has
   #   no fixed length requirement (use this name, not legacy APPSTORE_SECRET_KEY)
@@ -85,15 +94,6 @@ secret:
   # PostgreSQL password (when PostgreSQL is enabled):
   #   PG_DB_PASSWORD: application database-user password string; when using the
   #   bundled PostgreSQL chart, it must match postgresql.global.postgresql.auth.password
-  #
-  # The chart computes and injects these database settings directly from Helm
-  # values/templates; do not put them in the Secret:
-  #   PG_DB_ENGINE: always "postgresql"
-  #   PG_DB_DATABASE: derived from postgresql.global.postgresql.auth.database
-  #   PG_DB_USERNAME: derived from postgresql.global.postgresql.auth.username
-  #   PG_DB_HOST: derived from the release name and PostgreSQL service name
-  #   PG_DB_PORT: derived from db.port, normally "5432"
-  #   POSTGRES_ENABLED: "true" when postgresql.enabled is true, otherwise "false"
   #
   # Optional appstore settings:
   #   AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames
@@ -109,7 +109,7 @@ secret:
   #   RECIPIENT_EMAILS: comma-separated email addresses
   #
   # OAuth provider settings (include the group matching each configured provider):
-  #   OAUTH_PROVIDERS: comma-separated lowercase provider names with no spaces, for example "google,github"
+  #   OAUTH_PROVIDERS: comma-separated lowercase provider names with no spaces, e.g. "google,github"
   #   GITHUB_NAME: provider display/name string
   #   GITHUB_CLIENT_ID: provider client ID string
   #   GITHUB_SECRET: provider client secret string
@@ -453,8 +453,6 @@ postgresql:
       auth:
         database: "appstore-oauth"
         username: "renci"
-        password: "renciAdmin"
-        postgresPassword: "adminPass"
   # -- postgresql labels
   primary:
     labels: {"np-label": "appstore-db"}

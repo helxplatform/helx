@@ -2,6 +2,9 @@ dependencies:
 - name: appstore
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 5.1.4
+- name: appstore-prepuller
+  repository: file://../../../services/appstore-prepuller/chart
+  version: 0.1.1
 - name: appstore-sockets
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.1.0
@@ -14,6 +17,9 @@ dependencies:
 - name: image-utils
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 1.0.0
+- name: ldap-sync
+  repository: file://../../../services/ldap-sync/chart
+  version: 2.2.1
 - name: nfs-server
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 0.2.5
@@ -32,5 +38,8 @@ dependencies:
 - name: ui
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 1.6.0
-digest: sha256:59d5bcbd96fb37727060ffedf4b99b12ff493635454602d6e175fe7bfdb1815f
-generated: "2026-08-16T00:25:59.212575-04:00"
+- name: user-mutator
+  repository: file://../../../services/user-mutator/chart
+  version: 1.6.2
+digest: sha256:b1596c4cada16326bd852cb6c697dca6109b95264737a82bfc2f5b5f1ddf2c27
+generated: "2026-08-19T13:03:35-04:00"

@@ -61,6 +61,7 @@ class SemVer:
 
     @classmethod
     def parse(cls, value: Any, label: str = "version") -> SemVer:
+        """Parse a semantic version string into a comparable SemVer."""
         text = str(value).strip()
         match = SEMVER_RE.fullmatch(text)
         if not match:
@@ -80,9 +81,11 @@ class SemVer:
         return cls(int(major), int(minor), int(patch), tuple(identifiers))
 
     def _key(self) -> tuple[int, int, int]:
+        """Return the numeric release components used for comparison."""
         return self.major, self.minor, self.patch
 
     def _compare(self, other: SemVer) -> int:
+        """Compare this version with another SemVer, including prerelease ordering."""
         if self._key() != other._key():
             return (self._key() > other._key()) - (self._key() < other._key())
         if not self.prerelease or not other.prerelease:
@@ -103,11 +106,13 @@ class SemVer:
         )
 
     def __lt__(self, other: object) -> bool:
+        """Return whether this version precedes another SemVer."""
         if not isinstance(other, SemVer):
             return NotImplemented
         return self._compare(other) < 0
 
     def __eq__(self, other: object) -> bool:
+        """Return whether another object represents the same semantic version."""
         return isinstance(other, SemVer) and self._compare(other) == 0
 
 
@@ -118,10 +123,12 @@ class Dependency:
     repository: str
 
     def tsv(self) -> str:
+        """Serialize the dependency as a tab-separated row."""
         return f"{self.name}\t{self.version}\t{self.repository}"
 
 
 def _yaml_mapping(content: str, label: str) -> dict[str, Any]:
+    """Parse YAML content and require a top-level mapping."""
     try:
         value = yaml.safe_load(content)
     except yaml.YAMLError as exc:
@@ -132,6 +139,7 @@ def _yaml_mapping(content: str, label: str) -> dict[str, Any]:
 
 
 def read_yaml(path: Path) -> dict[str, Any]:
+    """Read a YAML file and return its top-level mapping."""
     try:
         return _yaml_mapping(path.read_text(encoding="utf-8"), str(path))
     except FileNotFoundError as exc:
@@ -139,6 +147,7 @@ def read_yaml(path: Path) -> dict[str, Any]:
 
 
 def metadata_value(data: dict[str, Any], field: str, label: str) -> str:
+    """Return a required non-empty scalar metadata field."""
     value = data.get(field)
     if value is None or isinstance(value, (dict, list)) or str(value).strip() == "":
         raise CIError(f"{label} is missing top-level {field!r}")
@@ -146,11 +155,13 @@ def metadata_value(data: dict[str, Any], field: str, label: str) -> str:
 
 
 def chart_file(chart: str | Path) -> Path:
+    """Return the Chart.yaml path for a chart directory or file path."""
     path = Path(chart)
     return path if path.name == "Chart.yaml" else path / "Chart.yaml"
 
 
 def dependency_list(data: dict[str, Any], label: str) -> list[Dependency]:
+    """Parse and validate a chart dependency list."""
     raw = data.get("dependencies", [])
     if raw is None:
         return []
@@ -176,6 +187,7 @@ def dependency_list(data: dict[str, Any], label: str) -> list[Dependency]:
 
 
 def exact_locked_dependencies(chart_dir: Path) -> list[Dependency]:
+    """Require Chart.yaml dependencies to match Chart.lock exactly."""
     chart_path = chart_dir / "Chart.yaml"
     lock_path = chart_dir / "Chart.lock"
     declared = dependency_list(read_yaml(chart_path), str(chart_path))
@@ -199,11 +211,13 @@ def exact_locked_dependencies(chart_dir: Path) -> list[Dependency]:
 
 
 def discover_chart_dirs(root: Path) -> list[Path]:
+    """Find all service, common, and umbrella chart directories."""
     service_dirs = sorted(path.parent for path in (root / "services").glob("*/chart/Chart.yaml"))
     return service_dirs + [root / COMMON_DIR, root / UMBRELLA_DIR]
 
 
 def relative_path(root: Path, path: Path) -> str:
+    """Return a POSIX path relative to root when possible."""
     try:
         return path.relative_to(root).as_posix()
     except ValueError:
@@ -211,6 +225,7 @@ def relative_path(root: Path, path: Path) -> str:
 
 
 def _configured_path(root: Path, value: Any, label: str) -> Path:
+    """Resolve a repository-relative configured path safely."""
     if not isinstance(value, str) or not value.strip():
         raise CIError(f"{label} must be a non-empty relative path")
     pure = PurePosixPath(value)
@@ -223,6 +238,7 @@ IMAGE_OVERRIDE_FIELDS = frozenset(REQUIRED_IMAGE_FIELDS)
 
 
 def _simple_name(value: Any, label: str) -> str:
+    """Validate and return a single-component name."""
     if not isinstance(value, str) or not value.strip():
         raise CIError(f"{label} must be a non-empty name")
     pure = PurePosixPath(value)
@@ -232,6 +248,7 @@ def _simple_name(value: Any, label: str) -> str:
 
 
 def _service_path(service: str, value: Any, label: str) -> str:
+    """Validate a service-relative path and prefix it with services/<service>."""
     if not isinstance(value, str) or not value.strip():
         raise CIError(f"{label} must be a non-empty path relative to services/{service}")
     pure = PurePosixPath(value)
@@ -241,6 +258,7 @@ def _service_path(service: str, value: Any, label: str) -> str:
 
 
 def _image_overrides(values: dict[str, Any], label: str) -> dict[str, Any]:
+    """Reject unsupported fields in an image override mapping."""
     unknown = set(values) - IMAGE_OVERRIDE_FIELDS
     if unknown:
         fields = ", ".join(sorted(unknown))
@@ -253,6 +271,7 @@ def _expand_service_image(
     variant: str | None,
     values: dict[str, Any],
 ) -> dict[str, Any]:
+    """Expand one service or variant configuration into normalized image data."""
     _image_overrides(values, f"service {service!r}")
     name = service if variant is None else f"{service}-{variant}"
     repository = service if variant is None else f"{service}/{variant}"
@@ -275,6 +294,7 @@ def _expand_service_image(
 
 
 def expand_service_images(services: Any) -> list[dict[str, Any]]:
+    """Expand service-based image configuration into normalized image entries."""
     if not isinstance(services, dict) or not services:
         raise CIError("Image configuration must define a non-empty 'services' mapping")
     images: list[dict[str, Any]] = []
@@ -305,6 +325,7 @@ def expand_service_images(services: Any) -> list[dict[str, Any]]:
 
 
 def load_images_config(path: Path) -> dict[str, Any]:
+    """Load, normalize, and validate the image configuration."""
     try:
         config = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -343,6 +364,7 @@ def load_images_config(path: Path) -> dict[str, Any]:
 
 
 def validate_images(root: Path, config_path: Path) -> dict[str, Any]:
+    """Validate image paths, repositories, and chart metadata."""
     config = load_images_config(config_path)
     errors: list[str] = []
     if config["registry"] != REGISTRY:
@@ -392,6 +414,7 @@ def validate_images(root: Path, config_path: Path) -> dict[str, Any]:
 
 
 def validate_chart(root: Path, chart_dir: Path) -> tuple[str, dict[str, Any]]:
+    """Validate a chart and its locked local dependencies."""
     chart_path = chart_dir / "Chart.yaml"
     data = read_yaml(chart_path)
     name = metadata_value(data, "name", str(chart_path))
@@ -419,6 +442,7 @@ def validate_chart(root: Path, chart_dir: Path) -> tuple[str, dict[str, Any]]:
 
 
 def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Validate all charts and image configuration and return chart metadata."""
     charts: dict[str, dict[str, Any]] = {}
     errors: list[str] = []
     seen: dict[str, Path] = {}
@@ -444,11 +468,13 @@ def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[
 
 
 def path_is_within(path: str, prefix: str) -> bool:
+    """Return whether path is prefix itself or a descendant of prefix."""
     normalized = prefix.strip("/")
     return path == normalized or path.startswith(normalized + "/")
 
 
 def image_source_changed(image: dict[str, Any], paths: Iterable[str]) -> bool:
+    """Return whether changed paths affect an image's included, non-excluded sources."""
     return any(
         any(path_is_within(path, source) for source in image["sources"])
         and not any(path_is_within(path, excluded) for excluded in image["excludes"])
@@ -457,6 +483,7 @@ def image_source_changed(image: dict[str, Any], paths: Iterable[str]) -> bool:
 
 
 def git_run(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    """Run a Git command in root and raise a CIError on failure."""
     result = subprocess.run(
         ["git", *args], cwd=root, text=True, capture_output=True, check=False
     )
@@ -467,27 +494,32 @@ def git_run(root: Path, *args: str, check: bool = True) -> subprocess.CompletedP
 
 
 def changed_paths(root: Path, base: str) -> list[str]:
+    """Return files changed from base to HEAD."""
     result = git_run(root, "diff", "--name-only", "--diff-filter=ACDMRTUXB", f"{base}..HEAD", "--")
     return [line for line in result.stdout.splitlines() if line]
 
 
 def git_file(root: Path, revision: str, path: str) -> str | None:
+    """Return a file's contents at a Git revision, or None if unavailable."""
     result = git_run(root, "show", f"{revision}:{path}", check=False)
     return result.stdout if result.returncode == 0 else None
 
 
 def _base_chart(root: Path, base: str, chart_dir: Path) -> dict[str, Any] | None:
+    """Load a chart's Chart.yaml from the base revision if it exists."""
     path = relative_path(root, chart_dir / "Chart.yaml")
     content = git_file(root, base, path)
     return _yaml_mapping(content, f"{base}:{path}") if content is not None else None
 
 
 def _require_increase(current: str, previous: str, label: str) -> None:
+    """Require current to be a greater semantic version than previous."""
     if SemVer.parse(current, label) <= SemVer.parse(previous, f"base {label}"):
         raise CIError(f"{label} must increase above {previous!r}; current value is {current!r}")
 
 
 def check_versions(root: Path, base: str, config_path: Path | None = None) -> None:
+    """Ensure changed chart and image versions increase over the base revision."""
     git_run(root, "rev-parse", "--verify", f"{base}^{{commit}}")
     paths = changed_paths(root, base)
     errors: list[str] = []
@@ -543,6 +575,7 @@ def image_matrix(
     base: str | None = None,
     config_path: Path | None = None,
 ) -> list[dict[str, Any]]:
+    """Select images for CI and build their versioned job matrix entries."""
     config = load_images_config(config_path or root / IMAGES_FILE)
     images = config["images"]
     if sum((all_images, target is not None, base is not None)) != 1:
@@ -581,6 +614,7 @@ def image_matrix(
 
 
 def empty_image() -> dict[str, Any]:
+    """Return a placeholder matrix entry when no images need building."""
     return {
         "name": "none changed",
         "job_name": "No images to build",
@@ -596,6 +630,7 @@ def empty_image() -> dict[str, Any]:
 
 
 def write_github_outputs(path: Path, values: dict[str, str]) -> None:
+    """Append key-value pairs to a GitHub Actions output file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as output:
         for key, value in values.items():
@@ -603,15 +638,18 @@ def write_github_outputs(path: Path, values: dict[str, str]) -> None:
 
 
 def compact_json(value: Any) -> str:
+    """Serialize a value as deterministic compact JSON."""
     return json.dumps(value, separators=(",", ":"), sort_keys=True)
 
 
 def service_chart_matrix(root: Path) -> list[str]:
+    """Return service chart paths for a GitHub Actions matrix."""
     charts = [relative_path(root, path.parent) for path in (root / "services").glob("*/chart/Chart.yaml")]
     return sorted(charts) or ["__none__"]
 
 
 def release_decision(current: str, previous: str | None, force: bool = False) -> bool:
+    """Determine whether the umbrella chart should be released."""
     current_version = SemVer.parse(current, "umbrella version")
     if previous is None:
         return force
@@ -622,6 +660,7 @@ def release_decision(current: str, previous: str | None, force: bool = False) ->
 
 
 def release_info(root: Path, base: str, force: bool = False) -> dict[str, str]:
+    """Collect the current and base umbrella versions and release decision."""
     current_data = read_yaml(root / UMBRELLA_DIR / "Chart.yaml")
     current = metadata_value(current_data, "version", str(root / UMBRELLA_DIR / "Chart.yaml"))
     git_run(root, "rev-parse", "--verify", f"{base}^{{commit}}")
@@ -640,6 +679,7 @@ def release_info(root: Path, base: str, force: bool = False) -> dict[str, str]:
 
 
 def archive_metadata(path: Path) -> dict[str, Any]:
+    """Read Chart.yaml metadata from a chart archive."""
     try:
         with tarfile.open(path, "r:*") as archive:
             candidates = [
@@ -660,6 +700,7 @@ def archive_metadata(path: Path) -> dict[str, Any]:
 
 
 def inspect_digest(reference: str) -> str:
+    """Inspect a container image and return its immutable digest."""
     result = subprocess.run(
         ["docker", "buildx", "imagetools", "inspect", reference],
         text=True,
@@ -679,6 +720,7 @@ def build_release_manifest(
     commit: str,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
+    """Build a release manifest with locked charts and image digests."""
     umbrella_dir = root / UMBRELLA_DIR
     umbrella = read_yaml(umbrella_dir / "Chart.yaml")
     name = metadata_value(umbrella, "name", str(umbrella_dir / "Chart.yaml"))
@@ -746,6 +788,7 @@ def build_release_manifest(
 
 
 def release_notes(manifest: dict[str, Any]) -> str:
+    """Render release manifest data as Markdown release notes."""
     release = manifest["release"]
     umbrella = manifest["umbrella"]
     lines = [
@@ -772,11 +815,13 @@ def release_notes(manifest: dict[str, Any]) -> str:
 
 
 def output_path(root: Path, value: str) -> Path:
+    """Resolve a CLI output path relative to root unless already absolute."""
     path = Path(value)
     return path if path.is_absolute() else root / path
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse CI command-line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -815,6 +860,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the requested CI command and return its process exit code."""
     args = parse_args(argv)
     try:
         if args.command == "validate-config":

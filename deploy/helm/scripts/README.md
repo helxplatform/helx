@@ -9,11 +9,20 @@ The umbrella chart normally resolves its dependencies from the configured OCI
 registry. This script lets local chart sources override that behavior for an
 explicit set of services:
 
-1. Builds the umbrella chart's normal dependencies from `Chart.lock`.
-2. Runs `helm dependency build` in each selected local service chart.
-3. Packages each selected service chart with `helm package`.
-4. Replaces only the corresponding chart archive in
-   `deploy/helm/helx-chart/charts/`.
+1. Runs `helm dependency build` in each selected local service chart.
+2. Packages each selected service chart with `helm package` and copies its
+   archive into `deploy/helm/helx-chart/charts/`.
+3. Creates a temporary sibling copy of the umbrella chart, removes the selected
+   dependencies from its `Chart.yaml`, and regenerates its temporary lockfile.
+4. Resolves only the remaining umbrella dependencies and copies those archives
+   into `deploy/helm/helx-chart/charts/`.
+
+The temporary chart preserves the umbrella chart's relative
+`file://../../../services/...` dependency paths. Since Helm rejects a lockfile
+that does not match the temporary `Chart.yaml`, the script regenerates the
+lockfile only in that copy. The umbrella currently declares exact dependency
+versions, so the regenerated lockfile retains those pinned versions. The real
+umbrella `Chart.yaml` and `Chart.lock` are not modified.
 
 The script uses `helm package` for chart archives; Helm does not provide a
 `helm dependency package` command.
@@ -25,11 +34,13 @@ The script uses `helm package` for chart archives; Helm does not provide a
 - Helm 3.
 - [`yq`](https://mikefarah.gitbook.io/yq/) on `PATH`.
 - Access and authentication for any OCI or HTTP repositories needed by the
-  umbrella chart or selected service dependencies.
+  remaining umbrella dependencies or selected service dependencies.
 
-The script builds the umbrella dependencies first, so remote-only dependencies
-are still available. For example, `search` is an umbrella dependency without a
-corresponding local chart and remains resolved from the OCI registry.
+Selected local charts are packaged before the remaining umbrella dependencies
+are resolved. Their corresponding OCI packages therefore do not need to exist
+remotely for this script to work. Remote-only dependencies are still resolved
+from their configured repositories and require the appropriate registry or
+repository authentication.
 
 ### Usage
 
@@ -65,9 +76,11 @@ dependencies are skipped.
 ### Generated files and side effects
 
 The script generates dependency archives in the selected service chart's
-`charts/` directory and replaces the selected archives in
-`deploy/helm/helx-chart/charts/`. These archives are ignored by Git and should
-not normally be committed.
+`charts/` directory, uses a temporary sibling copy of the umbrella chart while
+resolving the remaining dependencies, and replaces the corresponding archives
+in `deploy/helm/helx-chart/charts/`. These archives are ignored by Git and
+should not normally be committed. The temporary umbrella copy and its generated
+lockfile are removed automatically.
 
 Because dependency resolution can download charts, run the script after
 logging in to the required registries and repositories. Re-run it whenever a

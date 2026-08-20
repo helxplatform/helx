@@ -142,13 +142,16 @@ fi
 
 mkdir -p "$CHARTS_DIR"
 
-# First resolve the umbrella's normal dependencies. The selected local charts
-# are replaced below; every other dependency therefore remains at its normal
-# OCI-resolved version.
-helm dependency build "$UMBRELLA"
-
+# Package selected charts before resolving the remaining umbrella dependencies.
+# The temporary umbrella chart is a sibling so file://../../../services/... paths
+# retain the same meaning as they do in the real umbrella chart.
 package_dir="$(mktemp -d "${TMPDIR:-/tmp}/helx-local-deps.XXXXXX")"
-trap 'rm -rf "$package_dir"' EXIT
+temporary_umbrella="$(mktemp -d "$REPO_ROOT/deploy/helm/helx-chart.local-deps.XXXXXX")"
+trap 'rm -rf "$package_dir" "$temporary_umbrella"' EXIT
+
+cp -R "$UMBRELLA"/. "$temporary_umbrella"/
+rm -rf "$temporary_umbrella/charts"
+mkdir -p "$temporary_umbrella/charts"
 
 remove_existing_archives() {
   local chart_name="$1"
@@ -190,3 +193,34 @@ for index in "${!selected_names[@]}"; do
   cp "${package_files[0]}" "$CHARTS_DIR/"
   echo "local: $chart_name <- ${package_files[0]#$chart_package_dir/}"
 done
+
+# Resolve only the dependencies that were not selected locally. Helm requires
+# Chart.lock to match Chart.yaml, so regenerate a lockfile in the temporary
+# sibling chart after removing the selected dependency declarations. The real
+# umbrella Chart.yaml and Chart.lock are never modified.
+for chart_name in "${selected_names[@]}"; do
+  CHART_NAME="$chart_name" yq -i \
+    'del(.dependencies[] | select(.name == strenv(CHART_NAME)))' \
+    "$temporary_umbrella/Chart.yaml"
+done
+rm -f "$temporary_umbrella/Chart.lock"
+
+helm dependency update --skip-refresh "$temporary_umbrella"
+
+remaining_packages=("$temporary_umbrella/charts"/*.tgz)
+if [[ -f "${remaining_packages[0]}" ]]; then
+  for remaining_archive in "${remaining_packages[@]}"; do
+    [[ -f "$remaining_archive" ]] || continue
+
+    remaining_name="$(helm show chart "$remaining_archive" | yq -r '.name // ""')"
+    if [[ -z "$remaining_name" ]]; then
+      echo "Error: resolved archive has no chart name: $remaining_archive." >&2
+      exit 1
+    fi
+
+    remove_existing_archives "$remaining_name"
+    rm -rf "$CHARTS_DIR/$remaining_name"
+    cp "$remaining_archive" "$CHARTS_DIR/"
+    echo "dependency: $remaining_name <- ${remaining_archive#$temporary_umbrella/charts/}"
+  done
+fi

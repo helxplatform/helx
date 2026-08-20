@@ -278,35 +278,32 @@ bash db/init-schema.sh
 
 #### Secret Management
 
-The PostgreSQL password is auto-generated and preserved using:
+The bundled PostgreSQL dependency generates the password Secret and uses Helm
+`lookup` to preserve its password during upgrades. Its `nameOverride` is set to
+`ldap-sync-postgres`, so both the PostgreSQL Service and Secret use the same
+release-qualified name:
 
-1. **Helm Lookup**: Detects existing secrets from previous installations
-2. **Keep Annotation**: `helm.sh/resource-policy: keep` prevents
-   deletion during `helm uninstall`
-3. **Auto-Generation**: Random 32-character password on first install
-
-The secret is named `<release-name>-postgres` with key
-`postgres-password`.
-
-**Important**: When using a custom release name (other than "ldap-sync"),
-you must set `postgres.auth.existingSecret`:
-
-```bash
-helm install my-release ./chart \
-  --set postgres.auth.existingSecret=my-release-postgres \
-  [other settings...]
+```text
+<release-name>-ldap-sync-postgres
 ```
 
+For example, an umbrella release named `helx` creates
+`helx-ldap-sync-postgres`. The Secret contains the `postgres-password` key.
+
+`postgres.auth.existingSecret` is empty by default, allowing the dependency to
+create the Secret. Set it to a pre-created Secret to manage the PostgreSQL
+password outside the dependency; that Secret must contain the configured
+admin-password key.
+
 **Behavior:**
-- **Helm Upgrade**: Existing password reused, no data loss
-- **Helm Uninstall + Reinstall**: Secret preserved, data persists if
-  using persistent volumes
-- **Complete Cleanup**: Manual deletion required
+- **Helm Upgrade**: Existing password reused through Helm `lookup`
+- **Helm Uninstall**: The dependency-managed Secret is deleted unless it is
+  preserved externally
+- **Persistent data**: The PostgreSQL PVC remains separate from the Secret
 
 To completely remove everything:
 ```bash
 helm uninstall ldap-sync
-kubectl delete secret ldap-sync-postgres -n <namespace>
 kubectl delete pvc -l app.kubernetes.io/instance=ldap-sync -n <namespace>
 ```
 
@@ -314,10 +311,10 @@ kubectl delete pvc -l app.kubernetes.io/instance=ldap-sync -n <namespace>
 
 To use a custom password instead of auto-generated:
 
-1. Create secret before installing:
+1. Create a Secret before installing:
    ```bash
    kubectl create secret generic my-custom-secret \
-     --from-literal=password='my-secure-password' \
+     --from-literal=postgres-password='my-secure-password' \
      -n <namespace>
    ```
 
@@ -327,6 +324,42 @@ To use a custom password instead of auto-generated:
      auth:
        existingSecret: "my-custom-secret"
    ```
+
+When `existingSecret` is set, both the PostgreSQL dependency and ldap-sync
+consume that Secret directly.
+
+#### Renaming/Upgrading an Existing Installation
+
+Changing the PostgreSQL fullname renames the Service, StatefulSet, PVC
+identity, and default Secret. The chart provides an explicit one-time
+migration mode for existing releases:
+
+```yaml
+postgres:
+  migration:
+    enabled: true
+    # Usually <release-name>-postgres for installations before chart 2.3.2.
+    legacySecret: helx-postgres
+    legacyPvc: data-helx-postgres-0
+  auth:
+    # The migration hook creates this target before the dependency starts.
+    existingSecret: helx-ldap-sync-postgres
+  persistence:
+    # Reuse the old claim instead of creating a new one.
+    existingClaim: data-helx-postgres-0
+```
+
+Verify both legacy names with `kubectl` first. Scale the old PostgreSQL
+StatefulSet down before upgrading so the old and renamed StatefulSets do not
+mount the same ReadWriteOnce claim simultaneously. After the upgrade succeeds,
+set `postgres.migration.enabled` to `false` and clear
+`postgres.auth.existingSecret`; keep `postgres.persistence.existingClaim` set
+if the old PVC should continue to hold the database.
+
+The migration mode copies `postgres-password` from the old Secret into the
+new fullname-based Secret during the pre-upgrade hook. It does not copy or
+rename PVC storage; `persistence.existingClaim` is the explicit storage
+handoff.
 
 #### Database Schema
 

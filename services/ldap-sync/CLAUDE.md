@@ -217,14 +217,19 @@ The application reads the selected LDAP Secret from
 `/etc/ldap-sync/ldap-secrets/`. The PostgreSQL password is a separate
 credential owned by the bundled PostgreSQL dependency.
 
-**Secret Persistence**: The PostgreSQL password is automatically generated on first install and preserved across `helm upgrade` and even `helm uninstall` + `helm install` (using the same release name). This is achieved through:
-- Helm's `lookup` function to detect existing secrets
-- The `helm.sh/resource-policy: keep` annotation to prevent deletion
-- Auto-generation of a random 32-character password on first install
+**PostgreSQL naming**: The dependency uses `nameOverride: ldap-sync-postgres`,
+so its Service and generated Secret are both named
+`<release-name>-ldap-sync-postgres`. With release `helx`, the names are
+`helx-ldap-sync-postgres`.
+
+The PostgreSQL dependency uses Helm `lookup` to preserve its generated
+password across upgrades. Its Secret is deleted on uninstall unless preserved
+externally. Existing installations can use the explicit
+`postgres.migration` mode to copy the old Secret and reuse the old PVC, but the
+old StatefulSet must be scaled down before the upgrade.
 
 To completely remove everything including persisted data:
 ```bash
 helm uninstall ldap-sync
-kubectl delete secret ldap-sync-postgres-credentials -n ldap-sync
 kubectl delete pvc -l app.kubernetes.io/instance=ldap-sync -n ldap-sync
 ```

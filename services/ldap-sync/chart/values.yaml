@@ -140,6 +140,21 @@ config:
 # PostgreSQL configuration
 postgres:
   enabled: true
+  # The dependency's fullname becomes <release-name>-ldap-sync-postgres.
+  nameOverride: ldap-sync-postgres
+
+  migration:
+    # -- Enable the one-time migration from the previous PostgreSQL names.
+    # This is valid only during a Helm upgrade of an existing release.
+    enabled: false
+    # -- Name of the PostgreSQL Secret from the previous chart deployment.
+    # This must be the old chart's computed Secret name. If unknown, it is
+    # likely <release-name>-postgres; verify it with kubectl before upgrading.
+    legacySecret: ""
+    # -- Name of the existing PostgreSQL PVC from the previous deployment.
+    # It is likely data-<release-name>-postgres-0, but verify it in the cluster.
+    legacyPvc: ""
+
   persistence:
     enabled: true
     size: 8Gi
@@ -148,11 +163,12 @@ postgres:
     username: ldapsync
     # Database name
     database: ldapsync
-    # Use the auto-generated secret with lookup function for password persistence
-    # IMPORTANT: Set this to "<your-release-name>-postgres" on install
-    # Example: --set postgres.auth.existingSecret=my-release-postgres
-    # For release name "ldap-sync", this default works
-    existingSecret: "ldap-sync-postgres"
+    # Leave empty to let the PostgreSQL dependency create its fullname-based
+    # Secret. Set this to a pre-created Secret to manage the password outside
+    # the dependency chart. During migration, set this to the new fullname so
+    # the migration hook can create the target Secret before the dependency
+    # starts.
+    existingSecret: ""
     secretKeys:
       adminPasswordKey: postgres-password
   # SSL mode for PostgreSQL connection (disable, require, verify-ca, verify-full)

@@ -1,0 +1,39 @@
+{{- if and .Values.postgres.enabled .Values.postgres.migration.enabled }}
+{{- if not .Release.IsUpgrade }}
+  {{- fail "ldap-sync: postgres.migration.enabled is only valid during a Helm upgrade" -}}
+{{- end -}}
+{{- $legacySecretName := required "ldap-sync: postgres.migration.legacySecret is required" .Values.postgres.migration.legacySecret -}}
+{{- $legacyPvc := required "ldap-sync: postgres.migration.legacyPvc is required" .Values.postgres.migration.legacyPvc -}}
+{{- $targetName := include "ldap-sync.postgresFullname" . -}}
+{{- $configuredSecret := required "ldap-sync: set postgres.auth.existingSecret to the new PostgreSQL fullname during migration" .Values.postgres.auth.existingSecret -}}
+{{- if ne $configuredSecret $targetName -}}
+  {{- fail (printf "ldap-sync: postgres.auth.existingSecret must be %q during migration, got %q" $targetName $configuredSecret) -}}
+{{- end -}}
+{{- $configuredPvc := required "ldap-sync: set postgres.persistence.existingClaim to the legacy PVC during migration" .Values.postgres.persistence.existingClaim -}}
+{{- if ne $configuredPvc $legacyPvc -}}
+  {{- fail (printf "ldap-sync: postgres.persistence.existingClaim must match postgres.migration.legacyPvc %q, got %q" $legacyPvc $configuredPvc) -}}
+{{- end -}}
+{{- $payload := include "helx-common.secret.payload.v1" (dict
+  "root" .
+  "targetName" $targetName
+  "values" (dict)
+  "migration" (dict "legacyName" $legacySecretName)
+) | fromYaml -}}
+{{- $data := default (dict) $payload.data -}}
+{{- if empty (default "" (get $data "postgres-password")) -}}
+  {{- fail (printf "ldap-sync: Secret %q must contain postgres-password before migration" $legacySecretName) -}}
+{{- end -}}
+{{- $annotations := deepCopy (default (dict) $payload.annotations) -}}
+{{- $_ := set $annotations "helm.sh/hook" "pre-upgrade" -}}
+{{- $_ := set $annotations "helm.sh/hook-weight" "-10" -}}
+{{- $_ := set $annotations "helm.sh/hook-delete-policy" "before-hook-creation" -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $targetName }}
+  annotations:
+{{ toYaml $annotations | nindent 4 }}
+type: Opaque
+data:
+{{ toYaml $data | nindent 2 }}
+{{- end }}

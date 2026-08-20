@@ -78,6 +78,32 @@ Name of the chart-managed LDAP credential Secret.
 {{- end -}}
 
 {{/*
+Resolve the bundled PostgreSQL dependency's fullname. This mirrors the
+cloudpirates chart's fullname helper so LDAP Sync can reference the dependency
+without duplicating a release-specific name in its templates.
+*/}}
+{{- define "ldap-sync.postgresFullname" -}}
+{{- if .Values.postgres.fullnameOverride -}}
+{{- .Values.postgres.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "postgres" .Values.postgres.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve the PostgreSQL Secret consumed by ldap-sync. With no explicit
+existingSecret, the PostgreSQL dependency creates a Secret with its fullname.
+*/}}
+{{- define "ldap-sync.postgresSecretName" -}}
+{{- default (include "ldap-sync.postgresFullname" .) .Values.postgres.auth.existingSecret -}}
+{{- end -}}
+
+{{/*
 Resolve the LDAP credential Secret selected by managed, existingSecret, or ESO mode.
 */}}
 {{- define "ldap-sync.secretName" -}}

@@ -123,9 +123,9 @@ member users.
    ```bash
    helm upgrade --install ldap-sync ./chart \
      --set config.source.url="ldap://source:389" \
-     --set config.source.bindPassword="password" \
+     --set secret.values.SOURCE_BIND_PASSWORD="source-password" \
      --set config.target.url="ldap://target:389" \
-     --set config.target.bindPassword="password" \
+     --set secret.values.TARGET_BIND_PASSWORD="target-password" \
      --namespace ldap-sync --create-namespace
    ```
 
@@ -137,6 +137,33 @@ member users.
      --set config.source.url="ldap://source:389" \
      [other settings...]
    ```
+
+### LDAP Credential Secret Modes
+
+The chart keeps LDAP bind credentials out of its ConfigMap and supports the
+same three ownership modes as the other HeLx service charts. The Secret must
+contain these keys:
+
+- `SOURCE_BIND_PASSWORD`
+- `TARGET_BIND_PASSWORD`
+
+Choose one mode:
+
+1. **Existing Secret**: set `secret.existingSecret` to a Secret managed by the
+   caller. The chart does not create or modify that Secret.
+2. **Chart values**: leave `secret.existingSecret` empty and set both keys under
+   `secret.values`. The chart creates `<release>-secrets` and mounts the values
+   as files.
+3. **External Secrets Operator**: leave `secret.existingSecret` empty, set
+   `secret.externalSecret.enabled: true`, provide `remoteRef` and
+   `secretStoreRef`, and let ESO create the target Secret.
+
+The generated application config references the mounted files at
+`/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD` and
+`/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD`. The deprecated
+`config.source.bindPassword` and `config.target.bindPassword` values are only
+copied into a chart-managed Secret for upgrade compatibility; they are never
+rendered into the ConfigMap.
 
 ## Building
 
@@ -597,19 +624,32 @@ image:
 # Log level
 loglevel: "info"
 
-# LDAP configuration
+# LDAP configuration (bind passwords are supplied by the Secret contract below)
 config:
   source:
     url: ""
     bindDN: "cn=admin,dc=example,dc=org"
-    bindPassword: ""
     baseDN: "dc=example,dc=org"
   target:
     url: ""
     bindDN: "cn=admin,dc=example,dc=org"
-    bindPassword: ""
     baseDN: "dc=example,dc=org"
   hooks: []
+
+# Select exactly one LDAP credential ownership mode.
+secret:
+  existingSecret: ""
+  values:
+    SOURCE_BIND_PASSWORD: "source-password"
+    TARGET_BIND_PASSWORD: "target-password"
+  externalSecret:
+    enabled: false
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
 
 # PostgreSQL configuration
 postgres:

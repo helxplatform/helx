@@ -69,3 +69,21 @@ extra permissions.
 {{- define "ldap-sync.pvcGroupEnabled" -}}
 {{- ((((.Values.config).plugins).pvcGroup).enabled) | ternary "true" "" -}}
 {{- end }}
+
+{{/*
+Name of the chart-managed LDAP credential Secret.
+*/}}
+{{- define "ldap-sync.managedSecretName" -}}
+{{- printf "%s-secrets" (include "ldap-sync.fullname" . | trunc 55 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/*
+Resolve the LDAP credential Secret selected by managed, existingSecret, or ESO mode.
+*/}}
+{{- define "ldap-sync.secretName" -}}
+{{- include "helx-common.secret.name.v1" (dict
+  "defaultName" (include "ldap-sync.managedSecretName" .)
+  "existingSecret" .Values.secret.existingSecret
+  "externalSecret" .Values.secret.externalSecret
+) -}}
+{{- end }}

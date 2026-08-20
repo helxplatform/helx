@@ -78,6 +78,36 @@ tolerations: []
 affinity: {}
 
 loglevel: "info"
+
+# LDAP bind credential Secret contract. Select exactly one ownership mode:
+# existingSecret, secret.values, or secret.externalSecret.enabled.
+secret:
+  # -- Name of a caller-managed Secret containing SOURCE_BIND_PASSWORD and
+  # TARGET_BIND_PASSWORD. When set, the chart does not create or manage it.
+  existingSecret: ""
+
+  # -- Key/value pairs used to create the chart-managed LDAP credential Secret.
+  # Required keys are SOURCE_BIND_PASSWORD and TARGET_BIND_PASSWORD.
+  # Values are mounted as files and are never rendered into the ConfigMap.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the LDAP credential Secret.
+  # This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to <fullname>-secrets.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- No differently named legacy Secret exists. Legacy bindPassword values
+    # are copied into managed Secret data only when chart-managed mode is used.
+    enabled: false
+
 config:
   hooks: []
   hookRetry:
@@ -87,11 +117,13 @@ config:
   source:
     url: ""
     bindDN: "cn=admin,dc=example,dc=org"
+    # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
     bindPassword: ""
     baseDN: "dc=example,dc=org"
   target:
     url: ""
     bindDN: "cn=admin,dc=example,dc=org"
+    # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
     bindPassword: ""
     baseDN: "dc=example,dc=org"
   plugins:

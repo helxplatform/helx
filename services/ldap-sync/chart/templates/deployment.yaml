@@ -76,6 +76,9 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /etc/ldap-sync
+            - name: ldap-secret
+              mountPath: /etc/ldap-sync/ldap-secrets
+              readOnly: true
             {{- if .Values.postgres.enabled }}
             - name: postgres-secret
               mountPath: /etc/ldap-sync/secrets
@@ -96,6 +99,9 @@ spec:
         - name: config-volume
           configMap:
             name: {{ include "ldap-sync.fullname" . }}-config
+        - name: ldap-secret
+          secret:
+            secretName: {{ include "ldap-sync.secretName" . }}
         {{- if .Values.postgres.enabled }}
         - name: postgres-secret
           secret:

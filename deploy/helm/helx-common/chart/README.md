@@ -14,7 +14,9 @@ dependencies:
 ```
 
 Commit the resulting `Chart.lock`, but do not commit generated dependency
-archives under `charts/`. CI publishes `helx-common` before service charts. For
+archives under `charts/`. 
+
+CI publishes `helx-common` before service charts. For
 pull requests and first publication of a new version, CI substitutes an exact
 name-and-version match from this repository while assembling dependencies; the
 committed metadata remains OCI-based.

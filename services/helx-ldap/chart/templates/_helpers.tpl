@@ -49,6 +49,17 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Name resources used by the one-time StatefulSet migration hook.
+*/}}
+{{- define "helx-ldap.migrationName" -}}
+{{- printf "%s-migration" (include "helx-ldap.fullname" . | trunc 52 | trimSuffix "-") | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{- define "helx-ldap.migrationJobName" -}}
+{{- printf "%s-statefulset" (include "helx-ldap.migrationName" . | trunc 50 | trimSuffix "-") | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/*
 The canonical Secret name consumed by the upstream OpenLDAP chart. The
 upstream dependency requires this value before templates render, so the
 three-mode selector is validated against it in secrets.yaml.

@@ -2,10 +2,11 @@
 
 secret:
   # -- Name of a caller-managed HeLx LDAP credentials Secret containing
-  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. The existing Secret mode remains the default so
-  # upgrades do not attempt to adopt the historically pre-created Secret.
-  # Set this to "" to use secret.values or secret.externalSecret instead.
-  existingSecret: openldap-credentials
+  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD.
+  # Most prior deployments will have an existing Secret named
+  # "openldap-credentials". Set this to that value for a seamless upgrade,
+  # and do not set the secret values in the values section below.
+  existingSecret: ""
 
   # -- Key/value pairs used to create the chart-managed HeLx LDAP credentials
   # Secret when secret.existingSecret is empty and externalSecret is disabled.
@@ -48,7 +49,8 @@ openldap:
     # -- Secret name consumed by the upstream OpenLDAP chart. This is target-name
     # compatibility plumbing for the dependency, not a fourth ownership mode.
     # It must match secret.existingSecret or secret.externalSecret.targetName
-    # when either is set. Chart-managed and default ESO modes create this name.
+    # when either is set. Chart-managed and default ESO modes create this name
+    # automatically when secret.existingSecret is empty.
     existingSecret: openldap-credentials
 
   # The develop configuration intentionally permits anonymous HeLx LDAP binds. The

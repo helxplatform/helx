@@ -59,7 +59,7 @@ HeLx LDAP deployment and configuration
 | openldap.resources.requests.cpu | string | `"500m"` |  |
 | openldap.resources.requests.memory | string | `"500M"` |  |
 | openldap.test.enabled | bool | `false` |  |
-| secret.existingSecret | string | `"openldap-credentials"` | Name of a caller-managed HeLx LDAP credentials Secret containing LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. The existing Secret mode remains the default so upgrades do not attempt to adopt the historically pre-created Secret. Set this to "" to use secret.values or secret.externalSecret instead. |
+| secret.existingSecret | string | `""` | Name of a caller-managed HeLx LDAP credentials Secret containing LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Most prior deployments will have an existing Secret named "openldap-credentials". Set this to that value for a seamless upgrade, and do not set the secret values in the values section below. |
 | secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the HeLx LDAP credentials Secret. This is mutually exclusive with secret.existingSecret. |
 | secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to openldap.global.existingSecret. |
 | secret.migration.enabled | bool | `false` | Enable one-time credentials Secret migration during a Helm upgrade. |

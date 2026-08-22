@@ -1,11 +1,12 @@
-FROM node:18.17-alpine
+FROM node:20-alpine
 
 WORKDIR /usr/src/app
-COPY . /usr/src/app
 
-RUN npm i -g npm@latest
-RUN npm install
+# Copy just these for caching npm ci
+COPY package.json package-lock.json ./
 RUN npm ci
+
+COPY . .
 RUN npm run build
 
 EXPOSE 5555

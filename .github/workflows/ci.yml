@@ -1,0 +1,285 @@
+name: CI
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Image target to validate
+        required: true
+        default: all
+        type: string
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  COMMON_CHART: deploy/helm/helx-common/chart
+  UMBRELLA_CHART: deploy/helm/helx-chart
+  IMAGE_VALIDATION_TAG: ci-${{ github.sha }}
+
+jobs:
+  self-test:
+    name: Self-test CI
+    if: github.event.action != 'edited' || github.event.changes.base.ref.from
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install CI requirements
+        run: python -m pip install --requirement .github/requirements-ci.txt
+
+      - name: Run CI unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Validate CI configuration
+        run: python .github/scripts/ci.py validate-config
+
+      - name: Require release version increases
+        if: github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python .github/scripts/ci.py check-versions --base "$BASE_SHA"
+
+      - name: Install actionlint 1.7.12
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl -fsSL -o "$archive" https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  '"$archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" .github/workflows/*.yml
+
+  validate-common:
+    name: Validate common chart
+    needs: self-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate common chart
+        uses: ./.github/actions/publish-charts
+        with:
+          chart-dir: ${{ env.COMMON_CHART }}
+          publish: 'false'
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
+
+  plan-charts:
+    name: Plan service charts
+    needs: validate-common
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Install CI requirements
+        run: python -m pip install --requirement .github/requirements-ci.txt
+      - name: Create service chart matrix
+        id: plan
+        run: python .github/scripts/ci.py chart-matrix --github-output "$GITHUB_OUTPUT"
+
+  validate-charts:
+    name: Validate ${{ matrix.chart }}
+    needs:
+      - validate-common
+      - plan-charts
+    strategy:
+      fail-fast: false
+      matrix:
+        chart: ${{ fromJSON(needs.plan-charts.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate service chart
+        uses: ./.github/actions/publish-charts
+        with:
+          chart-dir: ${{ matrix.chart }}
+          publish: 'false'
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
+
+  validate-umbrella:
+    name: Validate umbrella chart
+    needs:
+      - validate-common
+      - plan-charts
+      - validate-charts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate umbrella after service charts
+        uses: ./.github/actions/publish-charts
+        with:
+          chart-dir: ${{ env.UMBRELLA_CHART }}
+          publish: 'false'
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
+
+  plan-images:
+    name: Plan images
+    needs: validate-common
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - name: Install CI requirements
+        run: python -m pip install --requirement .github/requirements-ci.txt
+      - name: Create image matrix
+        id: plan
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET: ${{ inputs.target || 'all' }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || format('{0}^', github.sha) }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
+            if [[ "$TARGET" == all ]]; then
+              python .github/scripts/ci.py image-matrix --all --github-output "$GITHUB_OUTPUT"
+            else
+              python .github/scripts/ci.py image-matrix --target "$TARGET" --github-output "$GITHUB_OUTPUT"
+            fi
+          else
+            if [[ "$BASE_SHA" =~ ^0+$ ]]; then BASE_SHA="origin/$DEFAULT_BRANCH"; fi
+            python .github/scripts/ci.py image-matrix --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT"
+          fi
+
+  validate-images:
+    name: ${{ matrix.image.job_name }}
+    needs:
+      - validate-common
+      - plan-images
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan-images.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: No affected images
+        if: matrix.image.repository == ''
+        run: echo 'No image source changes require a build.'
+      - name: Check out complete history
+        if: matrix.image.repository != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate image without registry credentials
+        if: matrix.image.repository != ''
+        uses: ./.github/actions/build-service
+        with:
+          repository: containers.renci.org/helxplatform/${{ matrix.image.repository }}
+          context: ${{ matrix.image.context }}
+          dockerfile: ${{ matrix.image.dockerfile }}
+          tag: ${{ env.IMAGE_VALIDATION_TAG }}
+          push: 'false'
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - self-test
+      - validate-common
+      - plan-charts
+      - validate-charts
+      - validate-umbrella
+      - plan-images
+      - validate-images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to pass
+        shell: bash
+        env:
+          SELF_TEST: ${{ needs.self-test.result }}
+          COMMON: ${{ needs.validate-common.result }}
+          CHART_PLAN: ${{ needs.plan-charts.result }}
+          CHARTS: ${{ needs.validate-charts.result }}
+          UMBRELLA: ${{ needs.validate-umbrella.result }}
+          IMAGE_PLAN: ${{ needs.plan-images.result }}
+          IMAGES: ${{ needs.validate-images.result }}
+        run: |
+          set -euo pipefail
+          statuses=(
+            "Self-test CI|$SELF_TEST"
+            "Validate common chart|$COMMON"
+            "Plan service charts|$CHART_PLAN"
+            "Validate service charts|$CHARTS"
+            "Validate umbrella chart|$UMBRELLA"
+            "Plan images|$IMAGE_PLAN"
+            "Build images|$IMAGES"
+          )
+          failed=0
+          for status in "${statuses[@]}"; do
+            name=${status%%|*}
+            result=${status#*|}
+            printf '%-28s %s\n' "$name" "$result"
+            if [[ "$result" != success && "$result" != skipped ]]; then
+              echo "::error::$name finished with result: $result"
+              failed=1
+            fi
+          done
+          exit "$failed"

@@ -51,6 +51,9 @@ spec:
         args: ["{{ .Values.appstoreEntrypointArgs }}"]
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
+        envFrom:
+          - secretRef:
+              name: {{ include "appstore.secretName" . }}
         env:
         {{- if .Values.graderApiUrl }}
         - name: GRADER_API_URL
@@ -112,6 +115,21 @@ spec:
             configMapKeyRef:
               key: SAML_METADATA_SOURCE
               name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_IDP_ENTITY_ID
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_IDP_ENTITY_ID
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_PROVIDER_SLUG
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_PROVIDER_SLUG
+              name: {{ include "appstore.fullname" . }}-env
+        - name: SAML_PROVIDER_NAME
+          valueFrom:
+            configMapKeyRef:
+              key: SAML_PROVIDER_NAME
+              name: {{ include "appstore.fullname" . }}-env
         {{- end }}
         - name: OAUTH_DB_DIR
           valueFrom:
@@ -170,275 +188,7 @@ spec:
               key: LDAP_SEARCH_BASE
               name: {{ include "appstore.fullname" . }}-env
         {{- end }}
-        - name: SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              key: APPSTORE_SECRET_KEY
-              name: {{ include "appstore.fullname" . }}
-        - name: APPSTORE_DJANGO_USERNAME
-          valueFrom:
-            secretKeyRef:
-              key: APPSTORE_DJANGO_USERNAME
-              name: {{ include "appstore.fullname" . }}
-        - name: APPSTORE_DJANGO_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: APPSTORE_DJANGO_PASSWORD
-              name: {{ include "appstore.fullname" . }}
-        {{- if .Values.global.ambassador_id }}
-        - name: AMBASSADOR_ID
-          valueFrom:
-            secretKeyRef:
-              key: AMBASSADOR_ID
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.django.DOCKSTORE_APPS_BRANCH }}
-        - name: DOCKSTORE_APPS_BRANCH
-          valueFrom:
-            secretKeyRef:
-              key: DOCKSTORE_APPS_BRANCH
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.django.REMOVE_AUTHORIZED_USERS }}
-        - name: REMOVE_AUTHORIZED_USERS
-          valueFrom:
-            secretKeyRef:
-              key: REMOVE_AUTHORIZED_USERS
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.django.AUTHORIZED_USERS }}
-        - name: AUTHORIZED_USERS
-          valueFrom:
-            secretKeyRef:
-              key: AUTHORIZED_USERS
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        - name: CSRF_DOMAINS
-          valueFrom:
-            secretKeyRef:
-              key: CSRF_DOMAINS
-              name: {{ include "appstore.fullname" . }}
-        - name: OAUTH_PROVIDERS
-          valueFrom:
-            secretKeyRef:
-              key: OAUTH_PROVIDERS
-              name: {{ include "appstore.fullname" . }}
-        {{- if .Values.oauth.GITHUB_NAME }}
-        - name: GITHUB_NAME
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_NAME
-              name: {{ include "appstore.fullname" . }}
-        - name: GITHUB_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_CLIENT_ID
-              name: {{ include "appstore.fullname" . }}
-        - name: GITHUB_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: GITHUB_SECRET
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
 
-        {{- if .Values.oauth.GOOGLE_NAME }}
-        - name: GOOGLE_NAME
-          valueFrom:
-            secretKeyRef:
-              key: GOOGLE_NAME
-              name: {{ include "appstore.fullname" . }}
-        - name: GOOGLE_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              key: GOOGLE_CLIENT_ID
-              name: {{ include "appstore.fullname" . }}
-        - name: GOOGLE_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: GOOGLE_SECRET
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-
-        {{- if .Values.oauth.CILOGON_NAME }}
-        - name: CILOGON_NAME
-          valueFrom:
-            secretKeyRef:
-              key: CILOGON_NAME
-              name: {{ include "appstore.fullname" . }}
-        - name: CILOGON_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              key: CILOGON_CLIENT_ID
-              name: {{ include "appstore.fullname" . }}
-        - name: CILOGON_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: CILOGON_SECRET
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-
-        {{- if .Values.oauth.OIDC_NAME }}
-        - name: OIDC_NAME
-          valueFrom:
-            secretKeyRef:
-              key: OIDC_NAME
-              name: {{ include "appstore.fullname" . }}
-        - name: OIDC_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              key: OIDC_CLIENT_ID
-              name: {{ include "appstore.fullname" . }}
-        - name: OIDC_SECRET
-          valueFrom:
-            secretKeyRef:
-              key: OIDC_SECRET
-              name: {{ include "appstore.fullname" . }}
-        - name: OIDC_SERVER_URL
-          valueFrom:
-            secretKeyRef:
-              key: OIDC_SERVER_URL
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-
-        {{- if .Values.irods.enabled }}
-        - name: BRAINI_RODS
-          valueFrom:
-            secretKeyRef:
-              key: BRAINI_RODS
-              name: {{ include "appstore.fullname" . }}
-        - name: NRC_MICROSCOPY_IRODS
-          valueFrom:
-            secretKeyRef:
-              key: NRC_MICROSCOPY_IRODS
-              name: {{ include "appstore.fullname" . }}
-        - name: RODS_USERNAME
-          valueFrom:
-            secretKeyRef:
-              key: RODS_USERNAME
-              name: {{ include "appstore.fullname" . }}
-        - name: RODS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: RODS_PASSWORD
-              name: {{ include "appstore.fullname" . }}
-        - name: IROD_COLLECTIONS
-          valueFrom:
-            secretKeyRef:
-              key: IROD_COLLECTIONS
-              name: {{ include "appstore.fullname" . }}
-        - name: IROD_ZONE
-          valueFrom:
-            secretKeyRef:
-              key: IROD_ZONE
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        {{- if .Values.irodsUnbranded.enabled }}
-        - name: IROD_HOST
-          valueFrom:
-            secretKeyRef:
-              key: IROD_HOST
-              name: {{ include "appstore.fullname" . }}
-        - name: RODS_USERNAME
-          valueFrom:
-            secretKeyRef:
-              key: RODS_USERNAME
-              name: {{ include "appstore.fullname" . }}
-        - name: RODS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: RODS_PASSWORD
-              name: {{ include "appstore.fullname" . }}
-        - name: IROD_ZONE
-          valueFrom:
-            secretKeyRef:
-              key: IROD_ZONE
-              name: {{ include "appstore.fullname" . }}
-        - name: IROD_PORT
-          valueFrom:
-            secretKeyRef:
-              key: IROD_PORT
-              name: {{ include "appstore.fullname" . }}
-        - name: NFSRODS_HOST
-          valueFrom:
-            secretKeyRef:
-              key: NFSRODS_HOST
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        - name: EMAIL_HOST
-          valueFrom:
-            secretKeyRef:
-              key: EMAIL_HOST
-              name: {{ include "appstore.fullname" . }}
-        - name: EMAIL_PORT
-          valueFrom:
-            secretKeyRef:
-              key: EMAIL_PORT
-              name: {{ include "appstore.fullname" . }}
-        - name: EMAIL_USE_TLS
-          valueFrom:
-            secretKeyRef:
-              key: EMAIL_USE_TLS
-              name: {{ include "appstore.fullname" . }}
-        - name: EMAIL_HOST_USER
-          valueFrom:
-            secretKeyRef:
-              key: EMAIL_HOST_USER
-              name: {{ include "appstore.fullname" . }}
-        - name: EMAIL_HOST_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: EMAIL_HOST_PASSWORD
-              name: {{ include "appstore.fullname" . }}
-        - name: RECIPIENT_EMAILS
-          valueFrom:
-            secretKeyRef:
-              key: RECIPIENT_EMAILS
-              name: {{ include "appstore.fullname" . }}
-        {{- if .Values.postgresql.global.postgresql }}
-        - name: PG_DB_ENGINE
-          valueFrom:
-            secretKeyRef:
-              key: PG_DB_ENGINE
-              name: {{ include "appstore.fullname" . }}
-        - name: PG_DB_DATABASE
-          valueFrom:
-            secretKeyRef:
-              key: PG_DB_DATABASE
-              name: {{ include "appstore.fullname" . }}
-        - name: PG_DB_USERNAME
-          valueFrom:
-            secretKeyRef:
-              key: PG_DB_USERNAME
-              name: {{ include "appstore.fullname" . }}
-        {{- if and .Values.postgresql .Values.postgresql.auth .Values.postgresql.auth.existingSecret }}
-        - name: PG_DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres-password
-              name: {{ .Values.postgresql.auth.existingSecret }}
-        {{- else }}
-        - name: PG_DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: PG_DB_PASSWORD
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        - name: PG_DB_HOST
-          valueFrom:
-            secretKeyRef:
-              key: PG_DB_HOST
-              name: {{ include "appstore.fullname" . }}
-        - name: PG_DB_PORT
-          valueFrom:
-            secretKeyRef:
-              key: PG_DB_PORT
-              name: {{ include "appstore.fullname" . }}
-        {{- end }}
-        - name: POSTGRES_ENABLED
-          valueFrom:
-            secretKeyRef:
-              key: POSTGRES_ENABLED
-              name: {{ include "appstore.fullname" . }}
         {{- range $key, $value := .Values.extraEnv }}
         - name: {{ $key }}
           value: {{ $value | quote }}
@@ -453,6 +203,26 @@ spec:
             configMapKeyRef:
               key: SET_BUILD_ENV_FROM_FILE
               name: {{ include "appstore.fullname" . }}-env
+
+        {{- if .Values.postgresql.global.postgresql }}
+        - name: PG_DB_ENGINE
+          value: "postgresql"
+        - name: PG_DB_DATABASE
+          value: {{ .Values.postgresql.global.postgresql.auth.database | quote }}
+        - name: PG_DB_USERNAME
+          value: {{ .Values.postgresql.global.postgresql.auth.username | quote }}
+        - name: PG_DB_HOST
+          {{- if .Values.fullnameOverride }}
+          value: {{ printf "%s-postgresql" (include "appstore.fullname" .) | quote }}
+          {{- else }}
+          value: {{ printf "%s-postgresql" .Release.Name | quote }}
+          {{- end }}
+        - name: PG_DB_PORT
+          value: {{ .Values.db.port | toString | quote }}
+        {{- end }}
+
+        - name: POSTGRES_ENABLED
+          value: {{ ternary "true" "false" .Values.postgresql.enabled | quote }}
 
         # Tycho-launched app settings
         - name: TYCHO_APP_INIT_MEMORY
@@ -485,6 +255,8 @@ spec:
           value: "{{ .Values.tycho.externalAppRegistryBranch | default (printf "v%s" .Chart.AppVersion) }}"
         - name: EXTERNAL_TYCHO_APP_REGISTRY_APP_SPECS_DIR
           value: "{{- .Values.tycho.externalAppRegistryAppSpecsDir }}"
+        - name: DOCKSTORE_APPS_BRANCH
+          value: {{ .Values.django.DOCKSTORE_APPS_BRANCH | quote }}
         - name: DOCKSTORE_APP_SPECS_DIR_URL
           {{- if .Values.tycho.externalAppRegistryEnabled }}
           value: "{{- .Values.tycho.externalAppRegistryRepo }}/{{ .Values.tycho.externalAppRegistryBranch | default (printf "v%s" .Chart.AppVersion) }}/{{- .Values.tycho.externalAppRegistryAppSpecsDir }}"
@@ -518,6 +290,10 @@ spec:
         {{- if .Values.global.ambassador_service_name }}
         - name: AMBASSADOR_SVC_NAME
           value: {{ .Values.global.ambassador_service_name }}
+        {{- end }}
+        {{- if .Values.global.ambassador_id }}
+        - name: AMBASSADOR_ID
+          value: {{ .Values.global.ambassador_id | quote }}
         {{- end }}
         - name: APP_ROUTING_MODE
           value: "{{ .Values.tycho.appRoutingMode }}"

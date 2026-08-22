@@ -1,5 +1,42 @@
 # Default values for helx-ldap.
 
+secret:
+  # -- Name of a caller-managed HeLx LDAP credentials Secret containing
+  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD.
+  # Most prior deployments will have an existing Secret named
+  # "openldap-credentials". Set this to that value for a seamless upgrade,
+  # and do not set the secret values in the values section below.
+  existingSecret: ""
+
+  # -- Key/value pairs used to create the chart-managed HeLx LDAP credentials
+  # Secret when secret.existingSecret is empty and externalSecret is disabled.
+  # Required keys:
+  #   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator
+  #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
+  # Argo CD users should provide stable encrypted values or select ESO mode.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the HeLx LDAP credentials Secret.
+  # This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to
+    # openldap.global.existingSecret.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- Enable the one-time credentials Secret migration during a Helm upgrade.
+    # The target remains caller-managed through secret.existingSecret.
+    enabled: false
+    # -- Name of the credentials Secret from the previous deployment. Verify it
+    # in the namespace before upgrading; this is not deleted automatically.
+    legacySecret: ""
+
 openldap:
   # Keep the service name stable for HeLx consumers, including appstore's
   # default ldap://openldap URI.
@@ -9,11 +46,14 @@ openldap:
 
   global:
     ldapDomain: example.org
-    # The Secret must contain LDAP_ADMIN_PASSWORD and
-    # LDAP_CONFIG_ADMIN_PASSWORD. Keep credentials out of chart values.
+    # -- Secret name consumed by the upstream OpenLDAP chart. This is target-name
+    # compatibility plumbing for the dependency, not a fourth ownership mode.
+    # It must match secret.existingSecret or secret.externalSecret.targetName
+    # when either is set. Chart-managed and default ESO modes create this name
+    # automatically when secret.existingSecret is empty.
     existingSecret: openldap-credentials
 
-  # The develop configuration intentionally permits anonymous LDAP binds. The
+  # The develop configuration intentionally permits anonymous HeLx LDAP binds. The
   # anonymous-access ACL below still controls what anonymous users can read.
   env:
     LDAP_ALLOW_ANON_BINDING: "yes"
@@ -32,6 +72,30 @@ openldap:
 
   persistence:
     enabled: true
+    # -- Existing PVC to mount instead of creating a StatefulSet
+    # volumeClaimTemplate. Leave empty for a fresh installation. Once a legacy
+    # PVC is adopted, keep this value set permanently.
+    existingClaim: ""
+
+  migration:
+    # -- Enable the one-time existing HeLx LDAP PVC migration during a Helm
+    # upgrade. The migration hook stops and replaces the old StatefulSet
+    # controller; it does not copy or delete the PVC.
+    enabled: false
+    # -- Name of the PVC that must be adopted. Set persistence.existingClaim to
+    # the same value during migration.
+    legacyPvc: ""
+    # -- Optional old StatefulSet name. When empty, the migration hook discovers
+    # HeLx LDAP StatefulSets using the Helm release and OpenLDAP labels.
+    legacyStatefulSet: ""
+    image:
+      # -- Image containing kubectl and /bin/sh used by the pre-upgrade hook.
+      repository: registry.k8s.io/kubectl
+      tag: v1.31.0
+      pullPolicy: IfNotPresent
+    job:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
 
   replication:
     enabled: false
@@ -52,7 +116,7 @@ configuration:
   configDN: cn=admin,cn=config
 
   # These are derived from openldap.global.ldapDomain and adminUser when empty.
-  # Set them explicitly when the LDAP deployment uses custom DNs.
+  # Set them explicitly when the HeLx LDAP deployment uses custom DNs.
   baseDN: ""
   adminDN: ""
 
@@ -75,10 +139,6 @@ configuration:
     pullPolicy: ""
 
   memberofModulePath: /opt/bitnami/openldap/lib/openldap/memberof.so
-
-  # Override this only when the Secret used by the OpenLDAP chart is not the
-  # Secret containing LDAP_CONFIG_ADMIN_PASSWORD.
-  existingSecret: ""
 
   job:
     backoffLimit: 6

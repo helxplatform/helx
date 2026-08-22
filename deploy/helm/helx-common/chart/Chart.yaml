@@ -1,0 +1,5 @@
+apiVersion: v2
+name: helx-common
+description: Shared Helm template helpers for HeLx service charts
+type: library
+version: 0.1.0

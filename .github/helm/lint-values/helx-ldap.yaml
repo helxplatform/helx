@@ -1,0 +1,5 @@
+secret:
+  existingSecret: ""
+  values:
+    LDAP_ADMIN_PASSWORD: lint-admin-password
+    LDAP_CONFIG_ADMIN_PASSWORD: lint-config-password

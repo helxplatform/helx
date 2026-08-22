@@ -34,17 +34,20 @@ export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
 bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
 
-The script creates or updates the `openldap-credentials` Secret, prepares the
-Helm dependencies, installs only the `helx-ldap` service, and waits for the
-OpenLDAP StatefulSet and configuration hook. The same configuration Job runs
-on upgrades.
+The script exercises the backward-compatible existing-Secret mode: it creates
+or updates `openldap-credentials`, prepares the Helm dependencies, installs only
+the `helx-ldap` service, and waits for the OpenLDAP StatefulSet and configuration
+hook. The same configuration Job runs on upgrades.
 
-The Secret must contain these keys:
+The selected Secret must contain these keys:
 
 - `LDAP_ADMIN_PASSWORD`
 - `LDAP_CONFIG_ADMIN_PASSWORD`
 
-Do not put these credentials in Helm values or commit them to the repository.
+The chart also supports chart-managed `secret.values` and an ESO-managed target
+through `secret.externalSecret`. ESO backed by Vault is recommended for GitOps;
+do not commit plaintext credentials. See `chart/README.md` for all three modes
+and the upstream chart's Secret-name constraint.
 
 ## What the wrapper chart configures
 

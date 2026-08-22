@@ -1,0 +1,33 @@
+# Image defaults
+#
+# For a service named <name>, the normalized image definition is calculated as:
+#
+# service root: services/<name>
+# name:         <name>
+# component:    <name>
+# chart:        services/<name>/chart
+# repository:   <name>
+# context:      services/<name>
+# dockerfile:   services/<name>/Dockerfile
+# sources:      [services/<name>]
+# excludes:     [services/<name>/chart]
+#
+# Paths in a service override are relative to that service's root. A service
+# with an `images` map creates one image per variant; variant defaults use
+# <service>/<variant> for the repository and <service>-<variant> for the name.
+registry: containers.renci.org/helxplatform
+services:
+  appstore: {}
+  appstore-prepuller:
+    context: controller
+    dockerfile: controller/Dockerfile
+  appstore-sockets:
+    images:
+      server: {}
+      monitoring:
+        context: monitoring
+        dockerfile: monitoring/Dockerfile
+  ldap-sync: {}
+  ui:
+    repository: helx-ui
+  user-mutator: {}

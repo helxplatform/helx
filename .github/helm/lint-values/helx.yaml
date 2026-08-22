@@ -1,0 +1,22 @@
+# CI-only references to caller-managed Secrets. Helm lint does not contact a
+# cluster, but these values exercise the current existing-secret interfaces
+# without putting synthetic credentials in rendered manifests.
+appstore:
+  enabled: true
+  # appstore 5.1.4 performs a cluster lookup when this is empty. Supplying a
+  # CI-only value keeps offline umbrella lint deterministic.
+  django:
+    APPSTORE_DJANGO_PASSWORD: lint-only-admin-password
+
+appstore-sockets:
+  enabled: true
+
+helx-ldap:
+  enabled: true
+  secret:
+    # Existing-secret mode is the helx-ldap default and must match the Secret
+    # name passed through to the upstream OpenLDAP chart.
+    existingSecret: openldap-credentials
+  openldap:
+    global:
+      existingSecret: openldap-credentials

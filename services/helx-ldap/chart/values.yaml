@@ -1,5 +1,39 @@
 # Default values for helx-ldap.
 
+secret:
+  # -- Name of a caller-managed Secret containing LDAP_ADMIN_PASSWORD and
+  # LDAP_CONFIG_ADMIN_PASSWORD. The existing Secret mode remains the default so
+  # upgrades do not attempt to adopt the historically pre-created Secret.
+  # Set this to "" to use secret.values or secret.externalSecret instead.
+  existingSecret: openldap-credentials
+
+  # -- Key/value pairs used to create the chart-managed OpenLDAP credentials
+  # Secret when secret.existingSecret is empty and externalSecret is disabled.
+  # Required keys:
+  #   LDAP_ADMIN_PASSWORD: password for the LDAP directory administrator
+  #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
+  # Argo CD users should provide stable encrypted values or select ESO mode.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the OpenLDAP credentials Secret.
+  # This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to
+    # openldap.global.existingSecret.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- helx-ldap has no differently named legacy Secret to migrate. Existing
+    # installations should continue using existingSecret mode unless ownership
+    # is intentionally transferred.
+    enabled: false
+
 openldap:
   # Keep the service name stable for HeLx consumers, including appstore's
   # default ldap://openldap URI.
@@ -9,8 +43,10 @@ openldap:
 
   global:
     ldapDomain: example.org
-    # The Secret must contain LDAP_ADMIN_PASSWORD and
-    # LDAP_CONFIG_ADMIN_PASSWORD. Keep credentials out of chart values.
+    # -- Secret name consumed by the upstream OpenLDAP chart. This is target-name
+    # compatibility plumbing for the dependency, not a fourth ownership mode.
+    # It must match secret.existingSecret or secret.externalSecret.targetName
+    # when either is set. Chart-managed and default ESO modes create this name.
     existingSecret: openldap-credentials
 
   # The develop configuration intentionally permits anonymous LDAP binds. The
@@ -75,10 +111,6 @@ configuration:
     pullPolicy: ""
 
   memberofModulePath: /opt/bitnami/openldap/lib/openldap/memberof.so
-
-  # Override this only when the Secret used by the OpenLDAP chart is not the
-  # Secret containing LDAP_CONFIG_ADMIN_PASSWORD.
-  existingSecret: ""
 
   job:
     backoffLimit: 6

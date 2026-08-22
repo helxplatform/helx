@@ -1,0 +1,91 @@
+{{ template "chart.header" . }}
+{{ template "chart.description" . }}
+
+{{ template "chart.versionBadge" .  }}{{ template "chart.typeBadge" .  }}{{ template "chart.appVersionBadge" .  }}
+
+HeLx puts the most advanced analytical scientific models at investigator’s finger tips using equally advanced cloud native, container orchestrated, distributed computing systems. HeLx can be applied in many domains. Its ability to empower researchers to leverage advanced analytical tools without installation or other infrastructure concerns has broad reaching benefits.
+
+```
+# Install the published chart from GHCR.
+NAMESPACE=helx
+helm registry login ghcr.io
+helm -n $NAMESPACE --create-namespace install helx \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version {{ .Version }}
+
+# Deploy to a non-GKE cluster.
+helm -n $NAMESPACE --create-namespace install helx \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version {{ .Version }} \
+  --set appstore.userStorage.createPVC=true,nfs-server.enabled=false
+
+# Review the output of the Helm install command.  To review the output use the
+# status option.
+helm -n $NAMESPACE status helx
+# Delete the HeLx chart.
+helm -n $NAMESPACE delete helx
+# Get the default values yaml for HeLx and subcharts.
+helm inspect values helx-charts/[helx ambassador nginx etc.]
+
+```
+
+To do more than the most basic install you should create a values.yaml that contains settings for your local HeLx environment.  A sample is below.
+
+```
+appstore:
+  django:
+    APPSTORE_DJANGO_PASSWORD: "< my secret password >"
+    AUTHORIZED_USERS: "user1@example.com,user2@example.com,user3@example.com"
+  ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
+  userStorage:
+    createPVC: true
+  oauth:
+    OAUTH_PROVIDERS: "google,github"
+    GOOGLE_NAME: "< secret >"
+    GOOGLE_CLIENT_ID: "< secret >"
+    GOOGLE_SECRET: "< secret >"
+    GITHUB_NAME: "< secret >"
+    GITHUB_CLIENT_ID: "< secret >"
+    GITHUB_SECRET: "< secret >"
+
+nfs-server:
+  enabled: false
+
+nginx:
+  service:
+    serverName: helx.example.com
+  SSL:
+    nginxTLSSecret: example-tls-secret
+```
+
+To deploy HeLx using the values.yaml use the following command.
+```
+helm -n $NAMESPACE --create-namespace install helx \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version {{ .Version }} \
+  --values values.yaml
+```
+
+## LDAP-only smoke test
+
+The repository includes a values file and script for installing only the LDAP
+service into an existing namespace. The script creates or updates the required
+credentials Secret, prepares chart dependencies, installs the umbrella chart, and
+waits for the OpenLDAP StatefulSet and configuration hook. The namespace must
+already exist:
+
+```sh
+NAMESPACE=ai-sb-test
+helm registry login ghcr.io
+export LDAP_ADMIN_PASSWORD='choose-an-admin-password'
+export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
+bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
+```
+
+The wrapper chart applies the HeLx `cn=config` LDIFs as a hardened
+post-install/post-upgrade Job. See `services/helx-ldap/chart/README.md` for the
+chart-specific Secret contract.
+
+You can view the README.md files for each subchart to see the variables that exist.
+
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}

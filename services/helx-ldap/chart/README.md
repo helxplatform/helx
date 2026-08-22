@@ -18,13 +18,62 @@ enabled. The ACL permits anonymous reads of user password hashes, so disable bot
 
 ## Credentials
 
-Create a Secret before installing with these keys:
+The selected Secret must contain these keys:
 
 - `LDAP_ADMIN_PASSWORD`
 - `LDAP_CONFIG_ADMIN_PASSWORD`
 
-The Secret name must match `openldap.global.existingSecret`, or
-`configuration.existingSecret` if it is set.
+The chart supports three mutually exclusive ownership modes under `secret`.
+
+### Existing Secret (backward-compatible default)
+
+The default continues to use the historically pre-created
+`openldap-credentials` Secret without managing it:
+
+```yaml
+secret:
+  existingSecret: openldap-credentials
+```
+
+### Chart-managed Secret
+
+Clear `existingSecret` and provide stable values. Existing Secret data is
+preserved during upgrades, and values only fill missing keys.
+
+```yaml
+secret:
+  existingSecret: ""
+  values:
+    LDAP_ADMIN_PASSWORD: replace-me
+    LDAP_CONFIG_ADMIN_PASSWORD: replace-me
+```
+
+### External Secrets Operator
+
+Clear `existingSecret`, enable ESO, and identify the backend object to extract:
+
+```yaml
+secret:
+  existingSecret: ""
+  externalSecret:
+    enabled: true
+    remoteRef: helx/openldap
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+```
+
+`openldap.global.existingSecret` is compatibility plumbing required by the
+upstream chart and defaults to `openldap-credentials`. If either
+`secret.existingSecret` or `secret.externalSecret.targetName` uses a custom
+name, set `openldap.global.existingSecret` to the same name. The chart fails
+rendering when these names differ rather than deploying OpenLDAP with a broken
+Secret reference.
+
+The chart does not automatically adopt the historical Secret. Keep existing
+installations in existing-Secret mode unless ownership is intentionally being
+transferred. Do not commit plaintext `secret.values`; for GitOps deployments,
+ESO backed by Vault is the recommended mode.
 
 ## Dependency preparation
 
@@ -36,7 +85,8 @@ helm dependency build services/helx-ldap/chart
 
 Use `helm dependency update services/helx-ldap/chart` only when intentionally
 changing the dependency versions; review the resulting `Chart.lock` before
-committing it. The wrapper chart uses the upstream chart version `4.3.3`. The configuration Job
+committing it. The wrapper chart uses the upstream chart version `4.3.3` and
+the shared `helx-common` library for Secret resources. The configuration Job
 uses the same image as the OpenLDAP dependency by default; that image must contain
 `/bin/sh`, `awk`, `sed`, `grep`, `ldapsearch`, and `ldapmodify`.
 

@@ -10,20 +10,26 @@ apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: {{ include "appstore.fullname" . }}-role
 rules:
+# Verbs below are scoped to what tycho/kube.py actually calls, verified against
+# a full repo grep of every self.api./self.extensions_api. call site, plus a live
+# behavioral test (launch/status/modify/delete cycles for filebrowser, jupyter,
+# rstudio-server, pgadmin) with the tightened rules applied to a running cddp-stage
+# deployment. get/watch/update/delete (singular) are never called for any of
+# these four resources and are intentionally omitted.
 - apiGroups:
   - ""
   resources:
     - pods
+  verbs:
+    - deletecollection
+- apiGroups:
+  - ""
+  resources:
     - services
   verbs:
     - create
-    - delete
-    - deletecollection
     - get
     - list
-    - patch
-    - update
-    - watch
 - apiGroups:
   - ""
   resources:
@@ -36,16 +42,17 @@ rules:
   - "apps"
   resources:
     - deployments
-    - replicasets
   verbs:
     - create
-    - delete
-    - deletecollection
-    - get
     - list
     - patch
-    - update
-    - watch
+    - deletecollection
+- apiGroups:
+  - "apps"
+  resources:
+    - replicasets
+  verbs:
+    - deletecollection
 ---
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

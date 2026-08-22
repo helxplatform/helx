@@ -8,7 +8,7 @@ image:
   repository: containers.renci.org/helxplatform/ldap-sync
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  tag: secrets-options-test-1
 
 imagePullSecrets: []
 nameOverride: ""
@@ -108,20 +108,65 @@ secret:
     # are copied into managed Secret data only when chart-managed mode is used.
     enabled: false
 
+# Reconcile the initial search through the ldap-sync API after the Service is ready.
+# Bind credentials should be supplied through secret.existingSecret,
+# secret.values, or External Secrets rather than committed to this file.
+searchBootstrap:
+  enabled: true
+  id: get-groups
+  filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+  refresh: 60
+  baseDN: ou=groups,dc=unc,dc=edu
+  oneShot: false
+  image:
+    repository: curlimages/curl
+    tag: 8.10.1
+    pullPolicy: IfNotPresent
+  job:
+    backoffLimit: 6
+    activeDeadlineSeconds: 600
+    ttlSecondsAfterFinished: 300
+    waitTimeoutSeconds: 300
+    retryIntervalSeconds: 5
+    rolloutImage:
+      repository: registry.k8s.io/kubectl
+      tag: v1.31.0
+      pullPolicy: IfNotPresent
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsUser: 100
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+
 config:
-  hooks: []
+  hooks:
+    - args:
+        - --baseGid=1025
+        - --baseGroup=helx-users
+      image:
+        repository: containers.renci.org/helxplatform/unc-group-x
+        tag: v2.3.2
+      name: unc-group-x
+      url: http://localhost:5001/hook
   hookRetry:
     maxRetries: 10
     initialDelayMs: 100
     maxDelayMs: 30000
   source:
-    url: ""
-    bindDN: "cn=admin,dc=example,dc=org"
+    url: "ldap://ldap.unc.edu/"
+    bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
     # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
     bindPassword: ""
-    baseDN: "dc=example,dc=org"
+    baseDN: "dc=unc,dc=edu"
   target:
-    url: ""
+    url: "ldap://openldap/"
     bindDN: "cn=admin,dc=example,dc=org"
     # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
     bindPassword: ""
@@ -132,7 +177,7 @@ config:
     # granting the service account get/list/create on PVCs.
     pvcGroup:
       enabled: true
-      storageClass: ""
+      storageClass: azurefile
       size: 10Gi
       accessModes:
         - ReadWriteMany

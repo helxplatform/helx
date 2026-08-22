@@ -1575,10 +1575,20 @@ func createSearchHandler(c echo.Context) error {
 	searchResults[id] = make(map[string]LDAPResult)
 	searchResultsMu.Unlock()
 
-	// Save to database
+	// Save to database. When persistence is enabled, do not report success if
+	// the search could only be created in memory; if the search isn't persisted
+	// to the db, it will be lost on restart.
 	if err := saveSearchToDB(id, spec); err != nil {
 		logger.Error("Failed to save search to database", "SearchId", id, "Err", err)
-		// Continue anyway - the search will still work, just won't persist
+		if config.Database.Enabled {
+			searchesMu.Lock()
+			delete(searches, id)
+			searchesMu.Unlock()
+			searchResultsMu.Lock()
+			delete(searchResults, id)
+			searchResultsMu.Unlock()
+			return c.String(http.StatusInternalServerError, "Failed to persist search")
+		}
 	}
 
 	// Pass the oneshot flag to the search routine.

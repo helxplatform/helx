@@ -138,6 +138,21 @@ member users.
      [other settings...]
    ```
 
+### Search bootstrap
+
+The chart enables `searchBootstrap` by default. A Helm `post-install`/`post-upgrade`
+Job waits for the current Deployment rollout and for the ldap-sync Service to
+answer `/readyz`, then reconciles the configured search through the REST API. The default search is `get-groups` with
+the UNC group filter used by the HeLx deployment. Existing searches are updated
+rather than recreated, so upgrades remain safe and repeatable. The Job is
+removed after a successful run; set `searchBootstrap.enabled: false` to manage
+searches manually.
+
+The default chart values also configure the UNC source, the example OpenLDAP
+target, the `unc-group-x` hook, and the `azurefile` PVC storage class. The
+bind credentials should be supplied through `secret.existingSecret`,
+`secret.values`, or External Secrets rather than committed to `values.yaml`.
+
 ### LDAP Credential Secret Modes
 
 The chart keeps LDAP bind credentials out of its ConfigMap and supports the

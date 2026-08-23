@@ -47,6 +47,9 @@ data:
   SAML_FETCH_INTERVAL: "{{ .Values.saml.cache.FETCH_INTERVAL }}"
   SAML_AUTH_ASSERTION_URL: "{{ .Values.saml.ASSERTION_URL }}"
   SAML_AUTH_ENTITY_ID: "{{ .Values.saml.ENTITY_ID }}"
+  SAML_IDP_ENTITY_ID: "{{ .Values.saml.IDP_ENTITY_ID }}"
+  SAML_PROVIDER_SLUG: "{{ .Values.saml.PROVIDER_SLUG }}"
+  SAML_PROVIDER_NAME: "{{ .Values.saml.PROVIDER_NAME }}"
   GUNICORN_WORKERS: "{{ .Values.gunicorn.workers }}"
   SET_BUILD_ENV_FROM_FILE: "{{ .Values.SET_BUILD_ENV_FROM_FILE }}"
 

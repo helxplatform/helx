@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-MAX_SUBTREE_BLOB_BYTES ?= 5000000
+MAX_SUBTREE_BLOB_BYTES ?= 10000000
 
 # Git remotes used by the services/ git subtrees.
 APPSTORE_URL                    ?= https://github.com/helxplatform/appstore.git

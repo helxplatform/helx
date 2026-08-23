@@ -1,5 +1,7 @@
 SHELL := /bin/bash
 
+MAX_SUBTREE_BLOB_BYTES ?= 5000000
+
 # Git remotes used by the services/ git subtrees.
 APPSTORE_URL                    ?= https://github.com/helxplatform/appstore.git
 APPSTORE_CHART_URL              ?= https://github.com/helxplatform/appstore-chart.git
@@ -101,6 +103,19 @@ define ensure-remote
 	fi
 endef
 
+# check-incoming: refuse to pull a subtree whose incoming tree has oversized files.
+# $(1)=remote  $(2)=branch
+define check-incoming
+	@git fetch -q "$(1)" "$(2)"; \
+	oversized=$$(git ls-tree -r -l FETCH_HEAD | awk -v m=$(MAX_SUBTREE_BLOB_BYTES) '$$4 > m {printf "    %10d  %s\n", $$4, $$5}'); \
+	if [ -n "$$oversized" ]; then \
+		echo "REFUSING to pull $(1)/$(2) -- incoming tree has files over $(MAX_SUBTREE_BLOB_BYTES) bytes:"; \
+		echo "$$oversized"; \
+		echo "  Fix upstream (git rm + .gitignore), then retry."; \
+		exit 1; \
+	fi
+endef
+
 # add-remotes: Add or verify all remotes needed by the service subtrees
 add-remotes:
 	$(call ensure-remote,appstore,$(APPSTORE_URL))
@@ -183,47 +198,58 @@ pull-subtree: add-remotes
 		echo "Usage: make pull-subtree REMOTE=<remote> PREFIX=<path> BRANCH=<branch>"; \
 		exit 1; \
 	fi
+	$(call check-incoming,$(REMOTE),$(BRANCH))
 	git subtree pull --prefix="$(PREFIX)" "$(REMOTE)" "$(BRANCH)"
 
 # pull-appstore: Pull the latest configured appstore branch into its subtree
 pull-appstore: add-remotes
+	$(call check-incoming,appstore,$(APPSTORE_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_PREFIX)" appstore "$(APPSTORE_BRANCH)"
 
 # pull-appstore-chart: Pull the latest configured appstore chart branch
 pull-appstore-chart: add-remotes
+	$(call check-incoming,appstore-chart,$(APPSTORE_CHART_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_CHART_PREFIX)" appstore-chart "$(APPSTORE_CHART_BRANCH)"
 
 # pull-appstore-prepuller: Pull the latest configured appstore-prepuller branch
 pull-appstore-prepuller: add-remotes
+	$(call check-incoming,appstore-prepuller,$(APPSTORE_PREPULLER_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_PREPULLER_PREFIX)" appstore-prepuller "$(APPSTORE_PREPULLER_BRANCH)"
 
 # pull-appstore-sockets: Pull the latest configured appstore-sockets branch
 pull-appstore-sockets: add-remotes
+	$(call check-incoming,appstore-sockets,$(APPSTORE_SOCKETS_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_SOCKETS_PREFIX)" appstore-sockets "$(APPSTORE_SOCKETS_BRANCH)"
 
 # pull-appstore-sockets-chart: Pull the latest configured appstore-sockets chart branch
 pull-appstore-sockets-chart: add-remotes
+	$(call check-incoming,appstore-sockets-chart,$(APPSTORE_SOCKETS_CHART_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_SOCKETS_CHART_PREFIX)" appstore-sockets-chart "$(APPSTORE_SOCKETS_CHART_BRANCH)"
 
 # pull-helx-ldap: Pull the latest configured helx-ldap branch into its subtree
 pull-helx-ldap: add-remotes
+	$(call check-incoming,helx-ldap,$(HELX_LDAP_BRANCH))
 	git subtree pull --prefix="$(HELX_LDAP_PREFIX)" helx-ldap "$(HELX_LDAP_BRANCH)"
 
 # pull-ldap-sync: Pull the latest configured ldap-sync branch
 pull-ldap-sync: add-remotes
+	$(call check-incoming,ldap-sync,$(LDAP_SYNC_BRANCH))
 	git subtree pull --prefix="$(LDAP_SYNC_PREFIX)" ldap-sync "$(LDAP_SYNC_BRANCH)"
 
 # pull-ui: Pull the latest configured UI branch into its subtree
 pull-ui: add-remotes
+	$(call check-incoming,ui,$(UI_BRANCH))
 	git subtree pull --prefix="$(UI_PREFIX)" ui "$(UI_BRANCH)"
 
 # pull-ui-chart: Pull the latest configured UI chart branch
 pull-ui-chart: add-remotes
+	$(call check-incoming,ui-chart,$(UI_CHART_BRANCH))
 	git subtree pull --prefix="$(UI_CHART_PREFIX)" ui-chart "$(UI_CHART_BRANCH)"
 
 # pull-user-mutator: Pull the latest configured user-mutator branch
 pull-user-mutator: add-remotes
-	git subtree pull --prefix="$(USER_MUTATOR_PREFIX)" user-mutator "$(USER_MUTATOR_BRANCH)"
+	$(call check-incoming,user-mutator,$(USER_MUTATOR_BRANCH))
+	git subtree pull --squash --prefix="$(USER_MUTATOR_PREFIX)" user-mutator "$(USER_MUTATOR_BRANCH)"
 
 # pull-remotes: Pull every configured service subtree in sequence
 .NOTPARALLEL: pull-remotes

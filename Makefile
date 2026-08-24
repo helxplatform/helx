@@ -48,6 +48,32 @@ HELX_CHART_BRANCH               ?= master
 RESTY_CHART_PREFIX              ?= services/resty/chart
 POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
 
+# The project virtualenv is the default interpreter. System pip is often
+# externally managed (PEP 668) and refuses to install, so a venv is not just
+# tidiness. Set PYTHON=... to use your own interpreter and skip provisioning.
+VENV                            ?= .venv
+BOOTSTRAP_PYTHON                ?= python3
+VENV_PYTHON                     := $(VENV)/bin/python
+PYTHON                          ?= $(VENV_PYTHON)
+CI_REQUIREMENTS                 := .github/requirements-ci.txt
+VENV_STAMP                      := $(VENV)/.ci-requirements
+# Auto-provision only when the default venv interpreter is in use.
+PYTHON_READY                    := $(if $(filter $(VENV_PYTHON),$(PYTHON)),$(VENV_STAMP),)
+
+CI_SCRIPT                       ?= .github/scripts/ci.py
+BUILD_CHART                     ?= .github/scripts/helm-build-chart.sh
+UMBRELLA_CHART                  ?= deploy/helm/helx-chart
+COMMON_CHART                    ?= deploy/helm/helx-common/chart
+
+# Defaults for the developer-facing targets, all overridable on the command line.
+BASE                            ?= develop
+CHECK_VERSIONS_FLAGS            ?= --include-untracked
+CHANNEL                         ?= develop
+SERVICE                         ?=
+CHART_CHANNEL                   ?=
+CHART_CHANNEL_COMMIT            ?=
+HOOKS_PATH                      ?= .githooks
+
 .DEFAULT_GOAL := help
 
 # Every target here mutates the same git repository -- the index lock,
@@ -83,7 +109,22 @@ POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
         pull-helx-chart \
         pull-resty \
         pull-pod-reaper \
-        pull-remotes pull-subtree
+        pull-remotes pull-subtree \
+        sync-locks \
+        sync-helx-lock \
+        check-locks \
+        ci-pip-install \
+        ci-validate-everything \
+        ci-check-versions \
+        ci-tests \
+        ci-build-chart \
+        ci-locked-deps \
+        ci-candidate-version \
+        ci-build-helx-chart \
+        ci-build-common-chart \
+        docker-build \
+        pre-push \
+        install-hooks
 
 #help: Show the available repository setup and subtree tasks
 help:
@@ -110,6 +151,39 @@ help:
 	@echo '  make pull-resty                    Mirror helx-chart/$(HELX_CHART_BRANCH) charts/resty'
 	@echo '  make pull-pod-reaper               Mirror helx-chart/$(HELX_CHART_BRANCH) charts/pod-reaper'
 	@echo '  Local edits to these charts are overwritten; FORCE=1 skips the dirty check.'
+	@echo
+	@echo 'Developer checks (see README.md "DevEx"):'
+	@echo '  make ci-pip-install                Create $(VENV) and install CI requirements'
+	@echo '  make ci-validate-everything        Validate every chart, lock, .helmignore, and image'
+	@echo '  make ci-check-versions             Run the version gate  [BASE, CHECK_VERSIONS_FLAGS]'
+	@echo '  make ci-tests                      Run the CI suite unit tests'
+	@echo '  make pre-push                      Everything above plus check-locks and whitespace'
+	@echo '  make install-hooks                 Run pre-push automatically via git hooks'
+	@echo
+	@echo 'Building and inspecting one service:'
+	@echo '  make ci-build-chart SERVICE=<name>       Vendor deps, lint, package services/<name>/chart'
+	@echo '  make ci-locked-deps SERVICE=<name>       Print the resolved dependency tuples for it'
+	@echo '  make docker-build SERVICE=<name>         Build the image for that service'
+	@echo '  make ci-build-common-chart               Vendor deps, lint, package $(COMMON_CHART)'
+	@echo '  make ci-build-helx-chart                 Package the umbrella  [CHART_CHANNEL, CHART_CHANNEL_COMMIT]'
+	@echo '  make ci-candidate-version                Print the candidate chart version  [CHANNEL]'
+	@echo
+	@echo 'Environment variables:'
+	@echo '  PYTHON=<path>          Interpreter to use (default $(VENV_PYTHON); skips venv setup)'
+	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
+	@echo '  SERVICE=<name>         Required by the per-service targets above'
+	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
+	@echo '  CHECK_VERSIONS_FLAGS=  Set empty to compare committed revisions only'
+	@echo '  CHANNEL=<name>         Candidate channel name (default develop)'
+	@echo '  CHART_CHANNEL=<name>   Build the umbrella as a candidate for this channel'
+	@echo '  CHART_CHANNEL_COMMIT=  Commit whose images the candidate pins (default HEAD)'
+	@echo '  FORCE=1                Let the chart mirrors overwrite uncommitted work'
+	@echo
+	@echo 'Chart.lock maintenance:'
+	@echo '  make sync-locks                    Regenerate every chart lock that has dependencies'
+	@echo '  make sync-helx-lock                Regenerate only $(UMBRELLA_CHART)'
+	@echo '  make check-locks                   Verify every lock without writing'
+	@echo '  Python setup is automatic; run make ci-pip-install to do it explicitly'
 	@echo
 	@echo 'For another branch or prefix, use:'
 	@echo '  make pull-subtree REMOTE=appstore PREFIX=services/appstore BRANCH=develop'
@@ -325,6 +399,127 @@ pull-pod-reaper: add-remotes
 
 # pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart
 pull-helx-chart: pull-resty pull-pod-reaper
+
+# require-pyyaml: fail with an actionable message instead of a raw traceback.
+define require-pyyaml
+	@$(PYTHON) -c 'import yaml' >/dev/null 2>&1 || { \
+		echo "$(PYTHON) cannot import PyYAML, which $(CI_SCRIPT) requires."; \
+		echo "  Install it:            $(PYTHON) -m pip install -r .github/requirements-ci.txt"; \
+		echo "  Or choose another:     make PYTHON=/path/to/python $@"; \
+		exit 1; \
+	}
+endef
+
+# require-service: the per-service targets need SERVICE=<name>.
+define require-service
+	@if test -z "$(SERVICE)"; then \
+		echo "SERVICE is required, for example: make $@ SERVICE=user-mutator"; \
+		echo "Available services:"; ls -1 services | sed 's/^/  /'; \
+		exit 1; \
+	fi; \
+	if test ! -d "services/$(SERVICE)"; then \
+		echo "services/$(SERVICE) does not exist. Available services:"; \
+		ls -1 services | sed 's/^/  /'; \
+		exit 1; \
+	fi
+endef
+
+# The virtualenv is provisioned from the requirements file and re-provisioned
+# only when that file changes, so depending on the stamp costs a stat.
+$(VENV_STAMP): $(CI_REQUIREMENTS)
+	@echo "Provisioning $(VENV) from $(CI_REQUIREMENTS)"
+	@$(BOOTSTRAP_PYTHON) -m venv "$(VENV)"
+	@"$(VENV_PYTHON)" -m pip install --quiet --upgrade pip
+	@"$(VENV_PYTHON)" -m pip install --quiet --requirement "$(CI_REQUIREMENTS)"
+	@touch "$@"
+
+# ci-pip-install: Create the virtualenv and install the CI requirements into it
+ci-pip-install: $(VENV_STAMP)
+	@echo "Ready: $(VENV_PYTHON)"
+	@echo "make targets and .github/scripts/*.sh use it automatically."
+	@echo "To get it in your own shell (optional): source $(VENV)/bin/activate"
+
+# ci-validate-everything: Validate every chart, lock, .helmignore, and image definition
+ci-validate-everything: $(PYTHON_READY)
+	@$(PYTHON) $(CI_SCRIPT) validate-config
+
+# ci-check-versions: Require version bumps for anything whose artifact changed
+ci-check-versions: $(PYTHON_READY)
+	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
+		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
+	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
+
+# ci-tests: Run the unit tests for the CI helpers
+ci-tests: $(PYTHON_READY)
+	@$(PYTHON) -m unittest discover -s .github/scripts -p 'test_*.py'
+
+# ci-build-chart: Vendor dependencies, lint, and package one service chart
+ci-build-chart: $(PYTHON_READY)
+	$(call require-service)
+	@if test ! -f "services/$(SERVICE)/chart/Chart.yaml"; then \
+		echo "services/$(SERVICE)/chart has no Chart.yaml"; exit 1; \
+	fi
+	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "services/$(SERVICE)/chart"
+
+# ci-locked-deps: Print one chart's resolved dependency name/version/repository tuples
+ci-locked-deps: $(PYTHON_READY)
+	$(call require-service)
+	@$(PYTHON) $(CI_SCRIPT) locked-dependencies "services/$(SERVICE)/chart"
+
+# ci-candidate-version: Print the chart version a candidate channel publishes under
+ci-candidate-version: $(PYTHON_READY)
+	@$(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)"
+
+# ci-build-common-chart: Vendor dependencies, lint, and package the shared
+# library chart. It lives outside services/, so ci-build-chart cannot reach it.
+ci-build-common-chart: $(PYTHON_READY)
+	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "$(COMMON_CHART)"
+
+# ci-build-helx-chart: Package the umbrella chart. Set CHART_CHANNEL to build a
+# candidate; CHART_CHANNEL_COMMIT defaults to HEAD.
+ci-build-helx-chart: $(PYTHON_READY)
+	@commit="$(CHART_CHANNEL_COMMIT)"; \
+	if test -n "$(CHART_CHANNEL)" && test -z "$$commit"; then \
+		commit=$$(git rev-parse HEAD); \
+		echo "CHART_CHANNEL_COMMIT defaulted to $$commit"; \
+	fi; \
+	PYTHON="$(PYTHON)" CHART_CHANNEL="$(CHART_CHANNEL)" CHART_CHANNEL_COMMIT="$$commit" \
+		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
+
+# docker-build: Build one service image exactly as CI builds it
+docker-build:
+	$(call require-service)
+	@if test ! -f "services/$(SERVICE)/Dockerfile"; then \
+		echo "services/$(SERVICE) has no Dockerfile; it is chart-only"; exit 1; \
+	fi
+	@docker build -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
+
+# pre-push: Every check CI will run that can run locally
+pre-push: ci-tests ci-validate-everything ci-check-versions check-locks
+	@git diff --check
+	@echo "pre-push checks passed"
+
+# install-hooks: Point git at $(HOOKS_PATH) so pre-push runs automatically
+install-hooks:
+	@git config core.hooksPath "$(HOOKS_PATH)"
+	@echo "core.hooksPath = $(HOOKS_PATH)"
+	@echo "Undo with: git config --unset core.hooksPath"
+
+# sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
+# Charts without dependencies are skipped rather than treated as an error.
+sync-locks:
+	$(call require-pyyaml)
+	@$(PYTHON) $(CI_SCRIPT) sync-lock --all
+
+# sync-helx-lock: Regenerate only the umbrella chart's Chart.lock
+sync-helx-lock:
+	$(call require-pyyaml)
+	@$(PYTHON) $(CI_SCRIPT) sync-lock "$(UMBRELLA_CHART)"
+
+# check-locks: Verify every lock matches its Chart.yaml without writing anything
+check-locks:
+	$(call require-pyyaml)
+	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
 
 # pull-remotes: Pull every configured service subtree in sequence
 pull-remotes: pull-appstore \

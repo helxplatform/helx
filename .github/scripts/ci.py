@@ -833,6 +833,16 @@ def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[
     return charts
 
 
+def charts_with_dependencies(root: Path) -> list[Path]:
+    """Return every chart directory that declares dependencies, so needs a lock."""
+    return [
+        chart_dir
+        for chart_dir in discover_chart_dirs(root)
+        if chart_file(chart_dir).is_file()
+        and dependency_list(read_yaml(chart_file(chart_dir)), str(chart_file(chart_dir)))
+    ]
+
+
 def _validate_locks(root: Path) -> None:
     """Require every Chart.lock to be the one Chart.yaml would generate."""
     stale = [
@@ -1394,7 +1404,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     overlay_destination.add_argument("--merge-into")
 
     lock = commands.add_parser("sync-lock")
-    lock.add_argument("chart_dir")
+    lock.add_argument("chart_dir", nargs="?")
+    lock.add_argument("--all", action="store_true", dest="all_charts")
     lock.add_argument("--check", action="store_true")
 
     manifest = commands.add_parser("release-manifest")
@@ -1469,21 +1480,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 encoding="utf-8",
             )
         elif args.command == "sync-lock":
-            chart_dir = output_path(ROOT, args.chart_dir)
-            lock_path = chart_dir / "Chart.lock"
-            if args.check:
-                if not lock_matches_chart(chart_dir):
-                    raise CIError(
-                        f"{lock_path} does not match {chart_file(chart_dir)}; regenerate with "
-                        f"'python .github/scripts/ci.py sync-lock {args.chart_dir}'"
-                    )
-                print(f"{lock_path} matches Chart.yaml")
-            elif lock_matches_chart(chart_dir):
-                # Rewriting would only churn the generated timestamp.
-                print(f"{lock_path} already matches Chart.yaml")
-            else:
-                lock_path.write_text(render_lock(chart_dir), encoding="utf-8")
-                print(f"Wrote {lock_path}")
+            if bool(args.chart_dir) == args.all_charts:
+                raise CIError("Choose either a chart directory or --all")
+            targets = (
+                charts_with_dependencies(ROOT)
+                if args.all_charts
+                else [output_path(ROOT, args.chart_dir)]
+            )
+            stale: list[str] = []
+            for chart_dir in targets:
+                lock_path = chart_dir / "Chart.lock"
+                label = relative_path(ROOT, chart_dir)
+                if args.check:
+                    if lock_matches_chart(chart_dir):
+                        print(f"{label}/Chart.lock matches Chart.yaml")
+                    else:
+                        stale.append(label)
+                elif lock_matches_chart(chart_dir):
+                    # Rewriting would only churn the generated timestamp.
+                    print(f"{label}/Chart.lock already matches Chart.yaml")
+                else:
+                    lock_path.write_text(render_lock(chart_dir), encoding="utf-8")
+                    print(f"Wrote {label}/Chart.lock")
+            if stale:
+                raise CIError(
+                    "Chart.lock does not match Chart.yaml; regenerate with "
+                    "'python .github/scripts/ci.py sync-lock <chart-dir>':\n- "
+                    + "\n- ".join(stale)
+                )
         elif args.command == "release-manifest":
             manifest = build_release_manifest(ROOT, args.commit)
             output_path(ROOT, args.output).write_text(

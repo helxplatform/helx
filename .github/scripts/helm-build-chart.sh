@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Interpreter used for ci.py. Prefers the project virtualenv so this script
+# works whether or not the venv is activated in your shell; override with
+# PYTHON=... to use your own.
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x "${VENV:-.venv}/bin/python" ]]; then
+    PYTHON="${VENV:-.venv}/bin/python"
+  else
+    PYTHON=python3
+  fi
+fi
+readonly PYTHON
+
 readonly COMMON_CHART="deploy/helm/helx-common/chart"
 readonly UMBRELLA_CHART="deploy/helm/helx-chart"
 
@@ -15,11 +27,11 @@ candidate_mode() {
 }
 
 chart_field() {
-  python3 .github/scripts/ci.py chart-field "$1" "$2"
+  "$PYTHON" .github/scripts/ci.py chart-field "$1" "$2"
 }
 
 locked_dependencies() {
-  python3 .github/scripts/ci.py locked-dependencies "$1"
+  "$PYTHON" .github/scripts/ci.py locked-dependencies "$1"
 }
 
 find_local_chart() {
@@ -127,7 +139,7 @@ apply_candidate_values() {
   # shellcheck disable=SC2064
   trap "mv -f '$backup' '$values'; rmdir '$backup_dir' 2>/dev/null || true" EXIT
 
-  python3 .github/scripts/ci.py candidate-values \
+  "$PYTHON" .github/scripts/ci.py candidate-values \
     --channel "$CHANNEL" \
     --commit "$CHANNEL_COMMIT" \
     --merge-into "$values"
@@ -195,7 +207,7 @@ main() {
       echo "::error::CHART_CHANNEL only applies to $UMBRELLA_CHART, not $chart_dir" >&2
       exit 1
     fi
-    chart_version=$(python3 .github/scripts/ci.py candidate-version \
+    chart_version=$("$PYTHON" .github/scripts/ci.py candidate-version \
       --channel "$CHANNEL" --chart-dir "$chart_dir")
     apply_candidate_values "$chart_dir"
   fi

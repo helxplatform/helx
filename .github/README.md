@@ -125,9 +125,11 @@ publication.
   Bump the service chart and the umbrella pin in the same change.
 - Every dependency is pinned to an exact version, so `Chart.lock` needs no
   resolution and is derivable from `Chart.yaml` with no registry access.
-  Regenerate it with `ci.py sync-lock <chart-dir>` instead of
-  `helm dependency update`; `--check` verifies without writing. The digest
-  reproduces Helm's `resolver.HashReq`.
+  Regenerate it with `make sync-locks` (every chart) or `make sync-helx-lock`
+  (umbrella only) rather than `helm dependency update`; `make check-locks`
+  verifies without writing. Because no resolution is involved, this also works
+  for a dependency version that is not published yet, which `helm dependency
+  update` cannot do. The digest reproduces Helm's `resolver.HashReq`.
 - Repository-owned dependencies should use
   `oci://ghcr.io/helxplatform/helm-charts` in committed metadata.
 - Generated `charts/` directories and dependency archives are not committed.
@@ -340,15 +342,21 @@ Install the one Python dependency and run focused checks:
 
 ```bash
 python3 -m pip install -r .github/requirements-ci.txt
-python3 -m unittest discover -s .github/scripts -p 'test_*.py'
-python3 .github/scripts/ci.py validate-config
-python3 .github/scripts/ci.py check-versions --base origin/develop --include-untracked
-python3 .github/scripts/ci.py sync-lock deploy/helm/helx-chart --check
+make ci-tests
+make ci-validate-everything
+make ci-check-versions BASE=origin/develop
+make check-locks
 bash -n .github/scripts/helm-build-chart.sh .github/scripts/helm-preflight.sh
-bash .github/scripts/helm-build-chart.sh deploy/helm/helx-common/chart
-bash .github/scripts/helm-build-chart.sh deploy/helm/helx-chart
+make ci-build-common-chart
+make ci-build-helx-chart
 git diff --check
 ```
+
+These wrap `.github/scripts/ci.py` and run it through the project virtualenv, so
+they work without activating anything. Invoking `python3 .github/scripts/ci.py`
+directly uses your system interpreter, which usually has no PyYAML; use
+`.venv/bin/python` or activate the venv if you prefer calling it by hand. See the
+DevEx section of the [root README](../README.md) for the full developer workflow.
 
 `check-versions` compares committed revisions by default, which is what CI does
 and what publication acts on. Pass `--include-untracked` for local runs: it
@@ -357,5 +365,16 @@ locally does not then fail in CI once you commit. Creating a chart file such as
 `.helmignore` is the usual way to hit that, because it is packaged into the chart
 and therefore requires a version bump.
 
-Run `actionlint` 1.7.12 or newer for workflow validation. The workflow pins the
-official 1.7.12 Linux archive checksum.
+Workflow YAML is linted by `actionlint` in CI, not locally: `self-test` downloads
+the pinned 1.7.12 release, verifies its checksum, and runs it over
+`.github/workflows/*.yml`. There is deliberately no local target for it, because
+workflow files change rarely and CI already gates them on every pull request and
+every push to `develop`.
+
+If you are editing workflows and want the faster loop, install it yourself and
+match the pinned version so a local pass means the same thing as a CI pass:
+
+```bash
+brew install actionlint     # then check the version matches 1.7.12
+actionlint .github/workflows/*.yml
+```

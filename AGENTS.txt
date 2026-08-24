@@ -52,3 +52,9 @@
 - Validate workflow/action YAML and inspect project diagnostics after edits.
 - Preserve unrelated user changes, including untracked directories such as
   `deployments/argocd/`; do not commit or create branches unless requested.
+
+## Other rules
+
+- Do not revert changes that you notice happen that you don't expect. They are very
+  likely intentional changes made by the user. If you think it relevant, you may
+  ask the user whether they made the changes or if they were unintentional.

@@ -19,6 +19,16 @@ inputs:
   registry-token:
     description: GHCR token used for dependency pulls and optional publication
     required: true
+  channel:
+    description: >-
+      Candidate channel name. When set, the umbrella is built from the local
+      tree and published as a mutable <version>-<channel> prerelease.
+    required: false
+    default: ''
+  channel-commit:
+    description: Commit whose images the candidate pins
+    required: false
+    default: ''
 
 outputs:
   package:
@@ -26,7 +36,10 @@ outputs:
     value: ${{ steps.chart.outputs.package }}
   published:
     description: Whether this run pushed a new chart version
-    value: ${{ steps.preflight.outputs.publish-needed }}
+    value: ${{ inputs.channel != '' || steps.preflight.outputs.publish-needed == 'true' }}
+  chart-version:
+    description: Version of the packaged chart, including any channel prerelease
+    value: ${{ steps.chart.outputs.chart-version }}
 
 runs:
   using: composite
@@ -57,11 +70,15 @@ runs:
       shell: bash
       env:
         CHART_DIR: ${{ inputs.chart-dir }}
+        CHART_CHANNEL: ${{ inputs.channel }}
+        CHART_CHANNEL_COMMIT: ${{ inputs.channel-commit }}
       run: bash .github/scripts/helm-build-chart.sh "$CHART_DIR"
 
+    # Candidate channels are deliberately mutable, so the immutability preflight
+    # only guards released versions.
     - name: Check immutable chart version
       id: preflight
-      if: inputs.publish == 'true'
+      if: inputs.publish == 'true' && inputs.channel == ''
       shell: bash
       env:
         CHART_DIR: ${{ inputs.chart-dir }}
@@ -70,7 +87,9 @@ runs:
       run: bash .github/scripts/helm-preflight.sh "$REGISTRY" "$CHART_DIR" "$PACKAGE"
 
     - name: Publish chart
-      if: inputs.publish == 'true' && steps.preflight.outputs.publish-needed == 'true'
+      if: >-
+        inputs.publish == 'true'
+        && (inputs.channel != '' || steps.preflight.outputs.publish-needed == 'true')
       shell: bash
       env:
         PACKAGE: ${{ steps.chart.outputs.package }}

@@ -1,39 +1,34 @@
-name: CI
+name: Develop channel
+
+# Every push to develop republishes one mutable candidate chart,
+# oci://ghcr.io/helxplatform/helm-charts/helx:<version>-develop, built from the
+# branch tree and pinned to immutable develop-<sha> images. Releases are
+# untouched: candidates are SemVer prereleases and always sort below <version>.
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - edited
-  # Pushes to develop are handled by develop.yml, which validates the same
-  # charts and then publishes the develop candidate channel.
+  push:
+    branches:
+      - develop
   workflow_dispatch:
-    inputs:
-      target:
-        description: Image target to validate
-        required: true
-        default: all
-        type: string
 
+# Never cancel: images publish before the chart that pins them, so a cancelled
+# run only leaves the channel behind, never pointing at a missing image.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: develop-channel
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  packages: read
 
 env:
+  CHART_REGISTRY: oci://ghcr.io/helxplatform/helm-charts
   COMMON_CHART: deploy/helm/helx-common/chart
   UMBRELLA_CHART: deploy/helm/helx-chart
-  IMAGE_VALIDATION_TAG: ci-${{ github.sha }}
+  CHANNEL: develop
 
 jobs:
   self-test:
-    name: Self-test CI
-    if: github.event.action != 'edited' || github.event.changes.base.ref.from
+    name: Self-test develop channel
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -42,34 +37,27 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-
       - name: Set up Python 3.12
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
-
       - name: Install CI requirements
         run: python -m pip install --requirement .github/requirements-ci.txt
-
       - name: Run CI unit tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m unittest discover -s .github/scripts -p 'test_*.py'
-
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py'
       - name: Validate CI configuration
         run: python .github/scripts/ci.py validate-config
-
-      # Every pull request is gated, not just those targeting the default branch.
-      # A chart edited without a version bump would otherwise reach develop and be
-      # vendored into a candidate under a version that is already published with
-      # different content.
       - name: Require chart and image version increases
-        if: github.event_name == 'pull_request'
+        shell: bash
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: python .github/scripts/ci.py check-versions --base "$BASE_SHA"
-
+          BASE_SHA: ${{ github.event.before || format('{0}^', github.sha) }}
+        run: |
+          set -euo pipefail
+          if [[ "$BASE_SHA" =~ ^0+$ ]]; then
+            echo 'No previous develop commit to compare against.'
+          else
+            python .github/scripts/ci.py check-versions --base "$BASE_SHA"
+          fi
       - name: Install actionlint 1.7.12
         shell: bash
         run: |
@@ -124,9 +112,7 @@ jobs:
 
   validate-charts:
     name: Validate ${{ matrix.chart }}
-    needs:
-      - validate-common
-      - plan-charts
+    needs: plan-charts
     strategy:
       fail-fast: false
       matrix:
@@ -147,30 +133,8 @@ jobs:
           registry-username: ${{ github.actor }}
           registry-token: ${{ github.token }}
 
-  validate-umbrella:
-    name: Validate umbrella chart
-    needs:
-      - validate-common
-      - plan-charts
-      - validate-charts
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Validate umbrella after service charts
-        uses: ./.github/actions/publish-charts
-        with:
-          chart-dir: ${{ env.UMBRELLA_CHART }}
-          publish: 'false'
-          registry-username: ${{ github.actor }}
-          registry-token: ${{ github.token }}
-
   plan-images:
-    name: Plan images
+    name: Plan candidate images
     needs: validate-common
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -188,98 +152,133 @@ jobs:
           python-version: '3.12'
       - name: Install CI requirements
         run: python -m pip install --requirement .github/requirements-ci.txt
-      - name: Create image matrix
+      # Every image is rebuilt because the candidate chart pins one shared
+      # develop-<sha> tag, which must resolve for every dependency image.
+      - name: Create candidate image matrix
         id: plan
-        shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          TARGET: ${{ inputs.target || 'all' }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || format('{0}^', github.sha) }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "$EVENT_NAME" == workflow_dispatch ]]; then
-            if [[ "$TARGET" == all ]]; then
-              python .github/scripts/ci.py image-matrix --all --github-output "$GITHUB_OUTPUT"
-            else
-              python .github/scripts/ci.py image-matrix --target "$TARGET" --github-output "$GITHUB_OUTPUT"
-            fi
-          else
-            if [[ "$BASE_SHA" =~ ^0+$ ]]; then BASE_SHA="origin/$DEFAULT_BRANCH"; fi
-            python .github/scripts/ci.py image-matrix --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT"
-          fi
+          COMMIT_SHA: ${{ github.sha }}
+        run: >-
+          python .github/scripts/ci.py image-matrix --all
+          --channel "$CHANNEL" --commit "$COMMIT_SHA"
+          --github-output "$GITHUB_OUTPUT"
 
-  validate-images:
-    name: ${{ matrix.image.job_name }}
+  publish-images:
+    name: Publish ${{ matrix.image.name }}:${{ matrix.image.tag }}
     needs:
-      - validate-common
       - plan-images
+      - validate-charts
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         image: ${{ fromJSON(needs.plan-images.outputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - name: No affected images
-        if: matrix.image.repository == ''
-        run: echo 'No image source changes require a build.'
       - name: Check out complete history
-        if: matrix.image.repository != ''
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Validate image without registry credentials
-        if: matrix.image.repository != ''
+      - name: Publish candidate image
         uses: ./.github/actions/build-service
         with:
           repository: containers.renci.org/helxplatform/${{ matrix.image.repository }}
           context: ${{ matrix.image.context }}
           dockerfile: ${{ matrix.image.dockerfile }}
-          tag: ${{ env.IMAGE_VALIDATION_TAG }}
-          push: 'false'
+          tag: ${{ matrix.image.tag }}
+          push: 'true'
+          registry-username: ${{ secrets.CONTAINERHUB_USERNAME }}
+          registry-password: ${{ secrets.CONTAINERHUB_PASSWORD }}
 
-  ci-gate:
-    name: CI gate
+  publish-candidate:
+    name: Publish candidate umbrella
+    needs: publish-images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      chart-version: ${{ steps.candidate.outputs.chart-version }}
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Publish candidate umbrella
+        id: candidate
+        uses: ./.github/actions/publish-charts
+        with:
+          chart-dir: ${{ env.UMBRELLA_CHART }}
+          publish: 'true'
+          registry: ${{ env.CHART_REGISTRY }}
+          registry-username: ${{ github.actor }}
+          registry-token: ${{ github.token }}
+          channel: ${{ env.CHANNEL }}
+          channel-commit: ${{ github.sha }}
+      - name: Summarize the candidate
+        shell: bash
+        env:
+          CHART_VERSION: ${{ steps.candidate.outputs.chart-version }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Develop candidate \`$CHART_VERSION\`"
+            echo
+            echo "Built from \`$COMMIT_SHA\`. Images pinned to \`$CHANNEL-${COMMIT_SHA:0:7}\`."
+            echo
+            echo '```bash'
+            echo "helm registry login ghcr.io"
+            echo "helm upgrade --install helx \\"
+            echo "  oci://ghcr.io/helxplatform/helm-charts/helx \\"
+            echo "  --version $CHART_VERSION -n helx --create-namespace"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  develop-gate:
+    name: Develop channel gate
     if: always()
     needs:
       - self-test
       - validate-common
       - plan-charts
       - validate-charts
-      - validate-umbrella
       - plan-images
-      - validate-images
+      - publish-images
+      - publish-candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require every CI job to pass
+      - name: Require every develop job to pass
         shell: bash
         env:
           SELF_TEST: ${{ needs.self-test.result }}
           COMMON: ${{ needs.validate-common.result }}
           CHART_PLAN: ${{ needs.plan-charts.result }}
           CHARTS: ${{ needs.validate-charts.result }}
-          UMBRELLA: ${{ needs.validate-umbrella.result }}
           IMAGE_PLAN: ${{ needs.plan-images.result }}
-          IMAGES: ${{ needs.validate-images.result }}
+          IMAGES: ${{ needs.publish-images.result }}
+          CANDIDATE: ${{ needs.publish-candidate.result }}
         run: |
           set -euo pipefail
           statuses=(
-            "Self-test CI|$SELF_TEST"
+            "Self-test develop channel|$SELF_TEST"
             "Validate common chart|$COMMON"
             "Plan service charts|$CHART_PLAN"
             "Validate service charts|$CHARTS"
-            "Validate umbrella chart|$UMBRELLA"
-            "Plan images|$IMAGE_PLAN"
-            "Build images|$IMAGES"
+            "Plan candidate images|$IMAGE_PLAN"
+            "Publish candidate images|$IMAGES"
+            "Publish candidate umbrella|$CANDIDATE"
           )
           failed=0
           for status in "${statuses[@]}"; do
             name=${status%%|*}
             result=${status#*|}
-            printf '%-28s %s\n' "$name" "$result"
+            printf '%-30s %s\n' "$name" "$result"
             if [[ "$result" != success && "$result" != skipped ]]; then
               echo "::error::$name finished with result: $result"
               failed=1

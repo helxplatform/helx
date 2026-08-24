@@ -21,6 +21,11 @@ readonly UMBRELLA_CHART="deploy/helm/helx-chart"
 # the commit being built, so the archive always describes the current tree.
 readonly CHANNEL="${CHART_CHANNEL:-}"
 readonly CHANNEL_COMMIT="${CHART_CHANNEL_COMMIT:-}"
+# Optional: limit the image pins to these components, and use a literal tag
+# instead of <channel>-<short-sha>. Both are for local builds where only a few
+# services were rebuilt; CI leaves them empty and pins everything.
+readonly CHANNEL_SERVICES="${CHART_CHANNEL_SERVICES:-}"
+readonly CHANNEL_IMAGE_TAG="${CHART_IMAGE_TAG:-}"
 
 candidate_mode() {
   [[ -n "$CHANNEL" ]]
@@ -139,10 +144,15 @@ apply_candidate_values() {
   # shellcheck disable=SC2064
   trap "mv -f '$backup' '$values'; rmdir '$backup_dir' 2>/dev/null || true" EXIT
 
-  "$PYTHON" .github/scripts/ci.py candidate-values \
-    --channel "$CHANNEL" \
-    --commit "$CHANNEL_COMMIT" \
+  local -a arguments=(
+    --channel "$CHANNEL"
+    --commit "$CHANNEL_COMMIT"
     --merge-into "$values"
+  )
+  [[ -n "$CHANNEL_SERVICES" ]] && arguments+=(--services "$CHANNEL_SERVICES")
+  [[ -n "$CHANNEL_IMAGE_TAG" ]] && arguments+=(--tag "$CHANNEL_IMAGE_TAG")
+
+  "$PYTHON" .github/scripts/ci.py candidate-values "${arguments[@]}"
 }
 
 lint_chart() {

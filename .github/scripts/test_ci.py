@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import io
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -831,6 +833,180 @@ class UntrackedChangeTests(TempTreeTest):
             ci.check_versions(self.root, self.base)
             with self.assertRaisesRegex(ci.CIError, "chart version must increase"):
                 ci.check_versions(self.root, self.base, include_untracked=True)
+
+
+class LocalServiceBuildTests(TempTreeTest):
+    """A developer rebuilding one service should pin only that service."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_chart(
+            "deploy/helm/helx-chart",
+            name="helx",
+            version="4.6.1",
+            dependencies=(
+                "dependencies:\n"
+                "  - name: api\n"
+                "    version: 1.0.0\n"
+                "    repository: oci://example.invalid/charts\n"
+                "  - name: worker\n"
+                "    version: 2.0.0\n"
+                "    repository: oci://example.invalid/charts\n"
+            ),
+        )
+        self.write(
+            "deploy/helm/helx-chart/Chart.lock",
+            "dependencies:\n"
+            "  - name: api\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://example.invalid/charts\n"
+            "  - name: worker\n"
+            "    version: 2.0.0\n"
+            "    repository: oci://example.invalid/charts\n",
+        )
+        self.config = self.write(
+            "images.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [
+                        {
+                            "name": name,
+                            "component": component,
+                            "chart": f"services/{component}/chart",
+                            "repository": repository,
+                            "context": f"services/{component}",
+                            "dockerfile": f"services/{component}/Dockerfile",
+                            "sources": [f"services/{component}"],
+                            "excludes": [],
+                            **({"tag_path": tag_path} if tag_path else {}),
+                        }
+                        for name, component, repository, tag_path in (
+                            ("api", "api", "api", None),
+                            ("worker", "worker", "worker", None),
+                            ("worker-sidecar", "worker", "worker/sidecar", "sidecar.image.tag"),
+                        )
+                    ],
+                }
+            ),
+        )
+
+    def test_plan_lists_every_variant_of_a_service(self) -> None:
+        plan = ci.image_plan(self.root, ["worker"], config_path=self.config)
+        self.assertEqual(
+            [(item["name"], item["reference"]) for item in plan],
+            [
+                ("worker", f"{ci.REGISTRY}/worker"),
+                ("worker-sidecar", f"{ci.REGISTRY}/worker/sidecar"),
+            ],
+        )
+
+    def test_plan_without_a_filter_returns_everything(self) -> None:
+        self.assertEqual(len(ci.image_plan(self.root, None, config_path=self.config)), 3)
+
+    def test_plan_rejects_an_unknown_service(self) -> None:
+        with self.assertRaisesRegex(ci.CIError, "No image is configured for: nope"):
+            ci.image_plan(self.root, ["nope"], config_path=self.config)
+
+    def test_only_the_named_service_is_pinned(self) -> None:
+        overlay = ci.candidate_values(
+            self.root, "local", "abc1234", config_path=self.config,
+            services=["worker"], tag="dev-1",
+        )
+        # api keeps its released tag by being absent from the overlay entirely.
+        self.assertEqual(
+            overlay,
+            {"worker": {"image": {"tag": "dev-1"}, "sidecar": {"image": {"tag": "dev-1"}}}},
+        )
+
+    def test_no_filter_still_pins_everything(self) -> None:
+        overlay = ci.candidate_values(
+            self.root, "develop", "abc1234def", config_path=self.config
+        )
+        self.assertEqual(set(overlay), {"api", "worker"})
+        self.assertEqual(overlay["api"]["image"]["tag"], "develop-abc1234")
+
+    def test_an_empty_tag_falls_back_to_the_channel_tag(self) -> None:
+        # helm-build-chart.sh passes an empty CHART_IMAGE_TAG to mean "unset".
+        overlay = ci.candidate_values(
+            self.root, "local", "abc1234", config_path=self.config,
+            services=["worker"], tag="",
+        )
+        self.assertEqual(overlay["worker"]["image"]["tag"], "local-abc1234")
+
+    def test_literal_tag_is_validated(self) -> None:
+        for bad in ("not a tag", "-leading", "x" * 200):
+            with self.subTest(tag=bad), self.assertRaisesRegex(ci.CIError, "valid OCI image tag"):
+                ci.candidate_values(
+                    self.root, "local", "abc1234", config_path=self.config,
+                    services=["worker"], tag=bad,
+                )
+
+
+class ImagePlanContractTests(TempTreeTest):
+    """The Makefile reads image-plan positionally, so the column order is a contract.
+
+    Reordering the printed fields would keep every other test green while making
+    the Makefile push to the wrong image reference, so both halves are pinned here.
+    """
+
+    COLUMNS = ("component", "name", "reference", "context", "dockerfile")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_chart("services/api/chart", name="api", app_version="1.0.0")
+        self.write("services/api/Dockerfile", "FROM scratch\n")
+        self.write(
+            ".github/ci/images.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [
+                        {
+                            "name": "api",
+                            "component": "api",
+                            "chart": "services/api/chart",
+                            "repository": "renamed-api",
+                            "context": "services/api",
+                            "dockerfile": "services/api/Dockerfile",
+                            "sources": ["services/api"],
+                            "excludes": [],
+                        }
+                    ],
+                }
+            ),
+        )
+
+    def run_cli(self, *argv: str) -> list[list[str]]:
+        buffer = io.StringIO()
+        with patch.object(ci, "ROOT", self.root), contextlib.redirect_stdout(buffer):
+            self.assertEqual(ci.main(list(argv)), 0)
+        return [line.split("\t") for line in buffer.getvalue().splitlines() if line]
+
+    def test_cli_emits_the_documented_columns_in_order(self) -> None:
+        rows = self.run_cli("image-plan")
+        self.assertTrue(rows)
+        for row in rows:
+            self.assertEqual(len(row), len(self.COLUMNS))
+        plan = ci.image_plan(self.root, None)
+        self.assertEqual(
+            rows, [[str(item[column]) for column in self.COLUMNS] for item in plan]
+        )
+
+    def test_reference_is_registry_plus_repository_not_the_service_name(self) -> None:
+        # The 'ui' service publishes 'helx-ui', so the reference cannot be derived
+        # from the service name in shell; it has to come from this column.
+        (row,) = self.run_cli("image-plan")
+        self.assertEqual(row[self.COLUMNS.index("reference")], f"{ci.REGISTRY}/renamed-api")
+
+    def test_makefile_read_order_matches_the_cli(self) -> None:
+        makefile = SCRIPT.resolve().parents[2] / "Makefile"
+        if not makefile.is_file():  # pragma: no cover - only when run outside the repo
+            self.skipTest("Makefile not present")
+        found = re.findall(r"read -r ([a-z_ ]+?)\s*;", makefile.read_text(encoding="utf-8"))
+        self.assertTrue(found, "no 'read -r' consumer found in the Makefile")
+        for names in found:
+            self.assertEqual(tuple(names.split()), self.COLUMNS)
 
 
 if __name__ == "__main__":

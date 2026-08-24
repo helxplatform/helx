@@ -204,7 +204,7 @@ For deploying uncommitted work, see the next section.
 
 A Helm chart with dependencies cannot be rendered or installed from a directory
 until the dependency archives are physically present in its `charts/`
-subdirectory — Helm does not fetch them at install time. `make sync-locks` writes
+subdirectory. Helm does not fetch them at install time. `make sync-locks` writes
 only `Chart.lock`, which is metadata. `make ci-build-helx-chart` is what actually
 vendors every dependency and produces a self-contained `.tgz` you can install
 anywhere.
@@ -219,36 +219,60 @@ helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
   --values my-values.yaml
 ```
 
-**For work that is not pushed yet**, build everything locally:
+**For work that is not pushed yet**, build everything locally. Nothing has to
+reach GitHub:
 
 1. Make your changes, then bump the service chart `version:` and its pin in
    `deploy/helm/helx-chart/Chart.yaml`. `make ci-validate-everything` will tell
-   you if you miss either.
-2. Build the image and get it somewhere the cluster can pull from:
+   you if you miss either one.
+2. Build images for just the services you changed:
 
    ```bash
-   make docker-build SERVICE=<name>
-   # hosted cluster: tag and push under a personal tag
-   docker tag <image-id> containers.renci.org/helxplatform/<name>:dev-<you>-1
-   docker push containers.renci.org/helxplatform/<name>:dev-<you>-1
-   # local cluster instead: load it directly
-   kind load docker-image <name>:latest        # or: minikube image load <name>:latest
+   make ci-build-helx-images SERVICES="user-mutator ui"
    ```
-3. Package the umbrella. Every umbrella dependency resolves from your working
-   tree, so this picks up your modified service charts with no extra flags:
+
+   `TAG` defaults to `local-<short-sha>`. A service with several image variants,
+   like `appstore-sockets`, builds all of them.
+3. Get those images to your cluster. For a local cluster, load them directly —
+   no registry involved:
 
    ```bash
-   make ci-build-helx-chart
+   make ci-load-helx-images SERVICES="user-mutator ui"
    ```
-4. Install it, overriding the image tag for each service you rebuilt:
+
+   `kind`, `minikube`, and `k3d` are auto-detected; override with
+   `CLUSTER_TOOL=` and `CLUSTER_NAME=`. For Sterling/Azure/ASHE, push to Harbor
+   instead (`docker login containers.renci.org`):
 
    ```bash
-   helm upgrade --install helx /path/to/helx-<version>.tgz \
-     -n helx --create-namespace --values my-values.yaml \
-     --set user-mutator.image.tag=dev-<you>-1
+   make ci-push-helx-images SERVICES="user-mutator ui"
+   ```
+4. Package the umbrella with those services pinned to your tag:
+
+   ```bash
+   make ci-build-helx-chart SERVICES="user-mutator ui"
    ```
 
-The override keys are the umbrella dependency name plus the chart's own tag key:
+   Every umbrella dependency already resolves from your working tree, so this
+   picks up your modified charts. Passing `SERVICES` additionally writes your
+   image tag into the packaged values for **only those services** — everything
+   else stays on its released `v<appVersion>`. No `--set` flags needed.
+5. Install the `.tgz` it prints:
+
+   ```bash
+   helm upgrade --install helx /path/to/helx-<version>-local.tgz \
+     -n helx --create-namespace --values my-values.yaml
+   ```
+
+Use the same `SERVICES` and `TAG` for every step. Setting them once is easiest:
+
+```bash
+export SERVICES="user-mutator ui" TAG=dev-1
+make ci-build-helx-images ci-load-helx-images ci-build-helx-chart
+```
+
+To override an image tag by hand instead, the keys are the umbrella dependency
+name plus the chart's own tag key:
 
 ```text
 appstore.image.tag                      ldap-sync.image.tag

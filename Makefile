@@ -74,6 +74,14 @@ CHART_CHANNEL                   ?=
 CHART_CHANNEL_COMMIT            ?=
 HOOKS_PATH                      ?= .githooks
 
+# Local image builds. SERVICES names the services you rebuilt; only those get
+# pinned in the umbrella, so everything else stays on its released tag.
+SERVICES                        ?=
+TAG                             ?= local-$(shell git rev-parse --short=7 HEAD 2>/dev/null)
+# auto picks whichever of kind, minikube, or k3d is installed.
+CLUSTER_TOOL                    ?= auto
+CLUSTER_NAME                    ?=
+
 .DEFAULT_GOAL := help
 
 # Every target here mutates the same git repository -- the index lock,
@@ -122,6 +130,9 @@ HOOKS_PATH                      ?= .githooks
         ci-candidate-version \
         ci-build-helx-chart \
         ci-build-common-chart \
+        ci-build-helx-images \
+        ci-load-helx-images \
+        ci-push-helx-images \
         docker-build \
         pre-push \
         install-hooks
@@ -168,10 +179,20 @@ help:
 	@echo '  make ci-build-helx-chart                 Package the umbrella  [CHART_CHANNEL, CHART_CHANNEL_COMMIT]'
 	@echo '  make ci-candidate-version                Print the candidate chart version  [CHANNEL]'
 	@echo
+	@echo 'Deploying a local build (see README.md "DevEx"):'
+	@echo '  make ci-build-helx-images SERVICES="a b"  Build and tag images for those services  [TAG]'
+	@echo '  make ci-load-helx-images  SERVICES="a b"  Load them into kind/minikube/k3d  [CLUSTER_TOOL, CLUSTER_NAME]'
+	@echo '  make ci-push-helx-images  SERVICES="a b"  Push them to Harbor instead  [TAG]'
+	@echo '  make ci-build-helx-chart  SERVICES="a b"  Package the umbrella pinned to TAG for those services'
+	@echo
 	@echo 'Environment variables:'
 	@echo '  PYTHON=<path>          Interpreter to use (default $(VENV_PYTHON); skips venv setup)'
 	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
 	@echo '  SERVICE=<name>         Required by the per-service targets above'
+	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
+	@echo '  TAG=<tag>              Image tag for local builds (default local-<short-sha>)'
+	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
+	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
 	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
 	@echo '  CHECK_VERSIONS_FLAGS=  Set empty to compare committed revisions only'
 	@echo '  CHANNEL=<name>         Candidate channel name (default develop)'
@@ -470,6 +491,77 @@ ci-locked-deps: $(PYTHON_READY)
 ci-candidate-version: $(PYTHON_READY)
 	@$(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)"
 
+# require-services: the local image targets act on an explicit list, so that a
+# bare invocation cannot accidentally build every image in the repository.
+define require-services
+	@if test -z "$(SERVICES)"; then \
+		echo 'SERVICES is required, for example: make $@ SERVICES="user-mutator ui"'; \
+		echo "Services that produce images:"; \
+		$(PYTHON) $(CI_SCRIPT) image-plan | cut -f1 | sort -u | sed 's/^/  /'; \
+		exit 1; \
+	fi
+endef
+
+# ci-build-helx-images: Build and tag one image per configured variant of each
+# named service, using the same context and Dockerfile CI uses.
+ci-build-helx-images: $(PYTHON_READY)
+	$(call require-services)
+	@set -euo pipefail; \
+	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan --services "$(SERVICES)"); \
+	while IFS=$$'\t' read -r component name reference context dockerfile; do \
+		echo "Building $$reference:$(TAG)"; \
+		docker build -f "$$dockerfile" -t "$$reference:$(TAG)" "$$context"; \
+	done <<< "$$plan"
+	@echo 'Next: make ci-load-helx-images or make ci-push-helx-images, with the same SERVICES and TAG'
+
+# ci-load-helx-images: Load the built images straight into a local cluster, so
+# nothing has to reach a registry.
+ci-load-helx-images: $(PYTHON_READY)
+	$(call require-services)
+	@set -euo pipefail; \
+	tool="$(CLUSTER_TOOL)"; \
+	if test "$$tool" = auto; then \
+		for candidate in kind minikube k3d; do \
+			if command -v "$$candidate" >/dev/null 2>&1; then tool="$$candidate"; break; fi; \
+		done; \
+	fi; \
+	if test "$$tool" = auto; then \
+		echo "No local cluster tool found. Install kind, minikube, or k3d,"; \
+		echo "or use 'make ci-push-helx-images' to push to Harbor instead."; \
+		exit 1; \
+	fi; \
+	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan --services "$(SERVICES)"); \
+	while IFS=$$'\t' read -r component name reference context dockerfile; do \
+		if ! docker image inspect "$$reference:$(TAG)" >/dev/null 2>&1; then \
+			echo "$$reference:$(TAG) has not been built."; \
+			echo 'Run: make ci-build-helx-images SERVICES="$(SERVICES)" TAG=$(TAG)'; \
+			exit 1; \
+		fi; \
+		echo "Loading $$reference:$(TAG) into $$tool"; \
+		case "$$tool" in \
+			kind) kind load docker-image "$$reference:$(TAG)" $${CLUSTER_NAME:+--name "$(CLUSTER_NAME)"} ;; \
+			minikube) minikube image load "$$reference:$(TAG)" ;; \
+			k3d) k3d image import "$$reference:$(TAG)" $${CLUSTER_NAME:+-c "$(CLUSTER_NAME)"} ;; \
+			*) echo "Unsupported CLUSTER_TOOL: $$tool"; exit 1 ;; \
+		esac; \
+	done <<< "$$plan"
+
+# ci-push-helx-images: Push the built images to Harbor, for a cluster that
+# cannot be loaded into directly. Requires docker login containers.renci.org.
+ci-push-helx-images: $(PYTHON_READY)
+	$(call require-services)
+	@set -euo pipefail; \
+	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan --services "$(SERVICES)"); \
+	while IFS=$$'\t' read -r component name reference context dockerfile; do \
+		if ! docker image inspect "$$reference:$(TAG)" >/dev/null 2>&1; then \
+			echo "$$reference:$(TAG) has not been built."; \
+			echo 'Run: make ci-build-helx-images SERVICES="$(SERVICES)" TAG=$(TAG)'; \
+			exit 1; \
+		fi; \
+		echo "Pushing $$reference:$(TAG)"; \
+		docker push "$$reference:$(TAG)"; \
+	done <<< "$$plan"
+
 # ci-build-common-chart: Vendor dependencies, lint, and package the shared
 # library chart. It lives outside services/, so ci-build-chart cannot reach it.
 ci-build-common-chart: $(PYTHON_READY)
@@ -478,12 +570,18 @@ ci-build-common-chart: $(PYTHON_READY)
 # ci-build-helx-chart: Package the umbrella chart. Set CHART_CHANNEL to build a
 # candidate; CHART_CHANNEL_COMMIT defaults to HEAD.
 ci-build-helx-chart: $(PYTHON_READY)
-	@commit="$(CHART_CHANNEL_COMMIT)"; \
-	if test -n "$(CHART_CHANNEL)" && test -z "$$commit"; then \
+	@channel="$(CHART_CHANNEL)"; \
+	if test -n "$(SERVICES)" && test -z "$$channel"; then channel=local; fi; \
+	commit="$(CHART_CHANNEL_COMMIT)"; \
+	if test -n "$$channel" && test -z "$$commit"; then \
 		commit=$$(git rev-parse HEAD); \
-		echo "CHART_CHANNEL_COMMIT defaulted to $$commit"; \
 	fi; \
-	PYTHON="$(PYTHON)" CHART_CHANNEL="$(CHART_CHANNEL)" CHART_CHANNEL_COMMIT="$$commit" \
+	if test -n "$(SERVICES)"; then \
+		echo "Pinning $(SERVICES) to $(TAG); every other image stays on its released tag"; \
+	fi; \
+	PYTHON="$(PYTHON)" CHART_CHANNEL="$$channel" CHART_CHANNEL_COMMIT="$$commit" \
+	CHART_CHANNEL_SERVICES="$(SERVICES)" \
+	CHART_IMAGE_TAG="$(if $(SERVICES),$(TAG),)" \
 		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
 
 # docker-build: Build one service image exactly as CI builds it

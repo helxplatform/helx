@@ -48,8 +48,10 @@ It performs these checks:
 2. run the focused tests for [`scripts/ci.py`](scripts/ci.py);
 3. validate every chart, lockfile, image definition, Dockerfile, and local
    dependency path;
-4. require chart `version` increases when an existing chart directory changes;
-5. require `appVersion` increases when an image's source changes;
+4. require chart `version` increases when a changed file would land in the
+   chart's package;
+5. require `appVersion` increases when a changed file would reach an image's
+   build context;
 6. run `actionlint` against the workflows;
 7. lint and package `deploy/helm/helx-common/chart`;
 8. lint and package every discovered `services/*/chart`;
@@ -68,6 +70,29 @@ published with different content. Manual validation runs have no base revision t
 compare against and are exempt. Changing a pull request's base branch emits a new
 `edited` run with the current base; rerunning an older workflow instead reuses
 that run's original commit and event payload.
+
+### What counts as a change
+
+A version bump is only demanded when a changed file can actually affect the
+artifact, and each artifact's own ignore file is the authority on that:
+
+- **Charts** consult the chart's `.helmignore`. Editing `.gitignore` cannot
+  change a package, so it never gates; editing `Chart.yaml`, `Chart.lock`,
+  `values.yaml`, `templates/`, or the `.helmignore` itself does. Every chart
+  must carry a `.helmignore` containing the baseline patterns in
+  `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
+  `templates/`; `validate-config` enforces both.
+- **Images** consult `excludes` in [`ci/images.yaml`](ci/images.yaml) and the
+  build context's `.dockerignore`. A path Docker never receives cannot change
+  the image. Only the pattern subset used here is supported, so `validate-config`
+  rejects `!` negation and `**` rather than mismatching them silently.
+
+Both matchers follow Go's `filepath.Match`, which Helm and Docker use: `*` and
+`?` never cross a path separator.
+
+The practical consequence is that the fix for a spurious version bump is usually
+to correct the ignore file, not to add a CI exception. If a README never reaches
+an image, add it to that service's `.dockerignore`.
 
 Manual dispatch accepts one image target or `all`. The target is validated against
 the normalized image inventory generated from [`ci/images.yaml`](ci/images.yaml);
@@ -285,9 +310,11 @@ chart and image inventory.
 For a chart:
 
 1. place service chart code under `services/<name>/chart`;
-2. use strict `x.y.z` chart versions;
-3. commit `Chart.lock` whenever dependencies are declared; and
-4. add a values override under `helm/lint-values/<chart-name>.yaml` only when
+2. commit a `.helmignore` carrying the baseline patterns; the version gate reads
+   it to decide what counts as a change;
+3. use strict `x.y.z` chart versions;
+4. commit `Chart.lock` whenever dependencies are declared; and
+5. add a values override under `helm/lint-values/<chart-name>.yaml` only when
    default values cannot be linted safely.
 
 For an image:

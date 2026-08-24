@@ -90,6 +90,12 @@ class ConfigValidationTests(TempTreeTest):
         self.write_chart("services/app/chart", name="app", app_version="2.0.0")
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
         self.write_chart("deploy/helm/helx-chart", name="helx")
+        for directory in (
+            "services/app/chart",
+            "deploy/helm/helx-common/chart",
+            "deploy/helm/helx-chart",
+        ):
+            self.write(f"{directory}/.helmignore", "\n".join(ci.REQUIRED_HELMIGNORE) + "\n")
         images = []
         for index, name in enumerate(("app", "worker")):
             source = f"sources/{index}"
@@ -607,6 +613,167 @@ class LockSyncTests(TempTreeTest):
         chart = self.chart_dir / "Chart.yaml"
         chart.write_text(chart.read_text().replace("1.2.3", "1.2.4"), encoding="utf-8")
         self.assertFalse(ci.lock_matches_chart(self.chart_dir))
+
+
+BASELINE_HELMIGNORE = "\n".join(ci.REQUIRED_HELMIGNORE) + "\n"
+
+
+class HelmIgnoreTests(TempTreeTest):
+    def rules(self, body: str) -> Path:
+        self.write_chart("services/api/chart", name="api")
+        return self.write("services/api/chart/.helmignore", body)
+
+    def test_bare_pattern_matches_a_base_name_at_any_depth(self) -> None:
+        chart = self.rules(".gitignore\n").parent
+        self.assertTrue(ci.helm_ignores(chart, ".gitignore"))
+        self.assertTrue(ci.helm_ignores(chart, "templates/.gitignore"))
+        self.assertFalse(ci.helm_ignores(chart, "Chart.yaml"))
+
+    def test_glob_matches_by_base_name(self) -> None:
+        chart = self.rules("*.swp\n").parent
+        self.assertTrue(ci.helm_ignores(chart, "templates/deployment.yaml.swp"))
+        self.assertFalse(ci.helm_ignores(chart, "templates/deployment.yaml"))
+
+    def test_pattern_with_a_slash_is_anchored(self) -> None:
+        chart = self.rules("charts/*/README.md\n").parent
+        self.assertTrue(ci.helm_ignores(chart, "charts/sub/README.md"))
+        self.assertFalse(ci.helm_ignores(chart, "README.md"))
+
+    def test_directory_rule_excludes_the_whole_subtree(self) -> None:
+        chart = self.rules(".git/\n").parent
+        self.assertTrue(ci.helm_ignores(chart, ".git/config"))
+        # A directory-only rule must not match a file of the same name.
+        self.assertFalse(ci.helm_ignores(chart, ".git"))
+
+    def test_negation_wins_when_it_is_matched_first(self) -> None:
+        chart = self.rules("!README.md\nREADME.md\n").parent
+        self.assertFalse(ci.helm_ignores(chart, "README.md"))
+
+    def test_comments_and_blank_lines_are_skipped(self) -> None:
+        chart = self.rules("# a comment\n\n.gitignore\n").parent
+        self.assertEqual(len(ci.helmignore_rules(chart)), 1)
+
+    def test_absent_helmignore_ignores_nothing(self) -> None:
+        self.write_chart("services/api/chart", name="api")
+        self.assertFalse(ci.helm_ignores(self.root / "services/api/chart", ".gitignore"))
+
+
+class PackagedChangeTests(TempTreeTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_chart("services/api/chart", name="api")
+        self.write("services/api/chart/.helmignore", BASELINE_HELMIGNORE)
+        self.chart_dir = self.root / "services/api/chart"
+
+    def test_ignored_file_does_not_gate(self) -> None:
+        self.assertFalse(
+            ci.packaged_change(self.root, self.chart_dir, ["services/api/chart/.gitignore"])
+        )
+
+    def test_packaged_file_gates(self) -> None:
+        for path in ("Chart.yaml", "Chart.lock", "values.yaml", "templates/deployment.yaml"):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    ci.packaged_change(self.root, self.chart_dir, [f"services/api/chart/{path}"])
+                )
+
+    def test_paths_outside_the_chart_do_not_gate(self) -> None:
+        self.assertFalse(ci.packaged_change(self.root, self.chart_dir, [".github/workflows/ci.yml"]))
+
+
+class HelmIgnoreValidationTests(TempTreeTest):
+    def build(self, body: str | None) -> None:
+        self.write_chart("services/api/chart", name="api")
+        self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
+        self.write_chart("deploy/helm/helx-chart", name="helx")
+        for directory in ("services/api/chart", "deploy/helm/helx-common/chart", "deploy/helm/helx-chart"):
+            if body is not None:
+                self.write(f"{directory}/.helmignore", body)
+
+    def test_compliant_charts_pass(self) -> None:
+        self.build(BASELINE_HELMIGNORE)
+        ci.validate_helmignore(self.root)
+
+    def test_missing_file_is_reported(self) -> None:
+        self.build(None)
+        with self.assertRaisesRegex(ci.CIError, "has no .helmignore"):
+            ci.validate_helmignore(self.root)
+
+    def test_missing_baseline_pattern_is_reported(self) -> None:
+        self.build(BASELINE_HELMIGNORE.replace(".gitignore\n", ""))
+        with self.assertRaisesRegex(ci.CIError, r"missing: \.gitignore"):
+            ci.validate_helmignore(self.root)
+
+    def test_excluding_an_essential_path_is_reported(self) -> None:
+        self.build(BASELINE_HELMIGNORE + "templates/\n")
+        with self.assertRaisesRegex(ci.CIError, "which every chart must package"):
+            ci.validate_helmignore(self.root)
+
+
+class DockerIgnoreTests(TempTreeTest):
+    def context(self, body: str) -> Path:
+        self.write("services/api/.dockerignore", body)
+        return self.root / "services/api"
+
+    def test_patterns_are_anchored_to_the_context_root(self) -> None:
+        context = self.context("*.log\n")
+        self.assertTrue(ci.docker_ignores(context, "build.log"))
+        # Docker's match does not cross a path separator.
+        self.assertFalse(ci.docker_ignores(context, "sub/build.log"))
+
+    def test_directory_excludes_its_subtree(self) -> None:
+        context = self.context("chart/\n")
+        self.assertTrue(ci.docker_ignores(context, "chart/Chart.yaml"))
+        self.assertFalse(ci.docker_ignores(context, "charts/Chart.yaml"))
+
+    def test_absent_file_excludes_nothing(self) -> None:
+        self.assertFalse(ci.docker_ignores(self.root / "services/api", "anything"))
+
+    def test_image_gate_skips_paths_docker_never_receives(self) -> None:
+        self.write_chart("services/api/chart", name="api", app_version="1.0.0")
+        self.write("services/api/Dockerfile", "FROM scratch\n")
+        self.context("README.md\n")
+        image = {
+            "name": "api",
+            "component": "api",
+            "chart": "services/api/chart",
+            "repository": "api",
+            "context": "services/api",
+            "dockerfile": "services/api/Dockerfile",
+            "sources": ["services/api"],
+            "excludes": [],
+        }
+        self.assertFalse(ci.image_source_changed(image, ["services/api/README.md"], self.root))
+        self.assertTrue(ci.image_source_changed(image, ["services/api/main.go"], self.root))
+        # Without a root there is no context to consult, so nothing is filtered.
+        self.assertTrue(ci.image_source_changed(image, ["services/api/README.md"]))
+
+    def test_unsupported_syntax_is_rejected(self) -> None:
+        self.write_chart("services/api/chart", name="api", app_version="1.0.0")
+        self.write("services/api/Dockerfile", "FROM scratch\n")
+        self.context("!keep.me\n")
+        config = self.write(
+            "images.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [
+                        {
+                            "name": "api",
+                            "component": "api",
+                            "chart": "services/api/chart",
+                            "repository": "api",
+                            "context": "services/api",
+                            "dockerfile": "services/api/Dockerfile",
+                            "sources": ["services/api"],
+                            "excludes": [],
+                        }
+                    ],
+                }
+            ),
+        )
+        with self.assertRaisesRegex(ci.CIError, "negation and"):
+            ci.validate_dockerignore(self.root, config)
 
 
 if __name__ == "__main__":

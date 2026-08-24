@@ -84,6 +84,19 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   helm-generated lock as the oracle.
 - `check-versions` runs on every pull request, not just those targeting the
   default branch, and on direct pushes to `develop`.
+- A version bump is only required when a changed file can affect the artifact.
+  Charts consult their own `.helmignore`, images consult `excludes` in
+  `.github/ci/images.yaml` plus the build context's `.dockerignore`. So editing
+  a chart's `.gitignore` never gates, while editing `Chart.lock` does.
+- Every chart must commit a `.helmignore` with the baseline patterns in
+  `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
+  `templates/`. `validate-config` enforces both, and also rejects `.dockerignore`
+  negation or `**`, which the gate cannot reason about.
+- Prefer fixing the ignore file over adding a CI exception. If a file never
+  reaches an image, add it to that service's `.dockerignore`.
+- `ambassador`, `pod-reaper`, and `resty` are content mirrors of
+  helxplatform/helx-chart, so local edits to them are destroyed by the next
+  `make pull-*`. Do not require patterns they lack upstream.
 - `helx-chart` dependencies use the GHCR OCI registry, not the old GitHub Pages
   repository. OCI consumers need GHCR registry authentication.
 - Chart-only changes should not trigger an image build; image workflows exclude

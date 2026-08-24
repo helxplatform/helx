@@ -36,6 +36,18 @@ UI_CHART_BRANCH                 ?= master
 USER_MUTATOR_PREFIX             ?= services/user-mutator
 USER_MUTATOR_BRANCH             ?= master
 
+# Vendored charts. helxplatform/helx-chart keeps several charts as
+# subdirectories, and git subtree cannot map a remote subdirectory to a local
+# prefix, so these are mirrored by content instead of merged. Local edits to a
+# mirrored chart are overwritten on the next pull.
+HELX_CHART_URL                  ?= https://github.com/helxplatform/helx-chart.git
+HELX_CHART_BRANCH               ?= master
+# Destination for each mirrored chart. `ambassador` also lives upstream and can
+# be mirrored by adding a prefix, a pull-ambassador target, and a pull-helx-chart
+# prerequisite.
+RESTY_CHART_PREFIX              ?= services/resty/chart
+POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
+
 .DEFAULT_GOAL := help
 
 .PHONY: help setup add-remotes add-subtrees \
@@ -59,6 +71,9 @@ USER_MUTATOR_BRANCH             ?= master
         pull-ui \
         pull-ui-chart \
         pull-user-mutator \
+        pull-helx-chart \
+        pull-resty \
+        pull-pod-reaper \
         pull-remotes pull-subtree
 
 #help: Show the available repository setup and subtree tasks
@@ -80,6 +95,12 @@ help:
 	@echo '  make pull-ui                       Pull ui/develop into services/ui'
 	@echo '  make pull-ui-chart                 Pull ui-chart/master into services/ui/chart'
 	@echo '  make pull-user-mutator             Pull user-mutator/master'
+	@echo
+	@echo 'Vendored charts (mirrored by content, not git subtree):'
+	@echo '  make pull-helx-chart               Mirror every chart below'
+	@echo '  make pull-resty                    Mirror helx-chart/$(HELX_CHART_BRANCH) charts/resty'
+	@echo '  make pull-pod-reaper               Mirror helx-chart/$(HELX_CHART_BRANCH) charts/pod-reaper'
+	@echo '  Local edits to these charts are overwritten; FORCE=1 skips the dirty check.'
 	@echo
 	@echo 'For another branch or prefix, use:'
 	@echo '  make pull-subtree REMOTE=appstore PREFIX=services/appstore BRANCH=develop'
@@ -128,6 +149,7 @@ add-remotes:
 	$(call ensure-remote,ui,$(UI_URL))
 	$(call ensure-remote,ui-chart,$(UI_CHART_URL))
 	$(call ensure-remote,user-mutator,$(USER_MUTATOR_URL))
+	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
 
 # add-subtree: Add a subtree unless its prefix is already present.
 define add-subtree
@@ -251,6 +273,51 @@ pull-user-mutator: add-remotes
 	$(call check-incoming,user-mutator,$(USER_MUTATOR_BRANCH))
 	git subtree pull --squash --prefix="$(USER_MUTATOR_PREFIX)" user-mutator "$(USER_MUTATOR_BRANCH)"
 
+# mirror-chart: Replace one local chart with a subdirectory of the fetched tree.
+# git subtree cannot map a remote subdirectory to a local prefix, so the chart is
+# copied by content. Staging is populated and validated before anything local is
+# removed, so a bad chart name leaves the working tree untouched.
+# $(1)=upstream charts/<name>  $(2)=local destination
+define mirror-chart
+	@set -euo pipefail; \
+	if test -z "$(FORCE)" && test -n "$$(git status --porcelain -- "$(2)" 2>/dev/null)"; then \
+		echo "REFUSING to overwrite $(2) -- uncommitted changes present:"; \
+		git status --short -- "$(2)"; \
+		echo "  Commit or stash them, or re-run with FORCE=1."; \
+		exit 1; \
+	fi; \
+	staging=$$(mktemp -d); \
+	trap 'rm -rf "$$staging"' EXIT; \
+	if ! git archive FETCH_HEAD "charts/$(1)" 2>/dev/null | tar -x --strip-components=2 -C "$$staging"; then \
+		echo "REFUSING to mirror -- charts/$(1) is not in helx-chart/$(HELX_CHART_BRANCH)"; \
+		exit 1; \
+	fi; \
+	if ! test -f "$$staging/Chart.yaml"; then \
+		echo "REFUSING to mirror -- charts/$(1)/Chart.yaml is not in helx-chart/$(HELX_CHART_BRANCH)"; \
+		exit 1; \
+	fi; \
+	rm -rf "$(2)"; \
+	mkdir -p "$(2)"; \
+	cp -R "$$staging"/. "$(2)"/; \
+	echo "Mirrored charts/$(1) -> $(2) ($$(sed -n 's/^version: *//p' "$(2)/Chart.yaml" | tr -d '\"'))"
+endef
+
+# pull-resty: Mirror the resty chart out of helxplatform/helx-chart.
+# Refuses to clobber uncommitted work; override with FORCE=1. To undo a pull:
+#   git checkout HEAD -- <prefix> && git clean -fd <prefix>
+pull-resty: add-remotes
+	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
+	$(call mirror-chart,resty,$(RESTY_CHART_PREFIX))
+
+# pull-pod-reaper: Mirror the pod-reaper chart out of helxplatform/helx-chart.
+pull-pod-reaper: add-remotes
+	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
+	$(call mirror-chart,pod-reaper,$(POD_REAPER_CHART_PREFIX))
+
+# pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart
+.NOTPARALLEL: pull-helx-chart
+pull-helx-chart: pull-resty pull-pod-reaper
+
 # pull-remotes: Pull every configured service subtree in sequence
 .NOTPARALLEL: pull-remotes
 pull-remotes: pull-appstore \
@@ -262,4 +329,5 @@ pull-remotes: pull-appstore \
 	pull-ldap-sync \
 	pull-ui \
 	pull-ui-chart \
-	pull-user-mutator
+	pull-user-mutator \
+	pull-helx-chart

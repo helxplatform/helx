@@ -1,0 +1,43 @@
+# Minimal values for testing the helx-ldap dependency in an existing namespace.
+# All other umbrella services are disabled.
+#
+# Create the referenced Secret first; do not put passwords in this file:
+#
+# kubectl -n <namespace> create secret generic openldap-credentials \\
+#   --from-literal=LDAP_ADMIN_PASSWORD='replace-me' \\
+#   --from-literal=LDAP_CONFIG_ADMIN_PASSWORD='replace-me'
+
+ambassador:
+  enabled: false
+appstore:
+  enabled: false
+appstore-sockets:
+  enabled: false
+backup-pvc-cronjob:
+  enabled: false
+image-utils:
+  enabled: false
+monitoring:
+  enabled: false
+nfs-server:
+  enabled: false
+nfsrods:
+  enabled: false
+nginx:
+  enabled: false
+pod-reaper:
+  enabled: false
+resty:
+  enabled: false
+search:
+  enabled: false
+ui:
+  enabled: false
+
+helx-ldap:
+  enabled: true
+  secret:
+    existingSecret: openldap-credentials
+  openldap:
+    global:
+      ldapDomain: example.org

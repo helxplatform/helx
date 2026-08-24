@@ -1,5 +1,6 @@
 .dockerignore
 build
+chart/
 node_modules
 *.log
 Dockerfile

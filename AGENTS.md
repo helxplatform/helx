@@ -1,0 +1,122 @@
+# Agent guidance for helx
+
+## Repository layout
+
+- This is a monorepo. Application and Helm sources live under `services/`; do not
+  restructure service directories without asking for approval.
+- Buildable image services are:
+  - `services/appstore` (`appstore` image)
+  - `services/appstore-prepuller/controller` (`appstore-prepuller` image)
+  - `services/appstore-sockets` (`appstore-sockets/server` and `appstore-sockets/monitoring` images)
+  - `services/ui` (`helx-ui` image, but we call it `ui` everywhere else in this repo)
+  - `services/user-mutator` (`user-mutator` image)
+- Other service directories are chart-only or utility/source-only. Helm charts
+  may be at the service root or under `services/<service>/chart/`.
+- The umbrella chart is `deploy/helm/helx-chart`.
+
+## CI and image publishing
+
+- There are three workflows and no per-service workflows:
+  - `.github/workflows/ci.yml` runs on pull requests and `workflow_dispatch`.
+    It only validates: charts are linted and packaged to `$RUNNER_TEMP`, images
+    build with `push: false`, and nothing leaves the runner.
+  - `.github/workflows/develop.yml` runs on pushes to `develop`. It validates
+    the same charts, publishes every image as `develop-<short-sha>`, then
+    publishes the candidate umbrella (see "Candidate channels").
+  - `.github/workflows/publish.yml` runs on pushes to `main`. It publishes
+    charts, publishes images as `v<appVersion>`, and creates the Git tag plus
+    GitHub Release when the umbrella `version:` increases.
+- Shared image build logic is in `.github/actions/build-service/action.yml` and
+  shared chart logic is in `.github/actions/publish-charts/action.yml`. Keep
+  workflows thin and reuse these actions.
+- Image tags come from chart metadata, not from Git tags or commit messages:
+  released images are `v<appVersion>` of the owning chart, and candidate images
+  are `<channel>-<short-sha>`. There is no automatic version bumping; bump
+  `appVersion` in the owning chart instead.
+- Images and BuildKit cache layers are pushed only to
+  `containers.renci.org/helxplatform/<image>`. Required image secrets are
+  `CONTAINERHUB_USERNAME` and `CONTAINERHUB_PASSWORD`; Docker Hub is not used.
+  However, even though the prefix of these variables is `CONTAINERHUB_`, the actual
+  name of the registry is Harbor. Please use that name when referring to the registry
+  itself.
+
+## Candidate channels
+
+A "candidate" is a single packaged umbrella chart published to a channel tag. 
+(e.g. `oci://ghcr.io/helxplatform/helm-charts/helx:4.6.0-develop`)
+
+- A candidate channel publishes one mutable prerelease umbrella chart that
+  tracks a branch. `develop` publishes `<umbrella version>-develop` to
+  `oci://ghcr.io/helxplatform/helm-charts/helx` and overwrites it on every push.
+- Candidates are SemVer prereleases, so they always sort below the matching
+  release and can never be mistaken for it.
+- Candidate mode is driven by `CHART_CHANNEL` and `CHART_CHANNEL_COMMIT` in
+  `.github/scripts/helm-build-chart.sh`, and only applies to the umbrella. In
+  this mode local service charts are vendored by name regardless of the version
+  pinned in `Chart.lock`, so the archive describes the branch tree rather than
+  what is already published.
+- Candidate image tags are written into the umbrella's `values.yaml` before
+  packaging and restored afterwards, because `helm package` cannot take value
+  overrides. Add `tag_path` to a service in `.github/ci/images.yaml` when its
+  chart does not read `image.tag`.
+- The immutability preflight is skipped for candidates and must stay that way;
+  it exists to protect released versions only.
+
+## Helm charts
+
+- Chart build, lint, package, and publication all go through
+  `.github/actions/publish-charts/action.yml`, which calls
+  `.github/scripts/helm-build-chart.sh`. Published charts go to
+  `oci://ghcr.io/helxplatform/helm-charts/`.
+- Chart versions are immutable in OCI registries. Bump `version:` in
+  `Chart.yaml` for chart changes that have already been published.
+- A dependency that also exists in this tree must be pinned to exactly the
+  in-tree chart's version. `validate-config` enforces this. Without it the
+  version comparison in `helm-build-chart.sh` silently decides whether a chart
+  is vendored from the tree or pulled from the registry, so bumping a service
+  chart without bumping the umbrella pin would drop it from the umbrella with no
+  warning. Bumping a service chart and the umbrella pin is one change.
+- Every dependency is pinned to an exact version, so `Chart.lock` is derivable
+  from `Chart.yaml` with no registry access. Regenerate it with
+  `python .github/scripts/ci.py sync-lock <chart-dir>` rather than
+  `helm dependency update`; `--check` verifies without writing. The digest
+  reproduces Helm's `resolver.HashReq` and is covered by a test using a
+  helm-generated lock as the oracle.
+- `check-versions` runs on every pull request, not just those targeting the
+  default branch, and on direct pushes to `develop`.
+- A version bump is only required when a changed file can affect the artifact.
+  Charts consult their own `.helmignore`, images consult `excludes` in
+  `.github/ci/images.yaml` plus the build context's `.dockerignore`. So editing
+  a chart's `.gitignore` never gates, while editing `Chart.lock` does.
+- Every chart must commit a `.helmignore` with the baseline patterns in
+  `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
+  `templates/`. `validate-config` enforces both, and also rejects `.dockerignore`
+  negation or `**`, which the gate cannot reason about.
+- `check-versions` compares committed revisions, so an uncommitted or untracked
+  chart file is invisible to it.
+- Prefer fixing the ignore file over adding a CI exception. If a file never
+  reaches an image, add it to that service's `.dockerignore`.
+- `ambassador`, `pod-reaper`, and `resty` are content mirrors of
+  helxplatform/helx-chart, so local edits to them are destroyed by the next
+  `make pull-*`. Do not require patterns they lack upstream.
+- `helx-chart` dependencies use the GHCR OCI registry, not the old GitHub Pages
+  repository. OCI consumers need GHCR registry authentication.
+- Chart-only changes should not trigger an image build; image workflows exclude
+  nested `chart/` paths.
+
+## Validation and safety
+
+- Use `helm lint` on the affected chart, then the complete chart set when
+  practical. Dependency archives are not checked in. CI does not run
+  `helm dependency update`; `prepare_dependencies` in
+  `.github/scripts/helm-build-chart.sh` vendors each locked dependency itself,
+  preferring an in-tree chart and pulling from the registry otherwise.
+- Validate workflow/action YAML and inspect project diagnostics after edits.
+- Preserve unrelated user changes, including untracked directories such as
+  `deployments/argocd/`; do not commit or create branches unless requested.
+
+## Other rules
+
+- Do not revert changes that you notice happen that you don't expect. They are very
+  likely intentional changes made by the user. If you think it relevant, you may
+  ask the user whether they made the changes or if they were unintentional.

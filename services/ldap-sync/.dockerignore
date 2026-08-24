@@ -1,0 +1,5 @@
+.dockerignore
+chart/
+.git/
+.gitignore
+README.md

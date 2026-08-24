@@ -50,6 +50,15 @@ POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
 
 .DEFAULT_GOAL := help
 
+# Every target here mutates the same git repository -- the index lock,
+# FETCH_HEAD, and subtree merges are all shared -- so nothing in this file is
+# safe to run concurrently. GNU make 3.81 (the make macOS ships) ignores any
+# prerequisites given to .NOTPARALLEL and serializes the whole file regardless,
+# so this is stated bare: it is exactly what already happens, and it keeps the
+# same meaning on make 4.4+, where a prerequisite list would silently narrow it
+# to only the listed targets' prerequisites.
+.NOTPARALLEL:
+
 .PHONY: help setup add-remotes add-subtrees \
         add-subtree-appstore \
         add-subtree-appstore-chart \
@@ -315,11 +324,9 @@ pull-pod-reaper: add-remotes
 	$(call mirror-chart,pod-reaper,$(POD_REAPER_CHART_PREFIX))
 
 # pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart
-.NOTPARALLEL: pull-helx-chart
 pull-helx-chart: pull-resty pull-pod-reaper
 
 # pull-remotes: Pull every configured service subtree in sequence
-.NOTPARALLEL: pull-remotes
 pull-remotes: pull-appstore \
 	pull-appstore-chart \
 	pull-appstore-prepuller \

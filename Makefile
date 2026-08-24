@@ -188,8 +188,8 @@ help:
 	@echo 'For another branch or prefix, use:'
 	@echo '  make pull-subtree REMOTE=appstore PREFIX=services/appstore BRANCH=develop'
 
-# setup: Add all remotes and missing service subtrees
-setup: add-subtrees
+# setup: Add all remotes and missing service subtrees, plus install git hooks
+setup: add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected URL.
 define ensure-remote

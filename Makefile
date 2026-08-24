@@ -34,7 +34,7 @@ UI_BRANCH                       ?= develop
 UI_CHART_PREFIX                 ?= services/ui/chart
 UI_CHART_BRANCH                 ?= master
 USER_MUTATOR_PREFIX             ?= services/user-mutator
-USER_MUTATOR_BRANCH             ?= master
+USER_MUTATOR_BRANCH             ?= develop
 
 # Vendored charts. helxplatform/helx-chart keeps several charts as
 # subdirectories, and git subtree cannot map a remote subdirectory to a local

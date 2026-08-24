@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -774,6 +775,62 @@ class DockerIgnoreTests(TempTreeTest):
         )
         with self.assertRaisesRegex(ci.CIError, "negation and"):
             ci.validate_dockerignore(self.root, config)
+
+
+class UntrackedChangeTests(TempTreeTest):
+    """A local run must be able to see what CI will see once files are committed."""
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.git("init", "-q")
+        self.write_chart("services/api/chart", name="api", version="1.0.0")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+
+    def test_untracked_file_is_invisible_by_default(self) -> None:
+        # The exact shape of the bug: a newly created .helmignore is packaged, so
+        # it changes the chart, but base..HEAD cannot see it until it is committed.
+        self.write("services/api/chart/.helmignore", ".gitignore\n")
+        self.assertEqual(ci.changed_paths(self.root, self.base), [])
+        self.assertEqual(
+            ci.changed_paths(self.root, self.base, include_untracked=True),
+            ["services/api/chart/.helmignore"],
+        )
+
+    def test_uncommitted_modification_is_invisible_by_default(self) -> None:
+        chart = self.root / "services/api/chart/Chart.yaml"
+        chart.write_text(chart.read_text() + "description: edited\n", encoding="utf-8")
+        self.assertEqual(ci.changed_paths(self.root, self.base), [])
+        self.assertEqual(
+            ci.changed_paths(self.root, self.base, include_untracked=True),
+            ["services/api/chart/Chart.yaml"],
+        )
+
+    def test_gitignored_files_stay_out_of_both_modes(self) -> None:
+        self.write(".gitignore", "ignored/\n")
+        self.write("ignored/junk.txt", "junk")
+        self.assertNotIn(
+            "ignored/junk.txt", ci.changed_paths(self.root, self.base, include_untracked=True)
+        )
+
+    def test_version_gate_catches_an_untracked_chart_file(self) -> None:
+        self.write("services/api/chart/.helmignore", ".gitignore\n")
+        empty = {"registry": ci.REGISTRY, "images": []}
+        with patch.object(ci, "load_images_config", return_value=empty):
+            # Committed history alone shows nothing to gate on.
+            ci.check_versions(self.root, self.base)
+            with self.assertRaisesRegex(ci.CIError, "chart version must increase"):
+                ci.check_versions(self.root, self.base, include_untracked=True)
 
 
 if __name__ == "__main__":

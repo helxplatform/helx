@@ -92,6 +92,8 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
   `templates/`. `validate-config` enforces both, and also rejects `.dockerignore`
   negation or `**`, which the gate cannot reason about.
+- `check-versions` compares committed revisions, so an uncommitted or untracked
+  chart file is invisible to it.
 - Prefer fixing the ignore file over adding a CI exception. If a file never
   reaches an image, add it to that service's `.dockerignore`.
 - `ambassador`, `pod-reaper`, and `resty` are content mirrors of

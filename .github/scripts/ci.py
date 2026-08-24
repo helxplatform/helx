@@ -895,10 +895,22 @@ def git_run(root: Path, *args: str, check: bool = True) -> subprocess.CompletedP
     return result
 
 
-def changed_paths(root: Path, base: str) -> list[str]:
-    """Return files changed from base to HEAD."""
-    result = git_run(root, "diff", "--name-only", "--diff-filter=ACDMRTUXB", f"{base}..HEAD", "--")
-    return [line for line in result.stdout.splitlines() if line]
+def changed_paths(root: Path, base: str, include_untracked: bool = False) -> list[str]:
+    """Return files changed from base to HEAD.
+
+    CI always compares committed revisions, which is what it will publish. With
+    include_untracked the working tree is compared instead and untracked files
+    are added, so a local run sees what CI will see once everything is
+    committed. Without it, an uncommitted or untracked chart file is invisible
+    and a local check can pass where CI fails.
+    """
+    revision = base if include_untracked else f"{base}..HEAD"
+    result = git_run(root, "diff", "--name-only", "--diff-filter=ACDMRTUXB", revision, "--")
+    paths = [line for line in result.stdout.splitlines() if line]
+    if include_untracked:
+        others = git_run(root, "ls-files", "--others", "--exclude-standard")
+        paths.extend(line for line in others.stdout.splitlines() if line)
+    return sorted(dict.fromkeys(paths))
 
 
 def git_file(root: Path, revision: str, path: str) -> str | None:
@@ -937,10 +949,15 @@ def packaged_change(root: Path, chart_dir: Path, paths: Iterable[str]) -> bool:
     return False
 
 
-def check_versions(root: Path, base: str, config_path: Path | None = None) -> None:
+def check_versions(
+    root: Path,
+    base: str,
+    config_path: Path | None = None,
+    include_untracked: bool = False,
+) -> None:
     """Ensure changed chart and image versions increase over the base revision."""
     git_run(root, "rev-parse", "--verify", f"{base}^{{commit}}")
-    paths = changed_paths(root, base)
+    paths = changed_paths(root, base, include_untracked)
     errors: list[str] = []
     chart_dirs = discover_chart_dirs(root)
     for chart_dir in chart_dirs:
@@ -1333,6 +1350,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     versions = commands.add_parser("check-versions")
     versions.add_argument("--base", required=True)
+    versions.add_argument(
+        "--include-untracked",
+        action="store_true",
+        help="also consider uncommitted and untracked files, matching what CI "
+        "will see once everything is committed",
+    )
 
     images = commands.add_parser("image-matrix")
     image_selection = images.add_mutually_exclusive_group(required=True)
@@ -1390,7 +1413,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_count = len(load_images_config(ROOT / IMAGES_FILE)["images"])
             print(f"Validated {len(charts)} charts and {image_count} images")
         elif args.command == "check-versions":
-            check_versions(ROOT, args.base)
+            check_versions(ROOT, args.base, include_untracked=args.include_untracked)
             print("Version checks passed")
         elif args.command == "image-matrix":
             if args.channel is not None and args.commit is None:

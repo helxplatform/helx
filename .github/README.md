@@ -342,13 +342,20 @@ Install the one Python dependency and run focused checks:
 python3 -m pip install -r .github/requirements-ci.txt
 python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 python3 .github/scripts/ci.py validate-config
-python3 .github/scripts/ci.py check-versions --base HEAD^
+python3 .github/scripts/ci.py check-versions --base origin/develop --include-untracked
 python3 .github/scripts/ci.py sync-lock deploy/helm/helx-chart --check
 bash -n .github/scripts/helm-build-chart.sh .github/scripts/helm-preflight.sh
 bash .github/scripts/helm-build-chart.sh deploy/helm/helx-common/chart
 bash .github/scripts/helm-build-chart.sh deploy/helm/helx-chart
 git diff --check
 ```
+
+`check-versions` compares committed revisions by default, which is what CI does
+and what publication acts on. Pass `--include-untracked` for local runs: it
+compares the working tree and adds untracked files, so a check that passes
+locally does not then fail in CI once you commit. Creating a chart file such as
+`.helmignore` is the usual way to hit that, because it is packaged into the chart
+and therefore requires a version bump.
 
 Run `actionlint` 1.7.12 or newer for workflow validation. The workflow pins the
 official 1.7.12 Linux archive checksum.

@@ -47,15 +47,26 @@ appstore:
     GITHUB_CLIENT_ID: "< secret >"
     GITHUB_SECRET: "< secret >"
 
-nfs-server:
-  enabled: false
-
-nginx:
+resty:
   service:
     serverName: helx.example.com
+  ingress:
+    # New installations should create an Ingress rather than request a static IP.
+    create: true
   SSL:
+    # The TLS Secret is caller-managed; no chart creates it. Create it first:
+    #   kubectl create secret tls example-tls-secret --key tls.key --cert tls.crt
+    # This key is named nginxTLSSecret, not restyTLSSecret.
     nginxTLSSecret: example-tls-secret
 ```
+
+Values are keyed by dependency name, so a block naming something the umbrella
+does not depend on is silently ignored. Check `resty.enabled` and the other
+`<name>.enabled` entries in the values table below for the current set.
+
+`resty.ingress.create` and `resty.ingress.tls.enabled` (which defaults to true)
+together require `resty.SSL.nginxTLSSecret`; the chart refuses to render without
+it rather than emitting an Ingress with an empty `secretName`.
 
 To deploy HeLx using the values.yaml use the following command.
 ```

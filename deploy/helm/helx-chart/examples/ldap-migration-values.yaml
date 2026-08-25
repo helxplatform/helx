@@ -1,0 +1,56 @@
+# Values for a one-time HeLx LDAP migration during an existing Helm release
+# upgrade. Verify the names and back up the HeLx LDAP PVC before using this file.
+# The values below are examples; replace the legacy PVC and Secret names with
+# live values.
+#
+# This file intentionally disables unrelated dependencies so it can be used for
+# a HeLx LDAP-only migration render or upgrade.
+
+ambassador:
+  enabled: false
+appstore:
+  enabled: false
+appstore-prepuller:
+  enabled: false
+appstore-sockets:
+  enabled: false
+backup-pvc-cronjob:
+  enabled: false
+image-utils:
+  enabled: false
+monitoring:
+  enabled: false
+nfs-server:
+  enabled: false
+nfsrods:
+  enabled: false
+nginx:
+  enabled: false
+ldap-sync:
+  enabled: false
+pod-reaper:
+  enabled: false
+resty:
+  enabled: false
+search:
+  enabled: false
+ui:
+  enabled: false
+user-mutator:
+  enabled: false
+
+helx-ldap:
+  enabled: true
+  openldap:
+    migration:
+      enabled: true
+      legacyPvc: "data-legacy-statefulset-0"
+    persistence:
+      existingClaim: "data-legacy-statefulset-0"
+  secret:
+    # The migration hook creates this target from legacySecret. Keep this
+    # caller-managed Secret name for subsequent upgrades.
+    existingSecret: openldap-credentials
+    migration:
+      enabled: true
+      legacySecret: "legacy-credentials-secret"

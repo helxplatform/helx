@@ -1,5 +1,5 @@
 {{- if .Values.configuration.enabled }}
-{{- $credentialsSecret := required "helx-ldap: configuration.existingSecret or openldap.global.existingSecret is required when configuration is enabled" (include "helx-ldap.credentialsSecret" .) -}}
+{{- $credentialsSecret := include "helx-ldap.credentialsSecret" . -}}
 {{- $serviceName := default (default "openldap" .Values.openldap.fullnameOverride) .Values.configuration.serviceName -}}
 {{- $imageRepository := default .Values.openldap.image.repository .Values.configuration.image.repository -}}
 {{- $imageTag := default .Values.openldap.image.tag .Values.configuration.image.tag -}}

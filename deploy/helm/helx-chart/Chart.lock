@@ -10,7 +10,7 @@ dependencies:
   version: 0.1.2
 - name: helx-ldap
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 0.1.3
+  version: 0.1.5
 - name: ldap-sync
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.2.1
@@ -26,5 +26,5 @@ dependencies:
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 1.6.3
-digest: sha256:fc9ab2cb35e8a61e0611eb331848205f04fbe4ec44c8dcb4aeebc489631f5e76
-generated: '2026-08-25T00:08:23.317674+00:00'
+digest: sha256:78abbb82c63d757f2321ef2de3c0fd02d0825e745c69e5a129029004c77f71ab
+generated: '2026-08-25T15:12:14.355092+00:00'

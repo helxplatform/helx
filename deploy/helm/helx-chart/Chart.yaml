@@ -33,7 +33,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-prepuller
     condition: appstore-prepuller.enabled
-    version: "0.1.1"
+    version: "0.1.2"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: helx-ldap
     condition: helx-ldap.enabled

@@ -80,11 +80,11 @@ pull request, made by the person who knows whether their change is a patch, a
 minor, or a major:
 
 ```text
-released 4.6.2      -> develop still at 4.6.2, next pull request must raise it
-pull request picks 4.6.3  -> merges, candidates publish to 4.6.3-develop
-next pull request, no change -> merges, still 4.6.3-develop
-pull request picks 4.7.0   -> merges, candidates publish to 4.7.0-develop
-next pull request, no change -> merges, still 4.7.0-develop
+released 4.6.2                  -> develop still at 4.6.2, next pull request must raise it
+pull request picks 4.6.3        -> merges, candidates publish to 4.6.3-develop
+next pull request, no change    -> merges, still 4.6.3-develop
+pull request picks 4.7.0        -> merges, candidates publish to 4.7.0-develop
+next pull request, no change    -> merges, still 4.7.0-develop
 pull request into main at 4.7.0 -> releases 4.7.0
 ```
 

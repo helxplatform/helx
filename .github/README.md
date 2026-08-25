@@ -48,7 +48,7 @@ It performs these checks:
 2. run the focused tests for [`scripts/ci.py`](scripts/ci.py);
 3. validate every chart, lockfile, image definition, Dockerfile, and local
    dependency path;
-4. require chart `version` increases when a changed file would land in the
+4. require service chart `version` increases when a changed file would land in the
    chart's package;
 5. require `appVersion` increases when a changed file would reach an image's
    build context;
@@ -62,14 +62,44 @@ All charts are validated instead of maintaining a changed-chart dependency
 planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
 
-Version increases are required on **every** pull request, not only those
-targeting `main`, and again on direct pushes to `develop` and `main`. The
+Version increases in service charts are required on **every** pull request, not only 
+those targeting `main`, and again on direct pushes to `develop` and `main`. The
 `develop` candidate channel vendors service charts straight out of the tree, so a
 chart edited without a version bump would otherwise ship under a version already
 published with different content. Manual validation runs have no base revision to
-compare against and are exempt. Changing a pull request's base branch emits a new
-`edited` run with the current base; rerunning an older workflow instead reuses
-that run's original commit and event payload.
+compare against and are exempt.
+
+The umbrella chart is judged differently. It is published immutably only from
+`main`, so on a pull request into any other branch, and on direct pushes to
+`develop`, `--umbrella-above-release` applies: rather than having to increase on
+every change, its version need only sit **above the last published release**, and
+may not regress against the base. Its dependency pins are still enforced.
+
+The practical effect is one version decision per release cycle instead of one per
+pull request, made by the person who knows whether their change is a patch, a
+minor, or a major:
+
+```text
+released 4.6.2      -> develop still at 4.6.2, next pull request must raise it
+pull request picks 4.6.3  -> merges, candidates publish to 4.6.3-develop
+next pull request, no change -> merges, still 4.6.3-develop
+pull request picks 4.7.0   -> merges, candidates publish to 4.7.0-develop
+next pull request, no change -> merges, still 4.7.0-develop
+pull request into main at 4.7.0 -> releases 4.7.0
+```
+
+Nothing implements those channels. The candidate tag is derived from the umbrella
+version, so raising it to 4.7.0 simply starts publishing `4.7.0-develop`. Older
+channels such as `4.6.3-develop` stop being written to and become abandoned; use
+`make ci-candidate-version` to learn which one is current.
+
+Because develop always sits above the last release, `<version>-develop` is an
+honest preview of `<version>` and correctly sorts below it. "Last released" is
+resolved from the `v*` tags publication creates; before the first release there is
+nothing to sit above, so the umbrella is unconstrained.
+
+The required increase reappears on the pull request into `main`, where
+publication would otherwise fail the immutability preflight.
 
 ### What counts as a change
 

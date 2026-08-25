@@ -10,6 +10,8 @@ import sys
 import tarfile
 import tempfile
 import unittest
+
+import yaml
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1107,6 +1109,54 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
                 ci.check_versions(
                     self.root, self.base, include_untracked=True, umbrella_above_release=True
                 )
+
+
+class WorkflowShellSyntaxTests(unittest.TestCase):
+    """Every `run:` block must be valid bash.
+
+    A stray quote in a workflow parses fine as YAML and only fails when the step
+    executes in CI, which is an expensive place to learn about it. actionlint
+    catches this too, but only in CI; this runs locally via `make ci-tests` and
+    `make pre-push`.
+    """
+
+    def workflow_files(self) -> list[Path]:
+        root = SCRIPT.resolve().parents[2] / ".github"
+        return sorted(root.glob("workflows/*.yml")) + sorted(root.glob("actions/*/action.yml"))
+
+    def run_blocks(self, path: Path) -> list[tuple[str, str]]:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        steps: list[dict] = []
+        for spec in (document.get("jobs") or {}).values():
+            steps.extend(spec.get("steps") or [])
+        steps.extend((document.get("runs") or {}).get("steps") or [])
+        return [
+            (step.get("name") or "<unnamed>", step["run"])
+            for step in steps
+            if isinstance(step, dict) and step.get("run")
+        ]
+
+    def test_every_run_block_is_valid_bash(self) -> None:
+        files = self.workflow_files()
+        self.assertTrue(files, "no workflow or action files found")
+        checked = 0
+        for path in files:
+            for name, script in self.run_blocks(path):
+                with self.subTest(workflow=path.name, step=name):
+                    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
+                        handle.write(script)
+                        temporary = handle.name
+                    try:
+                        result = subprocess.run(
+                            ["bash", "-n", temporary], capture_output=True, text=True
+                        )
+                    finally:
+                        Path(temporary).unlink()
+                    self.assertEqual(
+                        result.returncode, 0, f"{path.name} step {name!r}: {result.stderr.strip()}"
+                    )
+                    checked += 1
+        self.assertGreater(checked, 10, "suspiciously few run blocks discovered")
 
 
 if __name__ == "__main__":

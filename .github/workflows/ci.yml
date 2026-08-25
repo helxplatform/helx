@@ -84,7 +84,7 @@ jobs:
           arguments=(check-versions --base "$BASE_SHA")
           if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
             arguments+=(--umbrella-above-release)
-            echo "Base is $BASE_REF, not $DEFAULT_BRANCH: the umbrella is judged against the last release.""
+            echo "Base is $BASE_REF, not $DEFAULT_BRANCH: the umbrella is judged against the last release."
           fi
           python .github/scripts/ci.py "${arguments[@]}"
 

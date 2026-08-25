@@ -317,6 +317,13 @@ That points `core.hooksPath` at [`.githooks/`](.githooks), so `git push` runs th
 same checks. No package manager, nothing downloaded. Bypass a single push with
 `git push --no-verify`, and uninstall with `git config --unset core.hooksPath`.
 
+The umbrella chart's version only has to sit **above the last release**, not
+increase on every change. So the first pull request after a release picks the
+next version — patch, minor, or major, whichever fits — and later pull requests
+leave it alone. Raising it starts publishing a new `<version>-develop` candidate
+channel; `make ci-candidate-version` tells you which is current. Umbrella
+dependency pins still have to move with the charts they point at.
+
 The version gate compares against `develop` by default and includes uncommitted
 and untracked files. That last part matters: without it a chart file you have
 created but not yet committed is invisible, and a local pass can still fail in

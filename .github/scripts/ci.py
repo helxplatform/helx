@@ -937,10 +937,25 @@ def _base_chart(root: Path, base: str, chart_dir: Path) -> dict[str, Any] | None
     return _yaml_mapping(content, f"{base}:{path}") if content is not None else None
 
 
-def _require_increase(current: str, previous: str, label: str) -> None:
-    """Require current to be a greater semantic version than previous."""
-    if SemVer.parse(current, label) <= SemVer.parse(previous, f"base {label}"):
-        raise CIError(f"{label} must increase above {previous!r}; current value is {current!r}")
+def _require_increase(
+    current: str, previous: str, label: str, allow_equal: bool = False, hint: str = ""
+) -> None:
+    """Require current to be a greater semantic version than previous.
+
+    With allow_equal the version may stay put but still may not regress, which
+    is what the umbrella needs on branches that never publish it immutably.
+    """
+    parsed = SemVer.parse(current, label)
+    baseline = SemVer.parse(previous, f"base {label}")
+    if allow_equal:
+        if parsed < baseline:
+            raise CIError(
+                f"{label} must not decrease below {previous!r}; current value is {current!r}"
+            )
+    elif parsed <= baseline:
+        raise CIError(
+            f"{label} must increase above {previous!r}; current value is {current!r}{hint}"
+        )
 
 
 def packaged_change(root: Path, chart_dir: Path, paths: Iterable[str]) -> bool:
@@ -960,13 +975,51 @@ def packaged_change(root: Path, chart_dir: Path, paths: Iterable[str]) -> bool:
     return False
 
 
+def last_released_version(root: Path) -> str | None:
+    """Return the highest v* release tag's version, or None if nothing is released.
+
+    Publication creates these tags, so they are the record of what exists
+    immutably in the registry. Tags that are not v<semver> are ignored.
+    """
+    result = git_run(root, "tag", "--list", "v*", check=False)
+    if result.returncode != 0:
+        return None
+    released: list[tuple[SemVer, str]] = []
+    for line in result.stdout.splitlines():
+        tag = line.strip()
+        if not tag.startswith("v"):
+            continue
+        try:
+            released.append((SemVer.parse(tag[1:], "release tag"), tag[1:]))
+        except CIError:
+            continue
+    if not released:
+        return None
+    return max(released, key=lambda item: item[0])[1]
+
+
 def check_versions(
     root: Path,
     base: str,
     config_path: Path | None = None,
     include_untracked: bool = False,
+    umbrella_above_release: bool = False,
 ) -> None:
-    """Ensure changed chart and image versions increase over the base revision."""
+    """Ensure changed chart and image versions increase over the base revision.
+
+    umbrella_above_release changes how the umbrella alone is judged: instead of
+    having to increase on every change, it must simply sit above the last
+    published release, and may not regress against the base. That lets several
+    service pull requests land on an integration branch while only the first one
+    after a release has to choose the next version -- and whoever chooses it
+    knows whether their change is a patch, a minor, or a major.
+
+    The candidate channel follows for free, because its tag is derived from this
+    version: raising it to 4.7.0 simply starts publishing 4.7.0-develop.
+
+    Publication from the default branch must never set this. Republishing one
+    umbrella version with different content is what the preflight refuses.
+    """
     git_run(root, "rev-parse", "--verify", f"{base}^{{commit}}")
     paths = changed_paths(root, base, include_untracked)
     errors: list[str] = []
@@ -979,11 +1032,36 @@ def check_versions(
         if previous is None:  # New or moved chart.
             continue
         current = read_yaml(chart_dir / "Chart.yaml")
+        is_umbrella = chart_dir.resolve() == (root / UMBRELLA_DIR).resolve()
+        current_version = metadata_value(current, "version", str(chart_dir / "Chart.yaml"))
+        base_version = metadata_value(
+            previous, "version", f"{base}:{relative_dir}/Chart.yaml"
+        )
+        if is_umbrella and umbrella_above_release:
+            released = last_released_version(root)
+            try:
+                # It may stand still across merges, but never go backwards.
+                _require_increase(
+                    current_version, base_version, f"{relative_dir} chart version",
+                    allow_equal=True,
+                )
+                # Nothing published yet means there is nothing to sit above.
+                if released is not None:
+                    _require_increase(
+                        current_version,
+                        released,
+                        f"{relative_dir} chart version",
+                        hint=(
+                            ". It must sit above the last published release, so this "
+                            "pull request needs to choose the next version"
+                        ),
+                    )
+            except CIError as exc:
+                errors.append(str(exc))
+            continue
         try:
             _require_increase(
-                metadata_value(current, "version", str(chart_dir / "Chart.yaml")),
-                metadata_value(previous, "version", f"{base}:{relative_dir}/Chart.yaml"),
-                f"{relative_dir} chart version",
+                current_version, base_version, f"{relative_dir} chart version"
             )
         except CIError as exc:
             errors.append(str(exc))
@@ -1432,6 +1510,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     versions = commands.add_parser("check-versions")
     versions.add_argument("--base", required=True)
     versions.add_argument(
+        "--umbrella-above-release",
+        action="store_true",
+        help="judge the umbrella against the last published release rather than "
+        "the base revision, so it need only be raised once per release cycle",
+    )
+    versions.add_argument(
         "--include-untracked",
         action="store_true",
         help="also consider uncommitted and untracked files, matching what CI "
@@ -1500,7 +1584,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_count = len(load_images_config(ROOT / IMAGES_FILE)["images"])
             print(f"Validated {len(charts)} charts and {image_count} images")
         elif args.command == "check-versions":
-            check_versions(ROOT, args.base, include_untracked=args.include_untracked)
+            check_versions(
+                ROOT,
+                args.base,
+                include_untracked=args.include_untracked,
+                umbrella_above_release=args.umbrella_above_release,
+            )
             print("Version checks passed")
         elif args.command == "image-matrix":
             if args.channel is not None and args.commit is None:

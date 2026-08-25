@@ -24,6 +24,13 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Create the bounded name used by the search bootstrap resources.
+*/}}
+{{- define "ldap-sync.searchBootstrapName" -}}
+{{- printf "%s-search-bootstrap" (include "ldap-sync.fullname" . | trunc 46 | trimSuffix "-") -}}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "ldap-sync.chart" -}}
@@ -68,4 +75,48 @@ extra permissions.
 */}}
 {{- define "ldap-sync.pvcGroupEnabled" -}}
 {{- ((((.Values.config).plugins).pvcGroup).enabled) | ternary "true" "" -}}
+{{- end }}
+
+{{/*
+Name of the chart-managed LDAP credential Secret.
+*/}}
+{{- define "ldap-sync.managedSecretName" -}}
+{{- printf "%s-secrets" (include "ldap-sync.fullname" . | trunc 55 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/*
+Resolve the bundled PostgreSQL dependency's fullname. This mirrors the
+cloudpirates chart's fullname helper so LDAP Sync can reference the dependency
+without duplicating a release-specific name in its templates.
+*/}}
+{{- define "ldap-sync.postgresFullname" -}}
+{{- if .Values.postgres.fullnameOverride -}}
+{{- .Values.postgres.fullnameOverride | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "postgres" .Values.postgres.nameOverride -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve the PostgreSQL Secret consumed by ldap-sync. With no explicit
+existingSecret, the PostgreSQL dependency creates a Secret with its fullname.
+*/}}
+{{- define "ldap-sync.postgresSecretName" -}}
+{{- default (include "ldap-sync.postgresFullname" .) .Values.postgres.auth.existingSecret -}}
+{{- end -}}
+
+{{/*
+Resolve the LDAP credential Secret selected by managed, existingSecret, or ESO mode.
+*/}}
+{{- define "ldap-sync.secretName" -}}
+{{- include "helx-common.secret.name.v1" (dict
+  "defaultName" (include "ldap-sync.managedSecretName" .)
+  "existingSecret" .Values.secret.existingSecret
+  "externalSecret" .Values.secret.externalSecret
+) -}}
 {{- end }}

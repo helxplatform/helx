@@ -9,7 +9,7 @@ Add the published library dependency to a service chart:
 ```yaml
 dependencies:
   - name: helx-common
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
 ```
 
@@ -77,6 +77,50 @@ configuration explicitly:
 Set `secret.externalSecret.targetName` when ESO should use a target distinct
 from the chart-managed Secret, for example during an explicit ownership
 handoff.
+
+### Optional arguments
+
+`preserveKeys` selects which keys the live Secret protects. Omit it and every
+persisted key wins over `values`, which is correct for a Secret holding only
+generated credentials. Supply it and exactly the listed keys are preserved while
+every other key tracks chart values, which is what a Secret mixing credentials
+with plain configuration needs:
+
+```gotemplate
+  "preserveKeys" (list "GENERATED_PASSWORD")
+```
+
+`retain` defaults to true and controls the `helm.sh/resource-policy: keep`
+annotation described below. Set it to false only for a Secret whose contents are
+fully reproducible from values.
+
+`type` sets the Kubernetes Secret type, for example `kubernetes.io/tls`.
+
+### Ownership handoffs
+
+The chart-managed Secret carries `helm.sh/resource-policy: keep`. Without it,
+switching a chart-managed Secret to `existingSecret` or ESO under the same name
+removes it from the rendered manifest and Helm deletes the live credentials
+during the same upgrade, even though the workload is about to mount that name.
+
+Helm reads that annotation from the **live** object, so it only protects a
+Secret that already carries it. A handoff therefore takes two upgrades:
+
+1. Upgrade to a chart version that renders the Secret through this helper. This
+   applies the annotation to the live Secret.
+2. In a later upgrade, set `existingSecret` (or enable ESO) for the same name.
+   Helm leaves the live Secret in place, keeping its release ownership metadata,
+   so a later return to chart-managed mode re-adopts the same object.
+
+Handing a same-named Secret to ESO needs one extra step: an ExternalSecret with
+`creationPolicy: Owner` refuses to overwrite a Secret it does not own. Either
+point `externalSecret.targetName` at a new name, or delete the retained Secret
+after the backend is populated and verified.
+
+Hook-based migration templates in the service charts cannot rely on this
+annotation. Helm's hook deletion path ignores `helm.sh/resource-policy`
+entirely, so those templates stop rendering once the target Secret is populated
+instead.
 
 Workloads resolve the selected name with:
 

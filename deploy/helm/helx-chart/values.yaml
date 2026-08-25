@@ -6,11 +6,17 @@
 appstore:
   # -- enable/disable deployment of appstore
   enabled: true
+appstore-prepuller:
+  # -- enable/disable deployment of appstore-prepuller
+  enabled: true
 appstore-sockets:
   # -- enable/disable deployment of appstore websockets service
   enabled: true
 helx-ldap:
   # -- enable/disable deployment of the HeLx LDAP service
+  enabled: true
+ldap-sync:
+  # -- enable/disable deployment of ldap-sync
   enabled: true
 backup-pvc-cronjob:
   # -- enable/disable deployment of backup-pvc-cronjob
@@ -47,6 +53,9 @@ search:
 ui:
   # -- enable/disable deployment of helx-ui
   enabled: true
+user-mutator:
+  # -- enable/disable deployment of user-mutator
+  enabled: false
 
 global:
   # tycho_api_service_name: helx-tycho-api

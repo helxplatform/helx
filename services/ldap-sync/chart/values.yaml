@@ -8,7 +8,7 @@ image:
   repository: containers.renci.org/helxplatform/ldap-sync
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  tag: secrets-options-test-1
 
 imagePullSecrets: []
 nameOverride: ""
@@ -78,20 +78,97 @@ tolerations: []
 affinity: {}
 
 loglevel: "info"
+
+# LDAP bind credential Secret contract. Select exactly one ownership mode:
+# existingSecret, secret.values, or secret.externalSecret.enabled.
+secret:
+  # -- Name of a caller-managed Secret containing SOURCE_BIND_PASSWORD and
+  # TARGET_BIND_PASSWORD. When set, the chart does not create or manage it.
+  existingSecret: ""
+
+  # -- Key/value pairs used to create the chart-managed LDAP credential Secret.
+  # Required keys are SOURCE_BIND_PASSWORD and TARGET_BIND_PASSWORD.
+  # Values are mounted as files and are never rendered into the ConfigMap.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate the LDAP credential Secret.
+  # This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to <fullname>-secrets.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- No differently named legacy Secret exists. Legacy bindPassword values
+    # are copied into managed Secret data only when chart-managed mode is used.
+    enabled: false
+
+# Reconcile the initial search through the ldap-sync API after the Service is ready.
+# Bind credentials should be supplied through secret.existingSecret,
+# secret.values, or External Secrets rather than committed to this file.
+searchBootstrap:
+  enabled: true
+  id: get-groups
+  filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+  refresh: 60
+  baseDN: ou=groups,dc=unc,dc=edu
+  oneShot: false
+  image:
+    repository: curlimages/curl
+    tag: 8.10.1
+    pullPolicy: IfNotPresent
+  job:
+    backoffLimit: 6
+    activeDeadlineSeconds: 600
+    ttlSecondsAfterFinished: 300
+    waitTimeoutSeconds: 300
+    retryIntervalSeconds: 5
+    rolloutImage:
+      repository: registry.k8s.io/kubectl
+      tag: v1.31.0
+      pullPolicy: IfNotPresent
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      runAsUser: 100
+      runAsNonRoot: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      seccompProfile:
+        type: RuntimeDefault
+
 config:
-  hooks: []
+  hooks:
+    - args:
+        - --baseGid=1025
+        - --baseGroup=helx-users
+      image:
+        repository: containers.renci.org/helxplatform/unc-group-x
+        tag: v2.3.2
+      name: unc-group-x
+      url: http://localhost:5001/hook
   hookRetry:
     maxRetries: 10
     initialDelayMs: 100
     maxDelayMs: 30000
   source:
-    url: ""
-    bindDN: "cn=admin,dc=example,dc=org"
+    url: "ldap://ldap.unc.edu/"
+    bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
+    # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
     bindPassword: ""
-    baseDN: "dc=example,dc=org"
+    baseDN: "dc=unc,dc=edu"
   target:
-    url: ""
+    url: "ldap://openldap/"
     bindDN: "cn=admin,dc=example,dc=org"
+    # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
     bindPassword: ""
     baseDN: "dc=example,dc=org"
   plugins:
@@ -100,7 +177,7 @@ config:
     # granting the service account get/list/create on PVCs.
     pvcGroup:
       enabled: true
-      storageClass: ""
+      storageClass: azurefile
       size: 10Gi
       accessModes:
         - ReadWriteMany
@@ -108,6 +185,21 @@ config:
 # PostgreSQL configuration
 postgres:
   enabled: true
+  # The dependency's fullname becomes <release-name>-ldap-sync-postgres.
+  nameOverride: ldap-sync-postgres
+
+  migration:
+    # -- Enable the one-time migration from the previous PostgreSQL names.
+    # This is valid only during a Helm upgrade of an existing release.
+    enabled: false
+    # -- Name of the PostgreSQL Secret from the previous chart deployment.
+    # This must be the old chart's computed Secret name. If unknown, it is
+    # likely <release-name>-postgres; verify it with kubectl before upgrading.
+    legacySecret: ""
+    # -- Name of the existing PostgreSQL PVC from the previous deployment.
+    # It is likely data-<release-name>-postgres-0, but verify it in the cluster.
+    legacyPvc: ""
+
   persistence:
     enabled: true
     size: 8Gi
@@ -116,11 +208,14 @@ postgres:
     username: ldapsync
     # Database name
     database: ldapsync
-    # Use the auto-generated secret with lookup function for password persistence
-    # IMPORTANT: Set this to "<your-release-name>-postgres" on install
-    # Example: --set postgres.auth.existingSecret=my-release-postgres
-    # For release name "ldap-sync", this default works
-    existingSecret: "ldap-sync-postgres"
+    # Leave empty to let the PostgreSQL dependency create its fullname-based
+    # Secret. Set this to a pre-created Secret to manage the password outside
+    # the dependency chart. During migration, set this to the new fullname so
+    # the migration hook can create the target Secret before the dependency
+    # starts, and keep it set afterwards: the migrated Secret is a hook resource
+    # the dependency does not own, so clearing this asks the dependency to
+    # create a Secret that already exists.
+    existingSecret: ""
     secretKeys:
       adminPasswordKey: postgres-password
   # SSL mode for PostgreSQL connection (disable, require, verify-ca, verify-full)

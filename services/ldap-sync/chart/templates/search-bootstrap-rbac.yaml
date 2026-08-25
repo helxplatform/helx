@@ -1,0 +1,42 @@
+{{- if .Values.searchBootstrap.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "ldap-sync.searchBootstrapName" . }}
+  labels:
+    {{- include "ldap-sync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: search-bootstrap
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "ldap-sync.searchBootstrapName" . }}
+  labels:
+    {{- include "ldap-sync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: search-bootstrap
+rules:
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "ldap-sync.searchBootstrapName" . }}
+  labels:
+    {{- include "ldap-sync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: search-bootstrap
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "ldap-sync.searchBootstrapName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ldap-sync.searchBootstrapName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

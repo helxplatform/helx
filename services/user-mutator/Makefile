@@ -104,9 +104,10 @@ clean:
 	rm -f webhook-server/$(BINARY_NAME)
 
 deploy-webhook-server: key-cert-secret
+	helm dependency build ./chart
 	helm -n $(WEBHOOK_NAMESPACE) upgrade --install $(CHART_NAME) \
 	    --set "image.pullPolicy=IfNotPresent" --set "image.tag=$(VERSION)" \
-		--set "config.secrets.cert=$(SECRET)" $(HELM_INSTALL_ARG_1) $(HELM_INSTALL_ARG_2) \
+		--set "secret.existingSecret=$(SECRET)" $(HELM_INSTALL_ARG_1) $(HELM_INSTALL_ARG_2) \
 		./chart
 	@echo ""
 	@echo "To view and follow the logs of the mutator use the following command."

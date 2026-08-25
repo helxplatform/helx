@@ -60,3 +60,63 @@ Create the name of the service account to use
 {{- default "default" .Values.serviceAccount.name }}
 {{- end }}
 {{- end }}
+
+{{/*
+Name of the chart-managed webhook TLS Secret.
+*/}}
+{{- define "user-mutator.tlsManagedSecretName" -}}
+{{- printf "%s-tls" (include "user-mutator.fullname" . | trunc 59 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/*
+Name of the webhook TLS Secret consumed by the Deployment.
+*/}}
+{{- define "user-mutator.tlsSecretName" -}}
+{{- include "helx-common.secret.name.v1" (dict
+  "defaultName" (include "user-mutator.tlsManagedSecretName" .)
+  "existingSecret" .Values.secret.existingSecret
+  "externalSecret" .Values.secret.externalSecret
+) -}}
+{{- end -}}
+
+{{/*
+Name of the chart-managed LDAP password Secret.
+*/}}
+{{- define "user-mutator.ldapManagedSecretName" -}}
+{{- printf "%s-ldap-password" (include "user-mutator.fullname" . | trunc 49 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/*
+Name of the LDAP password Secret consumed by the Deployment.
+*/}}
+{{- define "user-mutator.ldapSecretName" -}}
+{{- include "helx-common.secret.name.v1" (dict
+  "defaultName" (include "user-mutator.ldapManagedSecretName" .)
+  "existingSecret" .Values.ldap.secret.existingSecret
+  "externalSecret" .Values.ldap.secret.externalSecret
+) -}}
+{{- end -}}
+
+{{/*
+Build the application Secret alias-to-resource-name map. Known contracts are
+reserved so additional caller-managed entries cannot silently replace them.
+*/}}
+{{- define "user-mutator.effectiveSecretNames" -}}
+{{- if hasKey .Values.config "secrets" -}}
+  {{- fail "user-mutator: config.secrets was removed in chart 2.0.0; use secret.existingSecret, ldap.secret.existingSecret, or config.additionalSecrets" -}}
+{{- end -}}
+{{- $additionalSecrets := default (dict) .Values.config.additionalSecrets -}}
+{{- range $reservedKey := list "cert" "ldap-password" -}}
+  {{- if hasKey $additionalSecrets $reservedKey -}}
+    {{- fail (printf "user-mutator: config.additionalSecrets cannot override reserved key %q" $reservedKey) -}}
+  {{- end -}}
+{{- end -}}
+{{- $secretNames := dict "cert" (include "user-mutator.tlsSecretName" .) -}}
+{{- if .Values.config.features.ldap -}}
+  {{- $_ := set $secretNames "ldap-password" (include "user-mutator.ldapSecretName" .) -}}
+{{- end -}}
+{{- range $key, $secretName := $additionalSecrets -}}
+  {{- $_ := set $secretNames $key $secretName -}}
+{{- end -}}
+{{- toYaml $secretNames -}}
+{{- end -}}

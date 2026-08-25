@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
+import hashlib
 import json
 import re
 import subprocess
@@ -11,6 +13,7 @@ import sys
 import tarfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import total_ordering
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -29,6 +32,53 @@ SEMVER_RE = re.compile(
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
 )
 DIGEST_RE = re.compile(r"^Digest:\s*(sha256:[0-9a-f]{64})\s*$", re.MULTILINE)
+CHANNEL_RE = re.compile(r"^[a-z][0-9a-z]*(?:-[0-9a-z]+)*$")
+COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
+VALUES_PART_RE = re.compile(r"^[A-Za-z_][0-9A-Za-z_-]*$")
+SHORT_SHA_LENGTH = 7
+DEFAULT_TAG_PATH = "image.tag"
+# Field order of Helm's chart.Dependency struct. Everything except name and
+# repository carries omitempty, which the lock digest depends on reproducing.
+HELM_DEPENDENCY_FIELDS = (
+    "name",
+    "version",
+    "repository",
+    "condition",
+    "tags",
+    "enabled",
+    "import-values",
+    "alias",
+)
+HELM_LOCK_FIELDS = ("name", "version", "repository")
+# Baseline .helmignore patterns every chart must carry. The version gate reads
+# .helmignore to decide whether a changed file can affect the packaged chart, so
+# a chart missing these would gate on editor and VCS noise.
+#
+# Helm's default set also lists '*.orig', which is deliberately not required
+# here: ambassador, pod-reaper, and resty are content mirrors of
+# helxplatform/helx-chart, so a local edit to them is destroyed by the next
+# 'make pull-*'. Requiring a pattern they lack upstream would fail validation
+# after every mirror pull. Fix it upstream to add it here.
+REQUIRED_HELMIGNORE = (
+    ".DS_Store",
+    ".git/",
+    ".gitignore",
+    ".bzr/",
+    ".bzrignore",
+    ".hg/",
+    ".hgignore",
+    ".svn/",
+    "*.swp",
+    "*.bak",
+    "*.tmp",
+    "*~",
+    ".project",
+    ".idea/",
+    "*.tmproj",
+    ".vscode/",
+)
+# Paths a chart must always package, whatever its .helmignore says.
+ESSENTIAL_CHART_PATHS = ("Chart.yaml", "values.yaml", "templates/placeholder.yaml")
 REBUILD_ALL_IMAGE_PATHS = (
     ".github/actions/build-service",
     ".github/ci/images.yaml",
@@ -210,6 +260,225 @@ def exact_locked_dependencies(chart_dir: Path) -> list[Dependency]:
     return locked
 
 
+def glob_match(candidate: str, pattern: str) -> bool:
+    """Match a path against a glob the way Go's filepath.Match does.
+
+    Unlike fnmatch, '*' and '?' never cross a path separator, so the pattern and
+    the candidate must have the same number of segments.
+    """
+    pattern_parts = pattern.split("/")
+    candidate_parts = candidate.split("/")
+    if len(pattern_parts) != len(candidate_parts):
+        return False
+    return all(
+        fnmatch.fnmatchcase(part, expected)
+        for part, expected in zip(candidate_parts, pattern_parts)
+    )
+
+
+@dataclass(frozen=True)
+class IgnoreRule:
+    pattern: str
+    negate: bool
+    directory_only: bool
+
+    @property
+    def anchored(self) -> bool:
+        """Return whether the pattern matches a path rather than a base name."""
+        return "/" in self.pattern
+
+    def spelling(self) -> str:
+        """Return the pattern as it appears in .helmignore."""
+        return self.pattern + ("/" if self.directory_only else "")
+
+    def matches(self, relative: str, *, is_dir: bool) -> bool:
+        """Return whether this rule applies to a chart-relative path."""
+        if self.directory_only and not is_dir:
+            return False
+        target = relative if self.anchored else PurePosixPath(relative).name
+        return glob_match(target, self.pattern)
+
+
+def helmignore_rules(chart_dir: Path) -> list[IgnoreRule]:
+    """Parse .helmignore into ordered rules, following Helm's documented subset.
+
+    Helm supports shell globs, relative-path matching when the pattern contains
+    a slash, a trailing slash for directories, and '!' negation. It does not
+    support '**'.
+    """
+    path = chart_dir / ".helmignore"
+    if not path.is_file():
+        return []
+    rules: list[IgnoreRule] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        negate = entry.startswith("!")
+        if negate:
+            entry = entry[1:].strip()
+        directory_only = entry.endswith("/")
+        pattern = entry.rstrip("/").removeprefix("./")
+        if not pattern:
+            continue
+        rules.append(IgnoreRule(pattern, negate, directory_only))
+    return rules
+
+
+def helm_ignores(chart_dir: Path, relative: str) -> bool:
+    """Return whether Helm would leave a chart-relative path out of the package."""
+    rules = helmignore_rules(chart_dir)
+    if not rules:
+        return False
+    parts = PurePosixPath(relative).parts
+    # An ignored directory removes its whole subtree, so every ancestor counts,
+    # and Helm stops at the first rule that matches.
+    for depth in range(1, len(parts) + 1):
+        candidate = "/".join(parts[:depth])
+        is_dir = depth < len(parts)
+        for rule in rules:
+            if rule.matches(candidate, is_dir=is_dir):
+                return not rule.negate
+    return False
+
+
+def dockerignore_rules(context_dir: Path) -> list[str]:
+    """Parse .dockerignore into anchored patterns.
+
+    Docker matches every pattern against the context-relative path, so unlike
+    .helmignore there is no base-name matching. Only the subset actually used in
+    this repository is supported; anything else is rejected by
+    validate_dockerignore rather than silently mismatched.
+    """
+    path = context_dir / ".dockerignore"
+    if not path.is_file():
+        return []
+    patterns: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        entry = line.strip()
+        if not entry or entry.startswith("#"):
+            continue
+        pattern = entry.rstrip("/").removeprefix("./")
+        if pattern:
+            patterns.append(pattern)
+    return patterns
+
+
+def docker_ignores(context_dir: Path, relative: str) -> bool:
+    """Return whether Docker would keep a context-relative path out of the build."""
+    patterns = dockerignore_rules(context_dir)
+    if not patterns:
+        return False
+    parts = PurePosixPath(relative).parts
+    # An excluded directory removes its whole subtree, so test every ancestor.
+    for depth in range(1, len(parts) + 1):
+        candidate = "/".join(parts[:depth])
+        for pattern in patterns:
+            if glob_match(candidate, pattern):
+                return True
+    return False
+
+
+def validate_dockerignore(root: Path, config_path: Path | None = None) -> None:
+    """Reject .dockerignore syntax the image version gate cannot reason about."""
+    config = load_images_config(config_path or root / IMAGES_FILE)
+    errors: list[str] = []
+    seen: set[Path] = set()
+    for image in config["images"]:
+        context = _configured_path(root, image["context"], f"{image['name']}.context")
+        path = context / ".dockerignore"
+        if path in seen or not path.is_file():
+            continue
+        seen.add(path)
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            if entry.startswith("!") or "**" in entry:
+                errors.append(
+                    f"{relative_path(root, path)}:{number} uses {entry!r}; negation and '**' "
+                    "are not supported by the image version gate"
+                )
+    if errors:
+        raise CIError("Unsupported .dockerignore syntax:\n- " + "\n- ".join(errors))
+
+
+def _helm_dependency_json(values: dict[str, Any], *, minimal: bool = False) -> dict[str, Any]:
+    """Render one dependency the way Helm marshals chart.Dependency to JSON."""
+    rendered: dict[str, Any] = {}
+    for field in HELM_LOCK_FIELDS if minimal else HELM_DEPENDENCY_FIELDS:
+        value = values.get(field)
+        if field in ("name", "repository"):
+            rendered[field] = "" if value is None else value
+        elif value not in (None, "", [], False):
+            rendered[field] = value
+    return rendered
+
+
+def values_path_exists(values: Any, path: str) -> bool:
+    """Return whether a dotted path is declared in a chart's values mapping."""
+    current = values
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
+
+
+def lock_digest(chart_data: dict[str, Any], locked: list[Dependency]) -> str:
+    """Compute a Chart.lock digest exactly as Helm's resolver.HashReq does."""
+    declared = chart_data.get("dependencies") or []
+    request = [_helm_dependency_json(dict(item)) for item in declared]
+    resolved = [
+        _helm_dependency_json(
+            {"name": item.name, "version": item.version, "repository": item.repository},
+            minimal=True,
+        )
+        for item in locked
+    ]
+    blob = json.dumps([request, resolved], separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def render_lock(chart_dir: Path) -> str:
+    """Render a Chart.lock mirroring Chart.yaml, with no registry access.
+
+    Every dependency in this repository is pinned to an exact version, so the
+    lock adds no resolution and is derivable from Chart.yaml alone.
+    """
+    path = chart_file(chart_dir)
+    data = read_yaml(path)
+    declared = dependency_list(data, str(path))
+    if not declared:
+        raise CIError(f"{path} declares no dependencies to lock")
+    payload = {
+        "dependencies": [
+            {"name": item.name, "repository": item.repository, "version": item.version}
+            for item in declared
+        ],
+        "digest": lock_digest(data, declared),
+        "generated": datetime.now(timezone.utc).isoformat(),
+    }
+    return yaml.safe_dump(payload, default_flow_style=False, sort_keys=True)
+
+
+def lock_matches_chart(chart_dir: Path) -> bool:
+    """Return whether Chart.lock already agrees with Chart.yaml."""
+    lock_path = chart_dir / "Chart.lock"
+    if not lock_path.is_file():
+        return False
+    expected = yaml.safe_load(render_lock(chart_dir))
+    actual = read_yaml(lock_path)
+    dependencies = [
+        {key: item.get(key) for key in ("name", "repository", "version")}
+        for item in (actual.get("dependencies") or [])
+    ]
+    return (
+        dependencies == expected["dependencies"]
+        and actual.get("digest") == expected["digest"]
+    )
+
+
 def discover_chart_dirs(root: Path) -> list[Path]:
     """Find all service, common, and umbrella chart directories."""
     service_dirs = sorted(path.parent for path in (root / "services").glob("*/chart/Chart.yaml"))
@@ -234,7 +503,7 @@ def _configured_path(root: Path, value: Any, label: str) -> Path:
     return root.joinpath(*pure.parts)
 
 
-IMAGE_OVERRIDE_FIELDS = frozenset(REQUIRED_IMAGE_FIELDS)
+IMAGE_OVERRIDE_FIELDS = frozenset(REQUIRED_IMAGE_FIELDS) | {"tag_path"}
 
 
 def _simple_name(value: Any, label: str) -> str:
@@ -255,6 +524,16 @@ def _service_path(service: str, value: Any, label: str) -> str:
     if pure.is_absolute() or ".." in pure.parts:
         raise CIError(f"{label} must stay within services/{service}: {value!r}")
     return (PurePosixPath("services") / service / pure).as_posix()
+
+
+def _tag_path(value: Any, label: str) -> str:
+    """Validate the dotted values path that overrides one image tag."""
+    if not isinstance(value, str) or not value.strip():
+        raise CIError(f"{label} must be a non-empty dotted values path")
+    parts = value.strip().split(".")
+    if not all(VALUES_PART_RE.fullmatch(part) for part in parts):
+        raise CIError(f"{label} must be a dotted values path: {value!r}")
+    return ".".join(parts)
 
 
 def _image_overrides(values: dict[str, Any], label: str) -> dict[str, Any]:
@@ -290,6 +569,9 @@ def _expand_service_image(
         if not isinstance(raw, list) or not all(isinstance(item, str) and item for item in raw):
             raise CIError(f"service {service!r} field {field!r} must be a list of relative paths")
         image[field] = [_service_path(service, item, f"{service}.{field}") for item in raw]
+    image["tag_path"] = _tag_path(
+        values.get("tag_path", DEFAULT_TAG_PATH), f"{service}.tag_path"
+    )
     return image
 
 
@@ -406,6 +688,16 @@ def validate_images(root: Path, config_path: Path) -> dict[str, Any]:
                 )
             app_version = metadata_value(chart_data, "appVersion", str(chart_path))
             SemVer.parse(app_version, f"{chart_path} appVersion")
+            # A tag_path the chart does not declare would make candidate image
+            # pins silently ineffective, so require it to resolve in values.yaml.
+            tag_path = image.get("tag_path", DEFAULT_TAG_PATH)
+            values_path = chart_path.parent / "values.yaml"
+            if values_path.is_file():
+                if not values_path_exists(read_yaml(values_path), tag_path):
+                    raise CIError(
+                        f"Image {name!r} tag_path {tag_path!r} is not declared in "
+                        f"{values_path}; set tag_path to the key the chart reads"
+                    )
         except CIError as exc:
             errors.append(str(exc))
     if errors:
@@ -441,6 +733,74 @@ def validate_chart(root: Path, chart_dir: Path) -> tuple[str, dict[str, Any]]:
     return name, data
 
 
+def in_tree_charts(root: Path) -> dict[str, tuple[str, Path]]:
+    """Map every chart name in this tree to its version and directory."""
+    charts: dict[str, tuple[str, Path]] = {}
+    for chart_dir in discover_chart_dirs(root):
+        path = chart_file(chart_dir)
+        if not path.is_file():
+            continue
+        data = read_yaml(path)
+        name = metadata_value(data, "name", str(path))
+        charts[name] = (metadata_value(data, "version", str(path)), chart_dir)
+    return charts
+
+
+def validate_dependency_versions(root: Path) -> None:
+    """Require a dependency that also lives in this tree to match the tree version.
+
+    Without this the version comparison in helm-build-chart.sh silently decides
+    whether a chart is vendored from the tree or pulled from the registry, so a
+    bumped service chart can be dropped from the umbrella with no warning.
+    """
+    charts = in_tree_charts(root)
+    errors: list[str] = []
+    for chart_dir in discover_chart_dirs(root):
+        path = chart_file(chart_dir)
+        if not path.is_file():
+            continue
+        for dependency in dependency_list(read_yaml(path), str(path)):
+            # validate_chart already checks file:// dependencies, with their path.
+            if dependency.repository.startswith("file://"):
+                continue
+            local = charts.get(dependency.name)
+            if local is None:
+                continue
+            version, local_dir = local
+            if dependency.version != version:
+                errors.append(
+                    f"{relative_path(root, path)} pins {dependency.name!r} "
+                    f"{dependency.version!r} but {relative_path(root, local_dir)} is "
+                    f"{version!r}; bump whichever is stale so they agree"
+                )
+    if errors:
+        raise CIError("In-tree dependency versions disagree:\n- " + "\n- ".join(errors))
+
+
+def validate_helmignore(root: Path) -> None:
+    """Require every chart to carry a .helmignore that hides junk and keeps essentials."""
+    errors: list[str] = []
+    for chart_dir in discover_chart_dirs(root):
+        if not chart_file(chart_dir).is_file():
+            continue
+        label = relative_path(root, chart_dir)
+        if not (chart_dir / ".helmignore").is_file():
+            errors.append(f"{label} has no .helmignore")
+            continue
+        rules = helmignore_rules(chart_dir)
+        spelled = {rule.spelling() for rule in rules if not rule.negate}
+        missing = [pattern for pattern in REQUIRED_HELMIGNORE if pattern not in spelled]
+        if missing:
+            errors.append(f"{label}/.helmignore is missing: {', '.join(missing)}")
+        for essential in ESSENTIAL_CHART_PATHS:
+            if helm_ignores(chart_dir, essential):
+                errors.append(
+                    f"{label}/.helmignore excludes {essential!r}, which every chart must package"
+                )
+    if errors:
+        raise CIError("Chart .helmignore problems:\n- " + "\n- ".join(errors))
+
+
 def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[str, dict[str, Any]]:
     """Validate all charts and image configuration and return chart metadata."""
     charts: dict[str, dict[str, Any]] = {}
@@ -458,13 +818,35 @@ def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[
             charts[name] = data
         except CIError as exc:
             errors.append(str(exc))
-    try:
-        validate_images(root, config_path or root / IMAGES_FILE)
-    except CIError as exc:
-        errors.append(str(exc))
+    for check in (validate_dependency_versions, _validate_locks, validate_helmignore):
+        try:
+            check(root)
+        except CIError as exc:
+            errors.append(str(exc))
+    for images_check in (validate_images, validate_dockerignore):
+        try:
+            images_check(root, config_path or root / IMAGES_FILE)
+        except CIError as exc:
+            errors.append(str(exc))
     if errors:
         raise CIError("Configuration validation failed:\n- " + "\n- ".join(errors))
     return charts
+
+
+def _validate_locks(root: Path) -> None:
+    """Require every Chart.lock to be the one Chart.yaml would generate."""
+    stale = [
+        relative_path(root, chart_dir)
+        for chart_dir in discover_chart_dirs(root)
+        if chart_file(chart_dir).is_file()
+        and dependency_list(read_yaml(chart_file(chart_dir)), str(chart_file(chart_dir)))
+        and not lock_matches_chart(chart_dir)
+    ]
+    if stale:
+        raise CIError(
+            "Chart.lock is stale; regenerate with "
+            "'python .github/scripts/ci.py sync-lock <chart-dir>':\n- " + "\n- ".join(stale)
+        )
 
 
 def path_is_within(path: str, prefix: str) -> bool:
@@ -473,13 +855,33 @@ def path_is_within(path: str, prefix: str) -> bool:
     return path == normalized or path.startswith(normalized + "/")
 
 
-def image_source_changed(image: dict[str, Any], paths: Iterable[str]) -> bool:
-    """Return whether changed paths affect an image's included, non-excluded sources."""
-    return any(
-        any(path_is_within(path, source) for source in image["sources"])
-        and not any(path_is_within(path, excluded) for excluded in image["excludes"])
-        for path in paths
+def image_source_changed(
+    image: dict[str, Any],
+    paths: Iterable[str],
+    root: Path | None = None,
+) -> bool:
+    """Return whether changed paths affect an image's included, non-excluded sources.
+
+    A path excluded by the build context's .dockerignore is never sent to the
+    daemon, so it cannot change the image and must not demand an appVersion bump.
+    """
+    context = image.get("context")
+    context_dir = (
+        _configured_path(root, context, f"{image.get('name')}.context")
+        if root is not None and context
+        else None
     )
+    for path in paths:
+        if not any(path_is_within(path, source) for source in image["sources"]):
+            continue
+        if any(path_is_within(path, excluded) for excluded in image["excludes"]):
+            continue
+        if context_dir is not None and path_is_within(path, context):
+            inner = path[len(context):].lstrip("/")
+            if inner and docker_ignores(context_dir, inner):
+                continue
+        return True
+    return False
 
 
 def git_run(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -493,10 +895,22 @@ def git_run(root: Path, *args: str, check: bool = True) -> subprocess.CompletedP
     return result
 
 
-def changed_paths(root: Path, base: str) -> list[str]:
-    """Return files changed from base to HEAD."""
-    result = git_run(root, "diff", "--name-only", "--diff-filter=ACDMRTUXB", f"{base}..HEAD", "--")
-    return [line for line in result.stdout.splitlines() if line]
+def changed_paths(root: Path, base: str, include_untracked: bool = False) -> list[str]:
+    """Return files changed from base to HEAD.
+
+    CI always compares committed revisions, which is what it will publish. With
+    include_untracked the working tree is compared instead and untracked files
+    are added, so a local run sees what CI will see once everything is
+    committed. Without it, an uncommitted or untracked chart file is invisible
+    and a local check can pass where CI fails.
+    """
+    revision = base if include_untracked else f"{base}..HEAD"
+    result = git_run(root, "diff", "--name-only", "--diff-filter=ACDMRTUXB", revision, "--")
+    paths = [line for line in result.stdout.splitlines() if line]
+    if include_untracked:
+        others = git_run(root, "ls-files", "--others", "--exclude-standard")
+        paths.extend(line for line in others.stdout.splitlines() if line)
+    return sorted(dict.fromkeys(paths))
 
 
 def git_file(root: Path, revision: str, path: str) -> str | None:
@@ -518,15 +932,37 @@ def _require_increase(current: str, previous: str, label: str) -> None:
         raise CIError(f"{label} must increase above {previous!r}; current value is {current!r}")
 
 
-def check_versions(root: Path, base: str, config_path: Path | None = None) -> None:
+def packaged_change(root: Path, chart_dir: Path, paths: Iterable[str]) -> bool:
+    """Return whether a changed file would land inside this chart's package.
+
+    A chart's own .helmignore is the authority on what is not part of the
+    artifact, so editing an ignored file such as .gitignore cannot require a
+    version bump.
+    """
+    relative_dir = relative_path(root, chart_dir)
+    for path in paths:
+        if not path_is_within(path, relative_dir):
+            continue
+        inner = path[len(relative_dir):].lstrip("/")
+        if inner and not helm_ignores(chart_dir, inner):
+            return True
+    return False
+
+
+def check_versions(
+    root: Path,
+    base: str,
+    config_path: Path | None = None,
+    include_untracked: bool = False,
+) -> None:
     """Ensure changed chart and image versions increase over the base revision."""
     git_run(root, "rev-parse", "--verify", f"{base}^{{commit}}")
-    paths = changed_paths(root, base)
+    paths = changed_paths(root, base, include_untracked)
     errors: list[str] = []
     chart_dirs = discover_chart_dirs(root)
     for chart_dir in chart_dirs:
         relative_dir = relative_path(root, chart_dir)
-        if not any(path_is_within(path, relative_dir) for path in paths):
+        if not packaged_change(root, chart_dir, paths):
             continue
         previous = _base_chart(root, base, chart_dir)
         if previous is None:  # New or moved chart.
@@ -544,7 +980,7 @@ def check_versions(root: Path, base: str, config_path: Path | None = None) -> No
     config = load_images_config(config_path or root / IMAGES_FILE)
     checked_components: set[tuple[str, str]] = set()
     for image in config["images"]:
-        if not image_source_changed(image, paths):
+        if not image_source_changed(image, paths, root):
             continue
         key = (image["component"], image["chart"])
         if key in checked_components:
@@ -574,6 +1010,8 @@ def image_matrix(
     target: str | None = None,
     base: str | None = None,
     config_path: Path | None = None,
+    channel: str | None = None,
+    commit: str | None = None,
 ) -> list[dict[str, Any]]:
     """Select images for CI and build their versioned job matrix entries."""
     config = load_images_config(config_path or root / IMAGES_FILE)
@@ -598,7 +1036,7 @@ def image_matrix(
             for shared_path in REBUILD_ALL_IMAGE_PATHS
         )
         selected = images if rebuild_all else [
-            image for image in images if image_source_changed(image, paths)
+            image for image in images if image_source_changed(image, paths, root)
         ]
 
     matrix: list[dict[str, Any]] = []
@@ -608,7 +1046,12 @@ def image_matrix(
         data = read_yaml(chart_file(_configured_path(root, image["chart"], f"{image['name']}.chart")))
         app_version = metadata_value(data, "appVersion", str(chart_file(image["chart"])))
         SemVer.parse(app_version, f"{image['component']} appVersion")
-        entry["tag"] = f"v{app_version}"
+        if channel is None:
+            entry["tag"] = f"v{app_version}"
+        else:
+            if commit is None:
+                raise CIError("A candidate image matrix requires the building commit")
+            entry["tag"] = candidate_image_tag(channel, commit)
         matrix.append(entry)
     return matrix
 
@@ -646,6 +1089,84 @@ def service_chart_matrix(root: Path) -> list[str]:
     """Return service chart paths for a GitHub Actions matrix."""
     charts = [relative_path(root, path.parent) for path in (root / "services").glob("*/chart/Chart.yaml")]
     return sorted(charts) or ["__none__"]
+
+
+def validate_channel(channel: str) -> str:
+    """Validate a candidate channel name usable as a SemVer prerelease identifier."""
+    if not isinstance(channel, str) or not CHANNEL_RE.fullmatch(channel):
+        raise CIError(f"Channel must be lowercase alphanumeric with dashes: {channel!r}")
+    return channel
+
+
+def short_commit(commit: str) -> str:
+    """Return the short SHA embedded in candidate image tags."""
+    if not isinstance(commit, str) or not COMMIT_RE.fullmatch(commit.strip()):
+        raise CIError(f"Commit must be a hexadecimal Git SHA: {commit!r}")
+    return commit.strip()[:SHORT_SHA_LENGTH]
+
+
+def candidate_version(version: str, channel: str) -> str:
+    """Return the mutable prerelease chart version published for a channel."""
+    if SemVer.parse(version, "chart version").prerelease:
+        raise CIError(f"Cannot build a candidate from prerelease version {version!r}")
+    candidate = f"{str(version).strip()}-{validate_channel(channel)}"
+    SemVer.parse(candidate, "candidate chart version")
+    return candidate
+
+
+def candidate_image_tag(channel: str, commit: str) -> str:
+    """Return the immutable image tag published for one candidate build."""
+    return f"{validate_channel(channel)}-{short_commit(commit)}"
+
+
+def assign_values_path(values: dict[str, Any], path: str, value: str) -> None:
+    """Set a dotted values path inside a nested mapping."""
+    parts = path.split(".")
+    target = values
+    for part in parts[:-1]:
+        branch = target.setdefault(part, {})
+        if not isinstance(branch, dict):
+            raise CIError(f"Values path {path!r} conflicts at {part!r}")
+        target = branch
+    target[parts[-1]] = value
+
+
+def candidate_values(
+    root: Path,
+    channel: str,
+    commit: str,
+    config_path: Path | None = None,
+) -> dict[str, Any]:
+    """Pin every locked umbrella dependency image to this candidate's image tag."""
+    tag = candidate_image_tag(channel, commit)
+    config = load_images_config(config_path or root / IMAGES_FILE)
+    locked = {dependency.name for dependency in exact_locked_dependencies(root / UMBRELLA_DIR)}
+    overlay: dict[str, Any] = {}
+    for image in config["images"]:
+        component = image["component"]
+        if component not in locked:
+            continue
+        assign_values_path(
+            overlay.setdefault(component, {}),
+            image.get("tag_path", DEFAULT_TAG_PATH),
+            tag,
+        )
+    if not overlay:
+        raise CIError("No locked umbrella dependency owns a configured image")
+    return overlay
+
+
+def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge an overlay into a copy of a base mapping."""
+    merged = dict(base)
+    for key, value in overlay.items():
+        current = merged.get(key)
+        merged[key] = (
+            deep_merge(current, value)
+            if isinstance(current, dict) and isinstance(value, dict)
+            else value
+        )
+    return merged
 
 
 def release_decision(current: str, previous: str | None, force: bool = False) -> bool:
@@ -829,6 +1350,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     versions = commands.add_parser("check-versions")
     versions.add_argument("--base", required=True)
+    versions.add_argument(
+        "--include-untracked",
+        action="store_true",
+        help="also consider uncommitted and untracked files, matching what CI "
+        "will see once everything is committed",
+    )
 
     images = commands.add_parser("image-matrix")
     image_selection = images.add_mutually_exclusive_group(required=True)
@@ -836,6 +1363,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     image_selection.add_argument("--all", action="store_true", dest="all_images")
     image_selection.add_argument("--target")
     images.add_argument("--github-output", required=True)
+    images.add_argument("--channel")
+    images.add_argument("--commit")
 
     charts = commands.add_parser("chart-matrix")
     charts.add_argument("--github-output", required=True)
@@ -851,6 +1380,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     info.add_argument("--base", required=True)
     info.add_argument("--github-output", required=True)
     info.add_argument("--force", action="store_true")
+
+    version = commands.add_parser("candidate-version")
+    version.add_argument("--channel", required=True)
+    version.add_argument("--chart-dir", default=str(UMBRELLA_DIR))
+    version.add_argument("--github-output")
+
+    overlay = commands.add_parser("candidate-values")
+    overlay.add_argument("--channel", required=True)
+    overlay.add_argument("--commit", required=True)
+    overlay_destination = overlay.add_mutually_exclusive_group(required=True)
+    overlay_destination.add_argument("--output")
+    overlay_destination.add_argument("--merge-into")
+
+    lock = commands.add_parser("sync-lock")
+    lock.add_argument("chart_dir")
+    lock.add_argument("--check", action="store_true")
 
     manifest = commands.add_parser("release-manifest")
     manifest.add_argument("--commit", required=True)
@@ -868,14 +1413,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_count = len(load_images_config(ROOT / IMAGES_FILE)["images"])
             print(f"Validated {len(charts)} charts and {image_count} images")
         elif args.command == "check-versions":
-            check_versions(ROOT, args.base)
+            check_versions(ROOT, args.base, include_untracked=args.include_untracked)
             print("Version checks passed")
         elif args.command == "image-matrix":
+            if args.channel is not None and args.commit is None:
+                raise CIError("--channel requires --commit")
             selected = image_matrix(
                 ROOT,
                 all_images=args.all_images,
                 target=args.target,
                 base=args.base,
+                channel=args.channel,
+                commit=args.commit,
             )
             write_github_outputs(
                 output_path(ROOT, args.github_output),
@@ -897,6 +1446,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_github_outputs(
                 output_path(ROOT, args.github_output), release_info(ROOT, args.base, args.force)
             )
+        elif args.command == "candidate-version":
+            chart_dir = output_path(ROOT, args.chart_dir)
+            data = read_yaml(chart_file(chart_dir))
+            base = metadata_value(data, "version", str(chart_file(chart_dir)))
+            candidate = candidate_version(base, args.channel)
+            if args.github_output:
+                write_github_outputs(
+                    output_path(ROOT, args.github_output),
+                    {"base-version": base, "version": candidate},
+                )
+            else:
+                print(candidate)
+        elif args.command == "candidate-values":
+            overlay = candidate_values(ROOT, args.channel, args.commit)
+            destination = output_path(ROOT, args.merge_into or args.output)
+            if args.merge_into:
+                existing = read_yaml(destination)
+                overlay = deep_merge(existing, overlay)
+            destination.write_text(
+                yaml.safe_dump(overlay, default_flow_style=False, sort_keys=True),
+                encoding="utf-8",
+            )
+        elif args.command == "sync-lock":
+            chart_dir = output_path(ROOT, args.chart_dir)
+            lock_path = chart_dir / "Chart.lock"
+            if args.check:
+                if not lock_matches_chart(chart_dir):
+                    raise CIError(
+                        f"{lock_path} does not match {chart_file(chart_dir)}; regenerate with "
+                        f"'python .github/scripts/ci.py sync-lock {args.chart_dir}'"
+                    )
+                print(f"{lock_path} matches Chart.yaml")
+            elif lock_matches_chart(chart_dir):
+                # Rewriting would only churn the generated timestamp.
+                print(f"{lock_path} already matches Chart.yaml")
+            else:
+                lock_path.write_text(render_lock(chart_dir), encoding="utf-8")
+                print(f"Wrote {lock_path}")
         elif args.command == "release-manifest":
             manifest = build_release_manifest(ROOT, args.commit)
             output_path(ROOT, args.output).write_text(

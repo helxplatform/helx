@@ -21,12 +21,18 @@ services:
   appstore-prepuller:
     context: controller
     dockerfile: controller/Dockerfile
+    # This chart reads controller.image.tag, not image.tag.
+    tag_path: controller.image.tag
   appstore-sockets:
     images:
       server: {}
       monitoring:
         context: monitoring
         dockerfile: monitoring/Dockerfile
+        # This variant is nested under the sockets chart's monitoring key.
+        tag_path: monitoring.image.tag
+        # Its build context is monitoring/, so parent files cannot reach it.
+        sources: [monitoring]
   ldap-sync: {}
   ui:
     repository: helx-ui

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -90,6 +91,12 @@ class ConfigValidationTests(TempTreeTest):
         self.write_chart("services/app/chart", name="app", app_version="2.0.0")
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
         self.write_chart("deploy/helm/helx-chart", name="helx")
+        for directory in (
+            "services/app/chart",
+            "deploy/helm/helx-common/chart",
+            "deploy/helm/helx-chart",
+        ):
+            self.write(f"{directory}/.helmignore", "\n".join(ci.REQUIRED_HELMIGNORE) + "\n")
         images = []
         for index, name in enumerate(("app", "worker")):
             source = f"sources/{index}"
@@ -117,6 +124,40 @@ class ConfigValidationTests(TempTreeTest):
         self.write_chart("services/duplicate/chart", name="app")
         with self.assertRaisesRegex(ci.CIError, "duplicated"):
             ci.validate_config(self.root, config)
+
+    def test_tag_path_must_be_declared_in_the_chart_values(self) -> None:
+        self.write_chart("services/app/chart", name="app", app_version="2.0.0")
+        self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
+        self.write_chart("deploy/helm/helx-chart", name="helx")
+        self.write("services/app/chart/values.yaml", "controller:\n  image:\n    tag: latest\n")
+        self.write("sources/Dockerfile", "FROM scratch\n")
+        image = {
+            "name": "app",
+            "component": "app",
+            "chart": "services/app/chart",
+            "repository": "app",
+            "context": "sources",
+            "dockerfile": "sources/Dockerfile",
+            "sources": ["sources"],
+            "excludes": [],
+        }
+        good = self.write(
+            "good.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [dict(image, tag_path="controller.image.tag")],
+                }
+            ),
+        )
+        self.assertEqual(len(ci.validate_images(self.root, good)["images"]), 1)
+
+        bad = self.write(
+            "bad.yaml",
+            json.dumps({"registry": ci.REGISTRY, "images": [dict(image, tag_path="image.tag")]}),
+        )
+        with self.assertRaisesRegex(ci.CIError, r"tag_path 'image.tag' is not declared"):
+            ci.validate_images(self.root, bad)
 
     def test_service_defaults_and_variants_expand_to_normalized_images(self) -> None:
         images = ci.expand_service_images(
@@ -312,6 +353,484 @@ class ManifestTests(TempTreeTest):
         notes = ci.release_notes(manifest)
         self.assertIn("# HeLx release v4.5.7", notes)
         self.assertIn("appstore", notes)
+
+
+class CandidateChannelTests(TempTreeTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_chart(
+            "deploy/helm/helx-chart",
+            name="helx",
+            version="4.5.6",
+            app_version="3.6.4",
+            dependencies=(
+                "dependencies:\n"
+                "  - name: appstore\n"
+                "    version: 5.1.4\n"
+                "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+                "  - name: sockets\n"
+                "    version: 2.1.0\n"
+                "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+            ),
+        )
+        self.write(
+            "deploy/helm/helx-chart/Chart.lock",
+            "dependencies:\n"
+            "  - name: appstore\n"
+            "    version: 5.1.4\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+            "  - name: sockets\n"
+            "    version: 2.1.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n",
+        )
+        self.write_chart("services/appstore/chart", name="appstore", app_version="3.6.4")
+        self.write_chart("services/sockets/chart", name="sockets", app_version="2.1.0")
+        self.write_chart("services/loose/chart", name="loose", app_version="1.0.0")
+        self.config = self.write(
+            "images.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [
+                        {
+                            "name": "appstore",
+                            "component": "appstore",
+                            "chart": "services/appstore/chart",
+                            "repository": "appstore",
+                            "context": "services/appstore",
+                            "dockerfile": "services/appstore/Dockerfile",
+                            "sources": ["services/appstore"],
+                            "excludes": [],
+                        },
+                        {
+                            "name": "sockets-monitoring",
+                            "component": "sockets",
+                            "chart": "services/sockets/chart",
+                            "repository": "sockets/monitoring",
+                            "context": "services/sockets/monitoring",
+                            "dockerfile": "services/sockets/monitoring/Dockerfile",
+                            "sources": ["services/sockets/monitoring"],
+                            "excludes": [],
+                            "tag_path": "monitoring.image.tag",
+                        },
+                        {
+                            # Not an umbrella dependency, so it earns no override.
+                            "name": "loose",
+                            "component": "loose",
+                            "chart": "services/loose/chart",
+                            "repository": "loose",
+                            "context": "services/loose",
+                            "dockerfile": "services/loose/Dockerfile",
+                            "sources": ["services/loose"],
+                            "excludes": [],
+                        },
+                    ],
+                }
+            ),
+        )
+
+    def test_candidate_version_is_a_prerelease_below_the_release(self) -> None:
+        candidate = ci.candidate_version("4.5.6", "develop")
+        self.assertEqual(candidate, "4.5.6-develop")
+        self.assertLess(ci.SemVer.parse(candidate), ci.SemVer.parse("4.5.6"))
+
+    def test_candidate_version_rejects_prerelease_input_and_bad_channels(self) -> None:
+        with self.assertRaisesRegex(ci.CIError, "prerelease"):
+            ci.candidate_version("4.5.6-develop", "develop")
+        for channel in ("Develop", "de_velop", "", "-develop"):
+            with self.assertRaisesRegex(ci.CIError, "Channel"):
+                ci.candidate_version("4.5.6", channel)
+
+    def test_candidate_image_tag_shortens_the_commit(self) -> None:
+        self.assertEqual(
+            ci.candidate_image_tag("develop", "e3452604aaaabbbbccccddddeeeeffff00001111"),
+            "develop-e345260",
+        )
+        with self.assertRaisesRegex(ci.CIError, "hexadecimal"):
+            ci.candidate_image_tag("develop", "not-a-sha")
+
+    def test_deep_merge_keeps_unrelated_existing_values(self) -> None:
+        merged = ci.deep_merge(
+            {"global": {"keep": True}, "appstore": {"replicas": 2}},
+            {"appstore": {"image": {"tag": "develop-abc1234"}}},
+        )
+        self.assertEqual(merged["global"], {"keep": True})
+        self.assertEqual(merged["appstore"], {"replicas": 2, "image": {"tag": "develop-abc1234"}})
+
+    def test_candidate_values_cover_locked_dependencies_only(self) -> None:
+        overlay = ci.candidate_values(
+            self.root, "develop", "e3452604aaaabbbb", config_path=self.config
+        )
+        self.assertEqual(
+            overlay,
+            {
+                "appstore": {"image": {"tag": "develop-e345260"}},
+                "sockets": {"monitoring": {"image": {"tag": "develop-e345260"}}},
+            },
+        )
+        self.assertNotIn("loose", overlay)
+
+    def test_candidate_matrix_pins_every_image_to_one_tag(self) -> None:
+        matrix = ci.image_matrix(
+            self.root,
+            all_images=True,
+            config_path=self.config,
+            channel="develop",
+            commit="e3452604aaaabbbb",
+        )
+        self.assertEqual({entry["tag"] for entry in matrix}, {"develop-e345260"})
+
+    def test_candidate_matrix_requires_a_commit(self) -> None:
+        with self.assertRaisesRegex(ci.CIError, "commit"):
+            ci.image_matrix(self.root, all_images=True, config_path=self.config, channel="develop")
+
+
+class LockDigestTests(unittest.TestCase):
+    # Oracle: this dependency set and digest were produced by helm itself and
+    # committed as deploy/helm/helx-chart/Chart.lock, so the assertion pins the
+    # exact field order and omitempty behaviour of Helm's resolver.HashReq.
+    REGISTRY = "oci://ghcr.io/helxplatform/helm-charts"
+    PINS = (
+        ("appstore", "5.1.4", REGISTRY),
+        ("appstore-sockets", "2.1.0", REGISTRY),
+        ("backup-pvc-cronjob", "0.2.1", REGISTRY),
+        ("helx-ldap", "0.1.2", "file://../../../services/helx-ldap/chart"),
+        ("image-utils", "1.0.0", REGISTRY),
+        ("nfs-server", "0.2.5", REGISTRY),
+        ("nfsrods", "2.0.4", REGISTRY),
+        ("pod-reaper", "0.2.5", REGISTRY),
+        ("resty", "1.0.5", REGISTRY),
+        ("search", "7.0.0", REGISTRY),
+        ("ui", "1.6.0", REGISTRY),
+    )
+    DIGEST = "sha256:f04ca543ec1ae416e77b6940cfd48b08331173f23fb2e02fcfe8f3c268b54fba"
+
+    def test_reproduces_a_helm_generated_digest(self) -> None:
+        chart = {
+            "dependencies": [
+                {
+                    "name": name,
+                    "condition": f"{name}.enabled",
+                    "version": version,
+                    "repository": repository,
+                }
+                for name, version, repository in self.PINS
+            ]
+        }
+        locked = [ci.Dependency(n, v, r) for n, v, r in self.PINS]
+        self.assertEqual(ci.lock_digest(chart, locked), self.DIGEST)
+
+    def test_digest_changes_when_a_pin_changes(self) -> None:
+        chart = {"dependencies": [{"name": "api", "version": "1.0.0", "repository": "oci://x/y"}]}
+        locked = [ci.Dependency("api", "1.0.0", "oci://x/y")]
+        bumped = [ci.Dependency("api", "1.0.1", "oci://x/y")]
+        self.assertNotEqual(ci.lock_digest(chart, locked), ci.lock_digest(chart, bumped))
+
+
+class DependencyVersionInvariantTests(TempTreeTest):
+    REGISTRY = "oci://ghcr.io/helxplatform/helm-charts"
+
+    def build(self, pin: str, tree: str, repository: str | None = None) -> None:
+        self.write_chart("services/api/chart", name="api", version=tree, app_version="1.0.0")
+        self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
+        self.write_chart(
+            "deploy/helm/helx-chart",
+            name="helx",
+            version="4.6.0",
+            dependencies=(
+                "dependencies:\n"
+                "  - name: api\n"
+                f"    version: {pin}\n"
+                f"    repository: {repository or self.REGISTRY}\n"
+            ),
+        )
+
+    def test_equal_versions_are_accepted(self) -> None:
+        self.build("1.2.3", "1.2.3")
+        ci.validate_dependency_versions(self.root)
+
+    def test_tree_ahead_of_the_pin_is_rejected(self) -> None:
+        self.build("1.2.3", "1.2.4")
+        with self.assertRaisesRegex(ci.CIError, r"pins 'api' '1.2.3'.*is '1.2.4'"):
+            ci.validate_dependency_versions(self.root)
+
+    def test_tree_behind_the_pin_is_rejected(self) -> None:
+        self.build("1.2.4", "1.2.3")
+        with self.assertRaisesRegex(ci.CIError, r"pins 'api' '1.2.4'.*is '1.2.3'"):
+            ci.validate_dependency_versions(self.root)
+
+    def test_file_dependencies_are_left_to_validate_chart(self) -> None:
+        self.build("1.2.3", "1.2.4", repository="file://../../../services/api/chart")
+        ci.validate_dependency_versions(self.root)
+
+    def test_dependency_absent_from_the_tree_is_ignored(self) -> None:
+        self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
+        self.write_chart(
+            "deploy/helm/helx-chart",
+            name="helx",
+            version="4.6.0",
+            dependencies=(
+                "dependencies:\n"
+                "  - name: external\n"
+                "    version: 9.9.9\n"
+                f"    repository: {self.REGISTRY}\n"
+            ),
+        )
+        ci.validate_dependency_versions(self.root)
+
+
+class LockSyncTests(TempTreeTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.chart_dir = self.root / "deploy/helm/helx-chart"
+        self.write_chart(
+            "deploy/helm/helx-chart",
+            name="helx",
+            version="4.6.0",
+            dependencies=(
+                "dependencies:\n"
+                "  - name: api\n"
+                "    version: 1.2.3\n"
+                "    repository: oci://example.invalid/charts\n"
+            ),
+        )
+
+    def write_lock(self) -> None:
+        (self.chart_dir / "Chart.lock").write_text(
+            ci.render_lock(self.chart_dir), encoding="utf-8"
+        )
+
+    def test_rendered_lock_satisfies_the_exactness_check(self) -> None:
+        self.write_lock()
+        self.assertTrue(ci.lock_matches_chart(self.chart_dir))
+        locked = ci.exact_locked_dependencies(self.chart_dir)
+        self.assertEqual([(item.name, item.version) for item in locked], [("api", "1.2.3")])
+
+    def test_missing_lock_does_not_match(self) -> None:
+        self.assertFalse(ci.lock_matches_chart(self.chart_dir))
+
+    def test_lock_goes_stale_when_a_pin_moves(self) -> None:
+        self.write_lock()
+        chart = self.chart_dir / "Chart.yaml"
+        chart.write_text(chart.read_text().replace("1.2.3", "1.2.4"), encoding="utf-8")
+        self.assertFalse(ci.lock_matches_chart(self.chart_dir))
+
+
+BASELINE_HELMIGNORE = "\n".join(ci.REQUIRED_HELMIGNORE) + "\n"
+
+
+class HelmIgnoreTests(TempTreeTest):
+    def rules(self, body: str) -> Path:
+        self.write_chart("services/api/chart", name="api")
+        return self.write("services/api/chart/.helmignore", body)
+
+    def test_bare_pattern_matches_a_base_name_at_any_depth(self) -> None:
+        chart = self.rules(".gitignore\n").parent
+        self.assertTrue(ci.helm_ignores(chart, ".gitignore"))
+        self.assertTrue(ci.helm_ignores(chart, "templates/.gitignore"))
+        self.assertFalse(ci.helm_ignores(chart, "Chart.yaml"))
+
+    def test_glob_matches_by_base_name(self) -> None:
+        chart = self.rules("*.swp\n").parent
+        self.assertTrue(ci.helm_ignores(chart, "templates/deployment.yaml.swp"))
+        self.assertFalse(ci.helm_ignores(chart, "templates/deployment.yaml"))
+
+    def test_pattern_with_a_slash_is_anchored(self) -> None:
+        chart = self.rules("charts/*/README.md\n").parent
+        self.assertTrue(ci.helm_ignores(chart, "charts/sub/README.md"))
+        self.assertFalse(ci.helm_ignores(chart, "README.md"))
+
+    def test_directory_rule_excludes_the_whole_subtree(self) -> None:
+        chart = self.rules(".git/\n").parent
+        self.assertTrue(ci.helm_ignores(chart, ".git/config"))
+        # A directory-only rule must not match a file of the same name.
+        self.assertFalse(ci.helm_ignores(chart, ".git"))
+
+    def test_negation_wins_when_it_is_matched_first(self) -> None:
+        chart = self.rules("!README.md\nREADME.md\n").parent
+        self.assertFalse(ci.helm_ignores(chart, "README.md"))
+
+    def test_comments_and_blank_lines_are_skipped(self) -> None:
+        chart = self.rules("# a comment\n\n.gitignore\n").parent
+        self.assertEqual(len(ci.helmignore_rules(chart)), 1)
+
+    def test_absent_helmignore_ignores_nothing(self) -> None:
+        self.write_chart("services/api/chart", name="api")
+        self.assertFalse(ci.helm_ignores(self.root / "services/api/chart", ".gitignore"))
+
+
+class PackagedChangeTests(TempTreeTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_chart("services/api/chart", name="api")
+        self.write("services/api/chart/.helmignore", BASELINE_HELMIGNORE)
+        self.chart_dir = self.root / "services/api/chart"
+
+    def test_ignored_file_does_not_gate(self) -> None:
+        self.assertFalse(
+            ci.packaged_change(self.root, self.chart_dir, ["services/api/chart/.gitignore"])
+        )
+
+    def test_packaged_file_gates(self) -> None:
+        for path in ("Chart.yaml", "Chart.lock", "values.yaml", "templates/deployment.yaml"):
+            with self.subTest(path=path):
+                self.assertTrue(
+                    ci.packaged_change(self.root, self.chart_dir, [f"services/api/chart/{path}"])
+                )
+
+    def test_paths_outside_the_chart_do_not_gate(self) -> None:
+        self.assertFalse(ci.packaged_change(self.root, self.chart_dir, [".github/workflows/ci.yml"]))
+
+
+class HelmIgnoreValidationTests(TempTreeTest):
+    def build(self, body: str | None) -> None:
+        self.write_chart("services/api/chart", name="api")
+        self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
+        self.write_chart("deploy/helm/helx-chart", name="helx")
+        for directory in ("services/api/chart", "deploy/helm/helx-common/chart", "deploy/helm/helx-chart"):
+            if body is not None:
+                self.write(f"{directory}/.helmignore", body)
+
+    def test_compliant_charts_pass(self) -> None:
+        self.build(BASELINE_HELMIGNORE)
+        ci.validate_helmignore(self.root)
+
+    def test_missing_file_is_reported(self) -> None:
+        self.build(None)
+        with self.assertRaisesRegex(ci.CIError, "has no .helmignore"):
+            ci.validate_helmignore(self.root)
+
+    def test_missing_baseline_pattern_is_reported(self) -> None:
+        self.build(BASELINE_HELMIGNORE.replace(".gitignore\n", ""))
+        with self.assertRaisesRegex(ci.CIError, r"missing: \.gitignore"):
+            ci.validate_helmignore(self.root)
+
+    def test_excluding_an_essential_path_is_reported(self) -> None:
+        self.build(BASELINE_HELMIGNORE + "templates/\n")
+        with self.assertRaisesRegex(ci.CIError, "which every chart must package"):
+            ci.validate_helmignore(self.root)
+
+
+class DockerIgnoreTests(TempTreeTest):
+    def context(self, body: str) -> Path:
+        self.write("services/api/.dockerignore", body)
+        return self.root / "services/api"
+
+    def test_patterns_are_anchored_to_the_context_root(self) -> None:
+        context = self.context("*.log\n")
+        self.assertTrue(ci.docker_ignores(context, "build.log"))
+        # Docker's match does not cross a path separator.
+        self.assertFalse(ci.docker_ignores(context, "sub/build.log"))
+
+    def test_directory_excludes_its_subtree(self) -> None:
+        context = self.context("chart/\n")
+        self.assertTrue(ci.docker_ignores(context, "chart/Chart.yaml"))
+        self.assertFalse(ci.docker_ignores(context, "charts/Chart.yaml"))
+
+    def test_absent_file_excludes_nothing(self) -> None:
+        self.assertFalse(ci.docker_ignores(self.root / "services/api", "anything"))
+
+    def test_image_gate_skips_paths_docker_never_receives(self) -> None:
+        self.write_chart("services/api/chart", name="api", app_version="1.0.0")
+        self.write("services/api/Dockerfile", "FROM scratch\n")
+        self.context("README.md\n")
+        image = {
+            "name": "api",
+            "component": "api",
+            "chart": "services/api/chart",
+            "repository": "api",
+            "context": "services/api",
+            "dockerfile": "services/api/Dockerfile",
+            "sources": ["services/api"],
+            "excludes": [],
+        }
+        self.assertFalse(ci.image_source_changed(image, ["services/api/README.md"], self.root))
+        self.assertTrue(ci.image_source_changed(image, ["services/api/main.go"], self.root))
+        # Without a root there is no context to consult, so nothing is filtered.
+        self.assertTrue(ci.image_source_changed(image, ["services/api/README.md"]))
+
+    def test_unsupported_syntax_is_rejected(self) -> None:
+        self.write_chart("services/api/chart", name="api", app_version="1.0.0")
+        self.write("services/api/Dockerfile", "FROM scratch\n")
+        self.context("!keep.me\n")
+        config = self.write(
+            "images.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [
+                        {
+                            "name": "api",
+                            "component": "api",
+                            "chart": "services/api/chart",
+                            "repository": "api",
+                            "context": "services/api",
+                            "dockerfile": "services/api/Dockerfile",
+                            "sources": ["services/api"],
+                            "excludes": [],
+                        }
+                    ],
+                }
+            ),
+        )
+        with self.assertRaisesRegex(ci.CIError, "negation and"):
+            ci.validate_dockerignore(self.root, config)
+
+
+class UntrackedChangeTests(TempTreeTest):
+    """A local run must be able to see what CI will see once files are committed."""
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.git("init", "-q")
+        self.write_chart("services/api/chart", name="api", version="1.0.0")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+
+    def test_untracked_file_is_invisible_by_default(self) -> None:
+        # The exact shape of the bug: a newly created .helmignore is packaged, so
+        # it changes the chart, but base..HEAD cannot see it until it is committed.
+        self.write("services/api/chart/.helmignore", ".gitignore\n")
+        self.assertEqual(ci.changed_paths(self.root, self.base), [])
+        self.assertEqual(
+            ci.changed_paths(self.root, self.base, include_untracked=True),
+            ["services/api/chart/.helmignore"],
+        )
+
+    def test_uncommitted_modification_is_invisible_by_default(self) -> None:
+        chart = self.root / "services/api/chart/Chart.yaml"
+        chart.write_text(chart.read_text() + "description: edited\n", encoding="utf-8")
+        self.assertEqual(ci.changed_paths(self.root, self.base), [])
+        self.assertEqual(
+            ci.changed_paths(self.root, self.base, include_untracked=True),
+            ["services/api/chart/Chart.yaml"],
+        )
+
+    def test_gitignored_files_stay_out_of_both_modes(self) -> None:
+        self.write(".gitignore", "ignored/\n")
+        self.write("ignored/junk.txt", "junk")
+        self.assertNotIn(
+            "ignored/junk.txt", ci.changed_paths(self.root, self.base, include_untracked=True)
+        )
+
+    def test_version_gate_catches_an_untracked_chart_file(self) -> None:
+        self.write("services/api/chart/.helmignore", ".gitignore\n")
+        empty = {"registry": ci.REGISTRY, "images": []}
+        with patch.object(ci, "load_images_config", return_value=empty):
+            # Committed history alone shows nothing to gate on.
+            ci.check_versions(self.root, self.base)
+            with self.assertRaisesRegex(ci.CIError, "chart version must increase"):
+                ci.check_versions(self.root, self.base, include_untracked=True)
 
 
 if __name__ == "__main__":

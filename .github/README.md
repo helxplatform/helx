@@ -1,9 +1,12 @@
 # HeLx CI/CD
 
-The repository uses two GitHub Actions workflows:
+The repository uses three GitHub Actions workflows:
 
-- [`workflows/ci.yml`](workflows/ci.yml) validates pull requests, non-`main`
-  pushes, and manual image builds without registry credentials.
+- [`workflows/ci.yml`](workflows/ci.yml) validates pull requests and manual
+  image builds without registry credentials. Nothing it produces leaves the
+  runner.
+- [`workflows/develop.yml`](workflows/develop.yml) validates pushes to
+  `develop`, then publishes the mutable `develop` candidate channel.
 - [`workflows/publish.yml`](workflows/publish.yml) serializes publication from
   `main`, reconciles immutable artifacts, and optionally creates a release.
 
@@ -19,6 +22,8 @@ flowchart TD
     Common --> Services[Validate or publish every service chart]
     Services --> Umbrella[Validate or publish the umbrella chart]
     Common --> Images[Validate changed images]
+    Services --> CandidateImages[develop only: publish develop-sha images]
+    CandidateImages --> Candidate[develop only: publish the version-develop umbrella]
     Umbrella --> ProductionImages[Publish or reuse semantic image tags]
     ProductionImages --> Decision{Umbrella version increased?}
     Decision -->|No| Done[Publication complete]
@@ -32,9 +37,10 @@ registry.
 
 ## CI validation
 
-`CI` runs on every pull request, pushes to `develop`, and manual dispatch. Pull
-request runs validate proposed merges, while the `develop` push run confirms the
-actual integration-branch tip. Its stable branch-protection result is `CI gate`.
+`CI` runs on every pull request and on manual dispatch. Its stable
+branch-protection result is `CI gate`. Pushes to `develop` are handled by
+`Develop channel`, which repeats the same validation before publishing anything,
+so the two do not build the same images twice.
 
 It performs these checks:
 
@@ -42,10 +48,10 @@ It performs these checks:
 2. run the focused tests for [`scripts/ci.py`](scripts/ci.py);
 3. validate every chart, lockfile, image definition, Dockerfile, and local
    dependency path;
-4. for pull requests targeting `main`, require chart `version` increases when an
-   existing chart directory changes;
-5. for pull requests targeting `main`, require `appVersion` increases when an
-   image's source changes;
+4. require chart `version` increases when a changed file would land in the
+   chart's package;
+5. require `appVersion` increases when a changed file would reach an image's
+   build context;
 6. run `actionlint` against the workflows;
 7. lint and package `deploy/helm/helx-common/chart`;
 8. lint and package every discovered `services/*/chart`;
@@ -56,12 +62,37 @@ All charts are validated instead of maintaining a changed-chart dependency
 planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
 
-Version increases are a publication-boundary policy, so they are not required on
-pull requests into `develop`, `develop` push runs, or manual validation runs.
-They are required before merging into the default `main` branch and are checked
-again by the `Publish` workflow as a defensive measure. Changing a pull request's base
-branch emits a new `edited` run with the current base; rerunning an older workflow
-instead reuses that run's original commit and event payload.
+Version increases are required on **every** pull request, not only those
+targeting `main`, and again on direct pushes to `develop` and `main`. The
+`develop` candidate channel vendors service charts straight out of the tree, so a
+chart edited without a version bump would otherwise ship under a version already
+published with different content. Manual validation runs have no base revision to
+compare against and are exempt. Changing a pull request's base branch emits a new
+`edited` run with the current base; rerunning an older workflow instead reuses
+that run's original commit and event payload.
+
+### What counts as a change
+
+A version bump is only demanded when a changed file can actually affect the
+artifact, and each artifact's own ignore file is the authority on that:
+
+- **Charts** consult the chart's `.helmignore`. Editing `.gitignore` cannot
+  change a package, so it never gates; editing `Chart.yaml`, `Chart.lock`,
+  `values.yaml`, `templates/`, or the `.helmignore` itself does. Every chart
+  must carry a `.helmignore` containing the baseline patterns in
+  `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
+  `templates/`; `validate-config` enforces both.
+- **Images** consult `excludes` in [`ci/images.yaml`](ci/images.yaml) and the
+  build context's `.dockerignore`. A path Docker never receives cannot change
+  the image. Only the pattern subset used here is supported, so `validate-config`
+  rejects `!` negation and `**` rather than mismatching them silently.
+
+Both matchers follow Go's `filepath.Match`, which Helm and Docker use: `*` and
+`?` never cross a path separator.
+
+The practical consequence is that the fix for a spurious version bump is usually
+to correct the ignore file, not to add a CI exception. If a README never reaches
+an image, add it to that service's `.dockerignore`.
 
 Manual dispatch accepts one image target or `all`. The target is validated against
 the normalized image inventory generated from [`ci/images.yaml`](ci/images.yaml);
@@ -87,6 +118,16 @@ publication.
 - A chart with dependencies must commit `Chart.lock`.
 - `Chart.yaml` and `Chart.lock` must contain identical dependency
   name/version/repository tuples.
+- A dependency whose name matches a chart in this repository must be pinned to
+  exactly that chart's version. This is the rule that keeps the tree and the
+  umbrella honest: without it, bumping a service chart and forgetting the
+  umbrella pin silently drops the change from the umbrella while CI stays green.
+  Bump the service chart and the umbrella pin in the same change.
+- Every dependency is pinned to an exact version, so `Chart.lock` needs no
+  resolution and is derivable from `Chart.yaml` with no registry access.
+  Regenerate it with `ci.py sync-lock <chart-dir>` instead of
+  `helm dependency update`; `--check` verifies without writing. The digest
+  reproduces Helm's `resolver.HashReq`.
 - Repository-owned dependencies should use
   `oci://ghcr.io/helxplatform/helm-charts` in committed metadata.
 - Generated `charts/` directories and dependency archives are not committed.
@@ -97,6 +138,8 @@ publication.
 The exact-version local substitution is what allows a pull request to validate a
 new `helx-common` or service version before it exists in GHCR. It does not change
 committed dependency metadata and never substitutes a different local version.
+The one exception is the `develop` candidate channel, which matches local charts
+by name alone; see [Develop candidate channel](#develop-candidate-channel).
 If no exact local chart exists, validation authenticates to GHCR with the job
 `GITHUB_TOKEN` and pulls the version recorded in `Chart.lock`. `publish: false`
 prevents a push; it does not disable dependency resolution.
@@ -126,6 +169,46 @@ dependencies. Publication chart jobs elevate that permission to
 `packages: write`. Personal package access is not inherited by `GITHUB_TOKEN`:
 it represents the workflow repository, not the person who triggered the run.
 
+## Develop candidate channel
+
+Every push to `develop` republishes one deployable candidate of the umbrella:
+
+```text
+oci://ghcr.io/helxplatform/helm-charts/helx:<umbrella-version>-develop
+```
+
+The tag is a SemVer prerelease, so it always sorts below the matching release and
+cannot be mistaken for one. It is deliberately **mutable**: each push overwrites
+it, and the immutability preflight is skipped for candidates only.
+
+Three things differ from a release build, all driven by `CHART_CHANNEL` and
+`CHART_CHANNEL_COMMIT` in [`scripts/helm-build-chart.sh`](scripts/helm-build-chart.sh):
+
+1. local charts are matched by **name alone**, ignoring the locked version, so
+   the archive describes the branch tree rather than what is already published;
+2. the package is versioned via `helm package --version`, leaving `Chart.yaml`
+   untouched; and
+3. candidate image tags are merged into the umbrella's `values.yaml` before
+   packaging and restored afterwards, because `helm package` accepts no value
+   overrides.
+
+Candidate mode applies only to the umbrella chart and refuses any other chart
+directory. Images publish before the chart that pins them, so a cancelled run
+leaves the channel behind rather than pointing at an image that was never built.
+
+Images for a candidate are immutable and pinned to the exact commit:
+
+```text
+containers.renci.org/helxplatform/<repository>:develop-<short-sha>
+```
+
+Every image is rebuilt on every `develop` push, because the candidate pins one
+shared tag that must resolve for every dependency image. A mutable channel tag
+paired with immutable image references is what keeps `IfNotPresent` from serving
+a stale layer.
+
+Its stable branch-protection result is `Develop channel gate`.
+
 ## Container images
 
 [`ci/images.yaml`](ci/images.yaml) is the only image-build inventory. It lists
@@ -148,6 +231,13 @@ credentials. Chart-only changes are excluded from image-source detection. When
 no image sources changed, the matrix runs one clearly labeled no-op job so the
 workflow remains successful without showing an unresolved matrix expression.
 
+Each image records the values key that carries its tag, defaulting to
+`image.tag`. Set `tag_path` in `ci/images.yaml` when a chart reads something else
+— `appstore-prepuller` uses `controller.image.tag` and the `appstore-sockets`
+monitoring variant uses `monitoring.image.tag`. `validate-config` requires the
+configured path to be declared in the chart's `values.yaml`, because a path the
+chart does not read would make candidate image pins silently ineffective.
+
 On `main`, publication reconciles every configured semantic image reference:
 
 ```text
@@ -160,9 +250,9 @@ tag is built and pushed directly with provenance and SBOM attestations. There
 are no staging tags, promotion jobs, or digest artifacts passed between jobs.
 Harbor must enforce immutability for semantic `v*` tags.
 
-`appstore-prepuller` and `user-mutator` are still validated and published, but
-they are not included in a compatibility release until the umbrella chart locks
-them as dependencies.
+Every image-bearing service is currently a locked umbrella dependency, so all of
+them appear in compatibility releases. A service that is validated and published
+without being locked as a dependency is excluded from the release manifest.
 
 ## Releases
 
@@ -207,9 +297,9 @@ GitHub Actions must be allowed to grant:
 - `packages: write` to chart publication jobs; and
 - `contents: write` to the optional release job.
 
-Protect `main` and other integration branches with pull requests, current-branch
-requirements, restricted force pushes/deletions, and the `CI gate` required
-check. Protect `.github/**` with a certain user list once the CI maintainers are
+Protect `main` and `develop` with pull requests, current-branch requirements,
+restricted force pushes/deletions, and the `CI gate` required check. `Develop
+channel gate` is the equivalent result for pushes that land on `develop`. Protect `.github/**` with a certain user list once the CI maintainers are
 known. Publication uses one `publish-main` concurrency group and does not cancel a
 running publication. GitHub Actions may replace an older pending run with a
 newer one; this is safe because every run reconciles the complete immutable
@@ -220,9 +310,11 @@ chart and image inventory.
 For a chart:
 
 1. place service chart code under `services/<name>/chart`;
-2. use strict `x.y.z` chart versions;
-3. commit `Chart.lock` whenever dependencies are declared; and
-4. add a values override under `helm/lint-values/<chart-name>.yaml` only when
+2. commit a `.helmignore` carrying the baseline patterns; the version gate reads
+   it to decide what counts as a change;
+3. use strict `x.y.z` chart versions;
+4. commit `Chart.lock` whenever dependencies are declared; and
+5. add a values override under `helm/lint-values/<chart-name>.yaml` only when
    default values cannot be linted safely.
 
 For an image:
@@ -233,7 +325,8 @@ For an image:
    overrides for non-standard paths, repositories, or image variants;
 3. ensure the chart defines strict `x.y.z` `appVersion` metadata;
 4. exclude chart-only files from the Docker build context; and
-5. make the image a locked umbrella dependency if it belongs in compatibility
+5. set `tag_path` if the chart reads a tag key other than `image.tag`; and
+6. make the image a locked umbrella dependency if it belongs in compatibility
    releases.
 
 A service with an `images` mapping creates multiple image targets from one
@@ -249,12 +342,20 @@ Install the one Python dependency and run focused checks:
 python3 -m pip install -r .github/requirements-ci.txt
 python3 -m unittest discover -s .github/scripts -p 'test_*.py'
 python3 .github/scripts/ci.py validate-config
-python3 .github/scripts/ci.py check-versions --base HEAD^
+python3 .github/scripts/ci.py check-versions --base origin/develop --include-untracked
+python3 .github/scripts/ci.py sync-lock deploy/helm/helx-chart --check
 bash -n .github/scripts/helm-build-chart.sh .github/scripts/helm-preflight.sh
 bash .github/scripts/helm-build-chart.sh deploy/helm/helx-common/chart
 bash .github/scripts/helm-build-chart.sh deploy/helm/helx-chart
 git diff --check
 ```
+
+`check-versions` compares committed revisions by default, which is what CI does
+and what publication acts on. Pass `--include-untracked` for local runs: it
+compares the working tree and adds untracked files, so a check that passes
+locally does not then fail in CI once you commit. Creating a chart file such as
+`.helmignore` is the usual way to hit that, because it is packaged into the chart
+and therefore requires a version bump.
 
 Run `actionlint` 1.7.12 or newer for workflow validation. The workflow pins the
 official 1.7.12 Linux archive checksum.

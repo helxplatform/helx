@@ -2,6 +2,17 @@
 set -euo pipefail
 
 readonly COMMON_CHART="deploy/helm/helx-common/chart"
+readonly UMBRELLA_CHART="deploy/helm/helx-chart"
+
+# Candidate channels publish a mutable prerelease chart that tracks a branch.
+# In this mode local charts win over locked versions and images are pinned to
+# the commit being built, so the archive always describes the current tree.
+readonly CHANNEL="${CHART_CHANNEL:-}"
+readonly CHANNEL_COMMIT="${CHART_CHANNEL_COMMIT:-}"
+
+candidate_mode() {
+  [[ -n "$CHANNEL" ]]
+}
 
 chart_field() {
   python3 .github/scripts/ci.py chart-field "$1" "$2"
@@ -20,8 +31,8 @@ find_local_chart() {
   for chart_file in "${chart_files[@]}"; do
     [[ -f "$chart_file" ]] || continue
     candidate=${chart_file%/Chart.yaml}
-    if [[ "$(chart_field "$candidate" name)" == "$name" && \
-          "$(chart_field "$candidate" version)" == "$version" ]]; then
+    [[ "$(chart_field "$candidate" name)" == "$name" ]] || continue
+    if candidate_mode || [[ "$(chart_field "$candidate" version)" == "$version" ]]; then
       printf '%s\n' "$candidate"
       return 0
     fi
@@ -97,6 +108,31 @@ prepare_dependencies() {
   done <<< "$rows"
 }
 
+apply_candidate_values() {
+  local chart_dir=$1
+  local values="$chart_dir/values.yaml"
+  local backup_dir backup
+
+  if [[ ! -f "$values" ]]; then
+    echo "::error::Candidate chart has no values.yaml: $values" >&2
+    return 1
+  fi
+
+  # helm package cannot take value overrides, so the working tree is edited and
+  # restored on exit rather than leaving the candidate tags behind. The backup
+  # must live outside the chart or helm package would ship it in the archive.
+  backup_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/helm-values.XXXXXX")
+  backup="$backup_dir/values.yaml"
+  cp "$values" "$backup"
+  # shellcheck disable=SC2064
+  trap "mv -f '$backup' '$values'; rmdir '$backup_dir' 2>/dev/null || true" EXIT
+
+  python3 .github/scripts/ci.py candidate-values \
+    --channel "$CHANNEL" \
+    --commit "$CHANNEL_COMMIT" \
+    --merge-into "$values"
+}
+
 lint_chart() {
   local chart_dir=$1
   local chart_name=$2
@@ -114,7 +150,11 @@ package_chart() {
   local package_dir package
 
   package_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/helm-package.XXXXXX")
-  helm package "$chart_dir" --destination "$package_dir"
+  if candidate_mode; then
+    helm package "$chart_dir" --destination "$package_dir" --version "$chart_version"
+  else
+    helm package "$chart_dir" --destination "$package_dir"
+  fi
   package="$package_dir/$chart_name-$chart_version.tgz"
   [[ -f "$package" ]] || {
     echo "::error::helm package did not create $package" >&2
@@ -144,6 +184,22 @@ main() {
   chart_name=$(chart_field "$chart_dir" name)
   chart_version=$(chart_field "$chart_dir" version)
   prepare_dependencies "$chart_dir"
+
+  if candidate_mode; then
+    if [[ -z "$CHANNEL_COMMIT" ]]; then
+      echo "::error::CHART_CHANNEL requires CHART_CHANNEL_COMMIT" >&2
+      exit 1
+    fi
+    # Candidate value overrides are umbrella-shaped, so refuse any other chart.
+    if [[ "${chart_dir%/}" != "$UMBRELLA_CHART" ]]; then
+      echo "::error::CHART_CHANNEL only applies to $UMBRELLA_CHART, not $chart_dir" >&2
+      exit 1
+    fi
+    chart_version=$(python3 .github/scripts/ci.py candidate-version \
+      --channel "$CHANNEL" --chart-dir "$chart_dir")
+    apply_candidate_values "$chart_dir"
+  fi
+
   lint_chart "$chart_dir" "$chart_name"
   package_chart "$chart_dir" "$chart_name" "$chart_version"
 }

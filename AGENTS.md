@@ -35,7 +35,7 @@
   `appVersion` in the owning chart instead.
 - Images and BuildKit cache layers are pushed only to
   `containers.renci.org/helxplatform/<image>`. Required image secrets are
-  `CONTAINERHUB_USERNAME` and `CONTAINERHUB_PASSWORD`; Docker Hub is not used.
+  `CONTAINERHUB_USERNAME` and `CONTAINERHUB_PASSWORD`; Docker Hub is not pushed to.
   However, even though the prefix of these variables is `CONTAINERHUB_`, the actual
   name of the registry is Harbor. Please use that name when referring to the registry
   itself.
@@ -78,6 +78,7 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   warning. Bumping a service chart and the umbrella pin is one change.
 - Every dependency is pinned to an exact version, so `Chart.lock` is derivable
   from `Chart.yaml` with no registry access. Regenerate it with
+  `make sync-locks`, `make sync-helx-lock`, or
   `python .github/scripts/ci.py sync-lock <chart-dir>` rather than
   `helm dependency update`; `--check` verifies without writing. The digest
   reproduces Helm's `resolver.HashReq` and is covered by a test using a

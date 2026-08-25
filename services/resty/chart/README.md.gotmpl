@@ -1,0 +1,40 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.requirementsSection" . }}
+
+## Basic authentication Secrets
+
+Set `basicAuth.enabled=true` to enable ingress basic authentication. The selected
+Secret must contain an `auth` key whose value is a precomputed htpasswd entry;
+this chart no longer accepts a username or password and does not compute the
+entry from plaintext credentials.
+
+The chart supports three mutually exclusive ownership modes:
+
+1. **Chart-managed:** leave `secret.existingSecret` empty and
+   `secret.externalSecret.enabled=false`, then provide the precomputed entry as
+   `secret.values.auth`. The Secret name remains exactly
+   `<release>-nginx-htpasswd`. During a cluster-aware Helm upgrade, existing data
+   at that name takes precedence so the entry is preserved.
+2. **Caller-managed:** set `secret.existingSecret` to the name of a Secret that
+   already contains `auth`. The chart creates no Secret resource.
+3. **ESO-managed:** set `secret.externalSecret.enabled=true` and configure its
+   store and remote reference. ESO populates `targetName`, which defaults to
+   `<release>-nginx-htpasswd`.
+
+Managed mode requires a non-empty `auth` value on a fresh install. Because
+client-side renderers such as Argo CD cannot use Helm upgrade lookups to recover
+cluster data, provide a stable managed value there or use `existingSecret` or
+External Secrets.
+
+The Secret configured by `SSL.nginxTLSSecret` is intentionally separate and
+caller-managed. TLS certificates have a different lifecycle from basic-auth
+credentials, and this chart does not create or rotate the TLS Secret.
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "helm-docs.versionFooter" . }}

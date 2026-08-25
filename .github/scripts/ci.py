@@ -36,6 +36,7 @@ CHANNEL_RE = re.compile(r"^[a-z][0-9a-z]*(?:-[0-9a-z]+)*$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 VALUES_PART_RE = re.compile(r"^[A-Za-z_][0-9A-Za-z_-]*$")
 SHORT_SHA_LENGTH = 7
+OCI_TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 DEFAULT_TAG_PATH = "image.tag"
 # Field order of Helm's chart.Dependency struct. Everything except name and
 # repository carries omitempty, which the lock digest depends on reproducing.
@@ -833,6 +834,16 @@ def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[
     return charts
 
 
+def charts_with_dependencies(root: Path) -> list[Path]:
+    """Return every chart directory that declares dependencies, so needs a lock."""
+    return [
+        chart_dir
+        for chart_dir in discover_chart_dirs(root)
+        if chart_file(chart_dir).is_file()
+        and dependency_list(read_yaml(chart_file(chart_dir)), str(chart_file(chart_dir)))
+    ]
+
+
 def _validate_locks(root: Path) -> None:
     """Require every Chart.lock to be the one Chart.yaml would generate."""
     stale = [
@@ -1131,26 +1142,96 @@ def assign_values_path(values: dict[str, Any], path: str, value: str) -> None:
     target[parts[-1]] = value
 
 
+def validate_image_tag(tag: str) -> str:
+    """Validate a literal image tag supplied by a developer."""
+    if not isinstance(tag, str) or not OCI_TAG_RE.fullmatch(tag):
+        raise CIError(f"Not a valid OCI image tag: {tag!r}")
+    return tag
+
+
+def component_images(root: Path, config_path: Path | None = None) -> dict[str, list[dict[str, Any]]]:
+    """Group configured images by the chart component that owns them."""
+    config = load_images_config(config_path or root / IMAGES_FILE)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for image in config["images"]:
+        entry = dict(image)
+        entry["reference"] = f"{config['registry']}/{image['repository']}"
+        grouped.setdefault(image["component"], []).append(entry)
+    return grouped
+
+
+def _selected_components(
+    grouped: dict[str, list[dict[str, Any]]],
+    services: Iterable[str] | None,
+) -> set[str] | None:
+    """Validate a caller-supplied service list against the image inventory."""
+    if services is None:
+        return None
+    selected = {name for name in services if name}
+    if not selected:
+        return None
+    unknown = selected - set(grouped)
+    if unknown:
+        raise CIError(
+            f"No image is configured for: {', '.join(sorted(unknown))}. "
+            f"Known: {', '.join(sorted(grouped))}"
+        )
+    return selected
+
+
+def image_plan(
+    root: Path,
+    services: Iterable[str] | None = None,
+    config_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return the build inputs for each image, optionally limited to some services."""
+    grouped = component_images(root, config_path)
+    selected = _selected_components(grouped, services)
+    plan: list[dict[str, Any]] = []
+    for component in sorted(grouped):
+        if selected is not None and component not in selected:
+            continue
+        plan.extend(grouped[component])
+    return plan
+
+
 def candidate_values(
     root: Path,
     channel: str,
     commit: str,
     config_path: Path | None = None,
+    services: Iterable[str] | None = None,
+    tag: str | None = None,
 ) -> dict[str, Any]:
-    """Pin every locked umbrella dependency image to this candidate's image tag."""
-    tag = candidate_image_tag(channel, commit)
-    config = load_images_config(config_path or root / IMAGES_FILE)
+    """Pin locked umbrella dependency images to a candidate tag.
+
+    `services` limits the override to those components, leaving everything else
+    on its released tag, which is what a developer rebuilding one service wants.
+    `tag` replaces the computed channel tag with a literal one.
+    """
+    image_tag = validate_image_tag(tag) if tag else candidate_image_tag(channel, commit)
+    grouped = component_images(root, config_path)
+    selected = _selected_components(grouped, services)
     locked = {dependency.name for dependency in exact_locked_dependencies(root / UMBRELLA_DIR)}
+    if selected is not None:
+        unlocked = selected - locked
+        if unlocked:
+            raise CIError(
+                f"Not an umbrella dependency, so pinning it would have no effect: "
+                f"{', '.join(sorted(unlocked))}"
+            )
     overlay: dict[str, Any] = {}
-    for image in config["images"]:
-        component = image["component"]
+    for component, images in grouped.items():
         if component not in locked:
             continue
-        assign_values_path(
-            overlay.setdefault(component, {}),
-            image.get("tag_path", DEFAULT_TAG_PATH),
-            tag,
-        )
+        if selected is not None and component not in selected:
+            continue
+        for image in images:
+            assign_values_path(
+                overlay.setdefault(component, {}),
+                image.get("tag_path", DEFAULT_TAG_PATH),
+                image_tag,
+            )
     if not overlay:
         raise CIError("No locked umbrella dependency owns a configured image")
     return overlay
@@ -1386,15 +1467,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     version.add_argument("--chart-dir", default=str(UMBRELLA_DIR))
     version.add_argument("--github-output")
 
+    plan = commands.add_parser("image-plan")
+    plan.add_argument("--services", default="")
+
     overlay = commands.add_parser("candidate-values")
     overlay.add_argument("--channel", required=True)
     overlay.add_argument("--commit", required=True)
+    overlay.add_argument("--services", default="")
+    overlay.add_argument("--tag")
     overlay_destination = overlay.add_mutually_exclusive_group(required=True)
     overlay_destination.add_argument("--output")
     overlay_destination.add_argument("--merge-into")
 
     lock = commands.add_parser("sync-lock")
-    lock.add_argument("chart_dir")
+    lock.add_argument("chart_dir", nargs="?")
+    lock.add_argument("--all", action="store_true", dest="all_charts")
     lock.add_argument("--check", action="store_true")
 
     manifest = commands.add_parser("release-manifest")
@@ -1458,8 +1545,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             else:
                 print(candidate)
+        elif args.command == "image-plan":
+            for image in image_plan(ROOT, args.services.split() or None):
+                print(
+                    "\t".join(
+                        (
+                            image["component"],
+                            image["name"],
+                            image["reference"],
+                            image["context"],
+                            image["dockerfile"],
+                        )
+                    )
+                )
         elif args.command == "candidate-values":
-            overlay = candidate_values(ROOT, args.channel, args.commit)
+            overlay = candidate_values(
+                ROOT,
+                args.channel,
+                args.commit,
+                services=args.services.split() or None,
+                tag=args.tag,
+            )
             destination = output_path(ROOT, args.merge_into or args.output)
             if args.merge_into:
                 existing = read_yaml(destination)
@@ -1469,21 +1575,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 encoding="utf-8",
             )
         elif args.command == "sync-lock":
-            chart_dir = output_path(ROOT, args.chart_dir)
-            lock_path = chart_dir / "Chart.lock"
-            if args.check:
-                if not lock_matches_chart(chart_dir):
-                    raise CIError(
-                        f"{lock_path} does not match {chart_file(chart_dir)}; regenerate with "
-                        f"'python .github/scripts/ci.py sync-lock {args.chart_dir}'"
-                    )
-                print(f"{lock_path} matches Chart.yaml")
-            elif lock_matches_chart(chart_dir):
-                # Rewriting would only churn the generated timestamp.
-                print(f"{lock_path} already matches Chart.yaml")
-            else:
-                lock_path.write_text(render_lock(chart_dir), encoding="utf-8")
-                print(f"Wrote {lock_path}")
+            if bool(args.chart_dir) == args.all_charts:
+                raise CIError("Choose either a chart directory or --all")
+            targets = (
+                charts_with_dependencies(ROOT)
+                if args.all_charts
+                else [output_path(ROOT, args.chart_dir)]
+            )
+            stale: list[str] = []
+            for chart_dir in targets:
+                lock_path = chart_dir / "Chart.lock"
+                label = relative_path(ROOT, chart_dir)
+                if args.check:
+                    if lock_matches_chart(chart_dir):
+                        print(f"{label}/Chart.lock matches Chart.yaml")
+                    else:
+                        stale.append(label)
+                elif lock_matches_chart(chart_dir):
+                    # Rewriting would only churn the generated timestamp.
+                    print(f"{label}/Chart.lock already matches Chart.yaml")
+                else:
+                    lock_path.write_text(render_lock(chart_dir), encoding="utf-8")
+                    print(f"Wrote {label}/Chart.lock")
+            if stale:
+                raise CIError(
+                    "Chart.lock does not match Chart.yaml; regenerate with "
+                    "'python .github/scripts/ci.py sync-lock <chart-dir>':\n- "
+                    + "\n- ".join(stale)
+                )
         elif args.command == "release-manifest":
             manifest = build_release_manifest(ROOT, args.commit)
             output_path(ROOT, args.output).write_text(

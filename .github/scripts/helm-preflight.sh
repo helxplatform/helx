@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Interpreter used for ci.py. Prefers the project virtualenv so this script
+# works whether or not the venv is activated in your shell; override with
+# PYTHON=... to use your own.
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x "${VENV:-.venv}/bin/python" ]]; then
+    PYTHON="${VENV:-.venv}/bin/python"
+  else
+    PYTHON=python3
+  fi
+fi
+readonly PYTHON
+
 chart_field() {
-  python3 .github/scripts/ci.py chart-field "$2" "$1"
+  "$PYTHON" .github/scripts/ci.py chart-field "$2" "$1"
 }
 
 validate_inputs() {

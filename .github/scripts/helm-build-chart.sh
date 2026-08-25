@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Interpreter used for ci.py. Prefers the project virtualenv so this script
+# works whether or not the venv is activated in your shell; override with
+# PYTHON=... to use your own.
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x "${VENV:-.venv}/bin/python" ]]; then
+    PYTHON="${VENV:-.venv}/bin/python"
+  else
+    PYTHON=python3
+  fi
+fi
+readonly PYTHON
+
 readonly COMMON_CHART="deploy/helm/helx-common/chart"
 readonly UMBRELLA_CHART="deploy/helm/helx-chart"
 
@@ -9,17 +21,22 @@ readonly UMBRELLA_CHART="deploy/helm/helx-chart"
 # the commit being built, so the archive always describes the current tree.
 readonly CHANNEL="${CHART_CHANNEL:-}"
 readonly CHANNEL_COMMIT="${CHART_CHANNEL_COMMIT:-}"
+# Optional: limit the image pins to these components, and use a literal tag
+# instead of <channel>-<short-sha>. Both are for local builds where only a few
+# services were rebuilt; CI leaves them empty and pins everything.
+readonly CHANNEL_SERVICES="${CHART_CHANNEL_SERVICES:-}"
+readonly CHANNEL_IMAGE_TAG="${CHART_IMAGE_TAG:-}"
 
 candidate_mode() {
   [[ -n "$CHANNEL" ]]
 }
 
 chart_field() {
-  python3 .github/scripts/ci.py chart-field "$1" "$2"
+  "$PYTHON" .github/scripts/ci.py chart-field "$1" "$2"
 }
 
 locked_dependencies() {
-  python3 .github/scripts/ci.py locked-dependencies "$1"
+  "$PYTHON" .github/scripts/ci.py locked-dependencies "$1"
 }
 
 find_local_chart() {
@@ -127,10 +144,15 @@ apply_candidate_values() {
   # shellcheck disable=SC2064
   trap "mv -f '$backup' '$values'; rmdir '$backup_dir' 2>/dev/null || true" EXIT
 
-  python3 .github/scripts/ci.py candidate-values \
-    --channel "$CHANNEL" \
-    --commit "$CHANNEL_COMMIT" \
+  local -a arguments=(
+    --channel "$CHANNEL"
+    --commit "$CHANNEL_COMMIT"
     --merge-into "$values"
+  )
+  [[ -n "$CHANNEL_SERVICES" ]] && arguments+=(--services "$CHANNEL_SERVICES")
+  [[ -n "$CHANNEL_IMAGE_TAG" ]] && arguments+=(--tag "$CHANNEL_IMAGE_TAG")
+
+  "$PYTHON" .github/scripts/ci.py candidate-values "${arguments[@]}"
 }
 
 lint_chart() {
@@ -195,7 +217,7 @@ main() {
       echo "::error::CHART_CHANNEL only applies to $UMBRELLA_CHART, not $chart_dir" >&2
       exit 1
     fi
-    chart_version=$(python3 .github/scripts/ci.py candidate-version \
+    chart_version=$("$PYTHON" .github/scripts/ci.py candidate-version \
       --channel "$CHANNEL" --chart-dir "$chart_dir")
     apply_candidate_values "$chart_dir"
   fi

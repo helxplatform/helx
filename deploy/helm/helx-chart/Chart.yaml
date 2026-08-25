@@ -29,7 +29,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-sockets
     condition: appstore-sockets.enabled
-    version: "2.1.1"
+    version: "2.1.2"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-prepuller
     condition: appstore-prepuller.enabled

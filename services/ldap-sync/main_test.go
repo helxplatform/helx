@@ -28,6 +28,37 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestLoadConfigResolvesLDAPPasswordFiles(t *testing.T) {
+	previousConfig := config
+	t.Cleanup(func() { config = previousConfig })
+
+	dir := t.TempDir()
+	sourcePasswordFile := dir + "/source-password"
+	targetPasswordFile := dir + "/target-password"
+	if err := os.WriteFile(sourcePasswordFile, []byte("source-secret\n"), 0600); err != nil {
+		t.Fatalf("write source password: %v", err)
+	}
+	if err := os.WriteFile(targetPasswordFile, []byte(" target-secret \n"), 0600); err != nil {
+		t.Fatalf("write target password: %v", err)
+	}
+
+	configPath := dir + "/config.yaml"
+	configData := "source:\n  bind_password: inline-source\n  bind_password_file: " + sourcePasswordFile + "\ntarget:\n  bind_password_file: " + targetPasswordFile + "\n"
+	if err := os.WriteFile(configPath, []byte(configData), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if err := loadConfig(configPath); err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if config.Source.BindPassword != "source-secret" {
+		t.Fatalf("source password = %q, want file contents", config.Source.BindPassword)
+	}
+	if config.Target.BindPassword != "target-secret" {
+		t.Fatalf("target password = %q, want trimmed file contents", config.Target.BindPassword)
+	}
+}
+
 // resetState wipes all package-level mutable state so tests don't bleed into
 // each other. Call at the start of any test that touches global maps.
 func resetState(t *testing.T) {
@@ -154,7 +185,7 @@ func TestIsMergeAttr(t *testing.T) {
 		want bool
 	}{
 		{"groups", true},
-		{"Groups", true},  // case-insensitive
+		{"Groups", true}, // case-insensitive
 		{"GROUPS", true},
 		{"memberuid", true},
 		{"MemberUID", true},

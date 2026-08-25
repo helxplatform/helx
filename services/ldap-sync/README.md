@@ -123,9 +123,9 @@ member users.
    ```bash
    helm upgrade --install ldap-sync ./chart \
      --set config.source.url="ldap://source:389" \
-     --set config.source.bindPassword="password" \
+     --set secret.values.SOURCE_BIND_PASSWORD="source-password" \
      --set config.target.url="ldap://target:389" \
-     --set config.target.bindPassword="password" \
+     --set secret.values.TARGET_BIND_PASSWORD="target-password" \
      --namespace ldap-sync --create-namespace
    ```
 
@@ -137,6 +137,48 @@ member users.
      --set config.source.url="ldap://source:389" \
      [other settings...]
    ```
+
+### Search bootstrap
+
+The chart enables `searchBootstrap` by default. A Helm `post-install`/`post-upgrade`
+Job waits for the current Deployment rollout and for the ldap-sync Service to
+answer `/readyz`, then reconciles the configured search through the REST API. The default search is `get-groups` with
+the UNC group filter used by the HeLx deployment. Existing searches are updated
+rather than recreated, so upgrades remain safe and repeatable. The Job is
+removed after a successful run; set `searchBootstrap.enabled: false` to manage
+searches manually.
+
+The default chart values also configure the UNC source, the example OpenLDAP
+target, the `unc-group-x` hook, and the `azurefile` PVC storage class. The
+bind credentials should be supplied through `secret.existingSecret`,
+`secret.values`, or External Secrets rather than committed to `values.yaml`.
+
+### LDAP Credential Secret Modes
+
+The chart keeps LDAP bind credentials out of its ConfigMap and supports the
+same three ownership modes as the other HeLx service charts. The Secret must
+contain these keys:
+
+- `SOURCE_BIND_PASSWORD`
+- `TARGET_BIND_PASSWORD`
+
+Choose one mode:
+
+1. **Existing Secret**: set `secret.existingSecret` to a Secret managed by the
+   caller. The chart does not create or modify that Secret.
+2. **Chart values**: leave `secret.existingSecret` empty and set both keys under
+   `secret.values`. The chart creates `<release>-secrets` and mounts the values
+   as files.
+3. **External Secrets Operator**: leave `secret.existingSecret` empty, set
+   `secret.externalSecret.enabled: true`, provide `remoteRef` and
+   `secretStoreRef`, and let ESO create the target Secret.
+
+The generated application config references the mounted files at
+`/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD` and
+`/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD`. The deprecated
+`config.source.bindPassword` and `config.target.bindPassword` values are only
+copied into a chart-managed Secret for upgrade compatibility; they are never
+rendered into the ConfigMap.
 
 ## Building
 
@@ -259,35 +301,32 @@ bash db/init-schema.sh
 
 #### Secret Management
 
-The PostgreSQL password is auto-generated and preserved using:
+The bundled PostgreSQL dependency generates the password Secret and uses Helm
+`lookup` to preserve its password during upgrades. Its `nameOverride` is set to
+`ldap-sync-postgres`, so both the PostgreSQL Service and Secret use the same
+release-qualified name:
 
-1. **Helm Lookup**: Detects existing secrets from previous installations
-2. **Keep Annotation**: `helm.sh/resource-policy: keep` prevents
-   deletion during `helm uninstall`
-3. **Auto-Generation**: Random 32-character password on first install
-
-The secret is named `<release-name>-postgres` with key
-`postgres-password`.
-
-**Important**: When using a custom release name (other than "ldap-sync"),
-you must set `postgres.auth.existingSecret`:
-
-```bash
-helm install my-release ./chart \
-  --set postgres.auth.existingSecret=my-release-postgres \
-  [other settings...]
+```text
+<release-name>-ldap-sync-postgres
 ```
 
+For example, an umbrella release named `helx` creates
+`helx-ldap-sync-postgres`. The Secret contains the `postgres-password` key.
+
+`postgres.auth.existingSecret` is empty by default, allowing the dependency to
+create the Secret. Set it to a pre-created Secret to manage the PostgreSQL
+password outside the dependency; that Secret must contain the configured
+admin-password key.
+
 **Behavior:**
-- **Helm Upgrade**: Existing password reused, no data loss
-- **Helm Uninstall + Reinstall**: Secret preserved, data persists if
-  using persistent volumes
-- **Complete Cleanup**: Manual deletion required
+- **Helm Upgrade**: Existing password reused through Helm `lookup`
+- **Helm Uninstall**: The dependency-managed Secret is deleted unless it is
+  preserved externally
+- **Persistent data**: The PostgreSQL PVC remains separate from the Secret
 
 To completely remove everything:
 ```bash
 helm uninstall ldap-sync
-kubectl delete secret ldap-sync-postgres -n <namespace>
 kubectl delete pvc -l app.kubernetes.io/instance=ldap-sync -n <namespace>
 ```
 
@@ -295,10 +334,10 @@ kubectl delete pvc -l app.kubernetes.io/instance=ldap-sync -n <namespace>
 
 To use a custom password instead of auto-generated:
 
-1. Create secret before installing:
+1. Create a Secret before installing:
    ```bash
    kubectl create secret generic my-custom-secret \
-     --from-literal=password='my-secure-password' \
+     --from-literal=postgres-password='my-secure-password' \
      -n <namespace>
    ```
 
@@ -308,6 +347,51 @@ To use a custom password instead of auto-generated:
      auth:
        existingSecret: "my-custom-secret"
    ```
+
+When `existingSecret` is set, both the PostgreSQL dependency and ldap-sync
+consume that Secret directly.
+
+#### Renaming/Upgrading an Existing Installation
+
+Changing the PostgreSQL fullname renames the Service, StatefulSet, PVC
+identity, and default Secret. The chart provides an explicit one-time
+migration mode for existing releases:
+
+```yaml
+postgres:
+  migration:
+    enabled: true
+    # Usually <release-name>-postgres for installations before chart 2.3.2.
+    legacySecret: helx-postgres
+    legacyPvc: data-helx-postgres-0
+  auth:
+    # The migration hook creates this target before the dependency starts.
+    existingSecret: helx-ldap-sync-postgres
+  persistence:
+    # Reuse the old claim instead of creating a new one.
+    existingClaim: data-helx-postgres-0
+```
+
+Verify both legacy names with `kubectl` first. Scale the old PostgreSQL
+StatefulSet down before upgrading so the old and renamed StatefulSets do not
+mount the same ReadWriteOnce claim simultaneously. After the upgrade succeeds,
+set `postgres.migration.enabled` to `false` and keep both
+`postgres.auth.existingSecret` and `postgres.persistence.existingClaim` set.
+
+Keep `postgres.auth.existingSecret` set permanently. The migration writes the
+target Secret as a Helm hook resource, so it is not part of the release manifest
+and the PostgreSQL dependency never takes ownership of it. Clearing
+`postgres.auth.existingSecret` asks the dependency to create a Secret that
+already exists under that name, which fails on ownership metadata or replaces
+the live password. Treat the migrated Secret as caller-managed from then on:
+rotate it in the cluster, not through chart values.
+
+The migration mode copies `postgres-password` from the old Secret into the
+new fullname-based Secret during the pre-upgrade hook. It is one-shot: once the
+target Secret holds a non-empty `postgres-password` the hook stops rendering, so
+leaving the flag enabled for one more upgrade cannot delete and recreate the
+live Secret. It does not copy or rename PVC storage;
+`persistence.existingClaim` is the explicit storage handoff.
 
 #### Database Schema
 
@@ -605,19 +689,32 @@ image:
 # Log level
 loglevel: "info"
 
-# LDAP configuration
+# LDAP configuration (bind passwords are supplied by the Secret contract below)
 config:
   source:
     url: ""
     bindDN: "cn=admin,dc=example,dc=org"
-    bindPassword: ""
     baseDN: "dc=example,dc=org"
   target:
     url: ""
     bindDN: "cn=admin,dc=example,dc=org"
-    bindPassword: ""
     baseDN: "dc=example,dc=org"
   hooks: []
+
+# Select exactly one LDAP credential ownership mode.
+secret:
+  existingSecret: ""
+  values:
+    SOURCE_BIND_PASSWORD: "source-password"
+    TARGET_BIND_PASSWORD: "target-password"
+  externalSecret:
+    enabled: false
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
 
 # PostgreSQL configuration
 postgres:

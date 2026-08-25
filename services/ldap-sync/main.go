@@ -33,6 +33,7 @@ type LDAPConfig struct {
 	URL               string   `yaml:"url"`
 	BindDN            string   `yaml:"bind_dn"`
 	BindPassword      string   `yaml:"bind_password"`
+	BindPasswordFile  string   `yaml:"bind_password_file"`
 	BaseDN            string   `yaml:"base_dn"`
 	ExcludeAttributes []string `yaml:"exclude_attributes"`
 }
@@ -71,8 +72,8 @@ type PluginConfig struct {
 
 // PluginsConfig groups all plugin configuration.
 type PluginsConfig struct {
-	Retry    PluginRetryConfig `yaml:"retry"`
-	Enabled  []PluginConfig    `yaml:"enabled"`
+	Retry   PluginRetryConfig `yaml:"retry"`
+	Enabled []PluginConfig    `yaml:"enabled"`
 }
 
 // Config holds the configuration for both source and target LDAP servers.
@@ -1025,13 +1026,40 @@ func setLogLevel(newLevel string) {
 	logger.Info("Log level updated", "newLevel", newLevel)
 }
 
-// loadConfig reads the YAML config file
+// loadLDAPPassword replaces an inline LDAP password with the contents of a
+// configured Secret-mounted file. Keeping this resolution here lets local
+// configurations continue using bind_password while Kubernetes deployments
+// keep credentials out of ConfigMaps.
+func loadLDAPPassword(server string, ldapConfig *LDAPConfig) error {
+	if ldapConfig.BindPasswordFile == "" {
+		return nil
+	}
+
+	passwordBytes, err := os.ReadFile(ldapConfig.BindPasswordFile)
+	if err != nil {
+		return fmt.Errorf("failed to read %s LDAP bind password file: %w", server, err)
+	}
+	ldapConfig.BindPassword = strings.TrimSpace(string(passwordBytes))
+	return nil
+}
+
+// loadConfig reads the YAML config file and resolves any file-based LDAP
+// credentials after unmarshalling.
 func loadConfig(path string) error {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	return yaml.Unmarshal(data, &config)
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return err
+	}
+	if err := loadLDAPPassword("source", &config.Source); err != nil {
+		return err
+	}
+	if err := loadLDAPPassword("target", &config.Target); err != nil {
+		return err
+	}
+	return nil
 }
 
 // connectAndBindLDAP connects to the LDAP server using the source configuration and binds using the credentials.
@@ -1547,10 +1575,20 @@ func createSearchHandler(c echo.Context) error {
 	searchResults[id] = make(map[string]LDAPResult)
 	searchResultsMu.Unlock()
 
-	// Save to database
+	// Save to database. When persistence is enabled, do not report success if
+	// the search could only be created in memory; if the search isn't persisted
+	// to the db, it will be lost on restart.
 	if err := saveSearchToDB(id, spec); err != nil {
 		logger.Error("Failed to save search to database", "SearchId", id, "Err", err)
-		// Continue anyway - the search will still work, just won't persist
+		if config.Database.Enabled {
+			searchesMu.Lock()
+			delete(searches, id)
+			searchesMu.Unlock()
+			searchResultsMu.Lock()
+			delete(searchResults, id)
+			searchResultsMu.Unlock()
+			return c.String(http.StatusInternalServerError, "Failed to persist search")
+		}
 	}
 
 	// Pass the oneshot flag to the search routine.

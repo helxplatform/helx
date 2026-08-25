@@ -41,7 +41,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ldap-sync
     condition: ldap-sync.enabled
-    version: "2.2.1"
+    version: "2.3.0"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: pod-reaper
     condition: pod-reaper.enabled

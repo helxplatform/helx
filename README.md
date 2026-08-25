@@ -1,6 +1,5 @@
 ## HeLxPlatform
 This is the HeLxplatform monorepo. From July 2026 and onward all changes to the code should flow through here. In effort to make HeLx simple to maintain, deploy and automate the platform has been united into a Majestic Monorepo!
-
 ## DevEx
 
 Everything CI does can be run locally with the same scripts CI uses, so you can

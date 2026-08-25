@@ -35,9 +35,15 @@ Arguments:
   targetName: Name of the chart-managed Secret.
   values: Plaintext fallback values rendered through stringData.
   migration: Optional map containing legacyName, annotation, and keyRenames.
+  preserveKeys: Optional list restricting which keys persisted data protects.
 
 Persisted target and legacy values are base64-encoded Kubernetes Secret data.
 Values are only used for keys absent from persisted data.
+
+Omitting preserveKeys protects every persisted key, which is correct for a
+Secret holding only generated credentials. Supplying it protects exactly the
+listed keys and lets every other key in values track the chart values, which is
+what a Secret mixing credentials with plain configuration needs.
 */}}
 {{- define "helx-common.secret.payload.v1" -}}
 {{- $root := required "helx-common: secret root context is required" .root -}}
@@ -97,6 +103,16 @@ Values are only used for keys absent from persisted data.
   {{- $data = $targetData -}}
 {{- end -}}
 
+{{/* Keys outside preserveKeys follow values instead of persisted data. */}}
+{{- if hasKey . "preserveKeys" -}}
+  {{- $preserveKeys := default (list) .preserveKeys -}}
+  {{- range $key, $value := $valuesData -}}
+    {{- if not (has $key $preserveKeys) -}}
+      {{- $_ := unset $data $key -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
 {{- $stringData := dict -}}
 {{- range $key, $value := $valuesData -}}
   {{- if not (hasKey $data $key) -}}
@@ -123,8 +139,18 @@ Arguments:
   externalSecret: ESO settings (enabled, refreshInterval, secretStoreRef, remoteRef).
   externalSecretName: Optional ExternalSecret resource name; defaults to defaultName.
   migration: Optional migration settings accepted by secret.payload.v1.
+  preserveKeys: Optional list passed through to secret.payload.v1.
   requiredKeys: Optional list of non-empty keys required in the final managed payload.
   type: Optional Kubernetes Secret type; defaults to Opaque.
+  retain: Optional boolean; defaults to true.
+
+The chart-managed Secret carries helm.sh/resource-policy: keep so that handing
+ownership to existingSecret or ESO under the same Secret name does not delete
+the live credentials when the resource leaves the rendered manifest. Helm reads
+that annotation from the live object, so the annotation must already have been
+applied by an earlier upgrade: upgrade to a chart carrying this helper first,
+then change ownership in a separate upgrade. Set retain to false only for a
+Secret whose contents are fully reproducible from values.
 */}}
 {{- define "helx-common.secret.resources.v1" -}}
 {{- $root := required "helx-common: secret root context is required" .root -}}
@@ -134,15 +160,23 @@ Arguments:
 {{- $externalEnabled := default false (get $externalSecret "enabled") -}}
 {{- $externalTargetName := default $defaultName (get $externalSecret "targetName") -}}
 {{- $secretType := default "Opaque" (get . "type") -}}
+{{- $retain := true -}}
+{{- if hasKey . "retain" -}}
+  {{- $retain = .retain -}}
+{{- end -}}
 {{- include "helx-common.secret.validate.v1" (dict "existingSecret" $existingSecret "externalSecret" $externalSecret) -}}
 
 {{- if and (not $existingSecret) (not $externalEnabled) -}}
-  {{- $payload := include "helx-common.secret.payload.v1" (dict
+  {{- $payloadArgs := dict
     "root" $root
     "targetName" $defaultName
     "values" (default (dict) .values)
     "migration" (default (dict) .migration)
-  ) | fromYaml -}}
+  -}}
+  {{- if hasKey . "preserveKeys" -}}
+    {{- $_ := set $payloadArgs "preserveKeys" (default (list) .preserveKeys) -}}
+  {{- end -}}
+  {{- $payload := include "helx-common.secret.payload.v1" $payloadArgs | fromYaml -}}
   {{- $data := default (dict) $payload.data -}}
   {{- $stringData := default (dict) $payload.stringData -}}
   {{- range $key := (default (list) .requiredKeys) -}}
@@ -152,22 +186,26 @@ Arguments:
       {{- fail (printf "helx-common: chart-managed Secret %s requires non-empty key %s in persisted data or secret.values" $defaultName $key) -}}
     {{- end -}}
   {{- end -}}
+  {{- $annotations := deepCopy (default (dict) $payload.annotations) -}}
+  {{- if $retain -}}
+    {{- $_ := set $annotations "helm.sh/resource-policy" "keep" -}}
+  {{- end -}}
 apiVersion: v1
 kind: Secret
 metadata:
   name: {{ $defaultName }}
-{{- with $payload.annotations }}
+{{- with $annotations }}
   annotations:
-{{ toYaml . | nindent 4 }}
+{{- toYaml . | nindent 4 }}
 {{- end }}
 type: {{ $secretType }}
 {{- with $payload.data }}
 data:
-{{ toYaml . | nindent 2 }}
+{{- toYaml . | nindent 2 }}
 {{- end }}
 {{- with $payload.stringData }}
 stringData:
-{{ toYaml . | nindent 2 }}
+{{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end -}}
 
@@ -211,7 +249,7 @@ metadata:
 type: {{ default "Opaque" $legacySecret.type }}
 {{- with $legacySecret.data }}
 data:
-{{ toYaml . | nindent 2 }}
+{{- toYaml . | nindent 2 }}
 {{- end }}
   {{- end -}}
 {{- end -}}

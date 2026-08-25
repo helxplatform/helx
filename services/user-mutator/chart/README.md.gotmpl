@@ -1,0 +1,58 @@
+# user-mutator Helm chart
+
+Chart `{{ template "chart.version" . }}` uses the `helx-common` `{{ range .Dependencies }}{{ if eq .Name "helx-common" }}{{ .Version }}{{ end }}{{ end }}` library for its webhook TLS and optional LDAP password Secret contracts.
+
+## Secret modes
+
+Each known contract supports exactly one of these ownership modes:
+
+1. **Existing Secret** (backward-compatible default): leave `existingSecret` set to the historical resource name. The chart references the Secret but does not manage it.
+2. **Chart-managed Secret**: set `existingSecret: ""` and supply plaintext entries under `values`. Persisted target data is retained on upgrades. Historical Secrets are caller-owned and are not adopted automatically.
+3. **External Secrets Operator**: set `existingSecret: ""`, enable `externalSecret.enabled`, and configure `remoteRef` plus `secretStoreRef`. `existingSecret` and ExternalSecret mode are mutually exclusive.
+
+### Webhook TLS
+
+The top-level `secret` contract defaults to the existing `user-mutator-cert-tls` Secret. Managed and default ESO modes target `<fullname>-tls` with type `kubernetes.io/tls`. Keys `tls.crt` and `tls.key` are required; `ca.crt` is optional.
+
+```yaml
+secret:
+  existingSecret: ""
+  values:
+    tls.crt: replace-me
+    tls.key: replace-me
+    # ca.crt: optional
+```
+
+### LDAP password
+
+The `ldap.secret` contract is rendered and mounted only when `config.features.ldap` is enabled. It defaults to the existing `user-mutator-ldap-password` Secret; managed and default ESO modes target `<fullname>-ldap-password` and require the `password` key.
+
+```yaml
+config:
+  features:
+    ldap:
+      host: ldap.example.org
+      port: 389
+      username: cn=admin,dc=example,dc=org
+      user_base_dn: ou=users,dc=example,dc=org
+      group_base_dn: ou=groups,dc=example,dc=org
+ldap:
+  secret:
+    existingSecret: ""
+    values:
+      password: replace-me
+```
+
+## Additional caller-managed Secrets
+
+Use `config.additionalSecrets` only for unknown extra contracts. Its keys become entries in the generated `config.json` `secrets` map and mount paths under `/etc/user-mutator-secrets/<key>`; values are existing Kubernetes Secret names. The known aliases `cert` and `ldap-password` are reserved and cause rendering to fail if overridden.
+
+The former `config.secrets` map was removed in chart `2.0.0`. Rendering fails when that legacy value is supplied so custom Secret names cannot be silently ignored. Move its `cert` entry to `secret.existingSecret`, its `ldap-password` entry to `ldap.secret.existingSecret`, and any other entries to `config.additionalSecrets`.
+
+```yaml
+config:
+  additionalSecrets:
+    extra-credentials: caller-managed-secret
+```
+
+The committed `Chart.lock` pins the exact `helx-common` dependency used by this chart.

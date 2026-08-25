@@ -53,7 +53,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ui
     condition: ui.enabled
-    version: "1.6.0"
+    version: "1.6.1"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: user-mutator
     condition: user-mutator.enabled

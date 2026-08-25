@@ -1,3 +1,8 @@
 # Editor
 .claude
 .DS_Store
+# Helm dependencies are rebuilt from committed Chart.lock files.
+**/chart/charts/
+deploy/helm/helx-chart/charts/
+
+.venv

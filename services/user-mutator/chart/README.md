@@ -1,6 +1,6 @@
 # user-mutator Helm chart
 
-Chart `2.0.0` uses the `helx-common` `0.1.0` library for its webhook TLS and optional LDAP password Secret contracts.
+Chart `2.0.0` uses the `helx-common` `0.1.1` library for its webhook TLS and optional LDAP password Secret contracts.
 
 ## Secret modes
 

@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Runs the same checks CI will run, before anything leaves your machine.
+#
+# Installed by `make install-hooks`, which points core.hooksPath at this
+# directory. Nothing is downloaded and no package manager is involved.
+#
+# Skip once:      git push --no-verify
+# Uninstall:      git config --unset core.hooksPath
+# Choose python:  PYTHON=/path/to/python git push
+set -e
+
+echo "pre-push: running 'make pre-push' (skip with git push --no-verify)"
+exec make pre-push

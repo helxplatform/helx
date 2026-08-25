@@ -23,7 +23,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: controller
-              image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+              image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
               imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
               env:
                 - name: PREPULLER_DAEMONSET_NAME

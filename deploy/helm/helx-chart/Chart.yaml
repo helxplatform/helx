@@ -12,8 +12,7 @@ description: A Helm chart for deploying HeLx to Kubernetes.
 type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
-version: 4.5.13
-
+version: 4.6.3
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application.
 appVersion: 3.6.4
@@ -25,37 +24,37 @@ dependencies:
   #   repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore
     condition: appstore.enabled
-    version: "5.1.6"
+    version: "5.1.7"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
+  - name: appstore-sockets
+    condition: appstore-sockets.enabled
+    version: "2.1.2"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-prepuller
     condition: appstore-prepuller.enabled
-    version: "0.1.1"
-    repository: "file://../../../services/appstore-prepuller/chart"
-  - name: appstore-sockets
-    condition: appstore-sockets.enabled
-    version: "2.1.0"
+    version: "0.1.2"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: helx-ldap
     condition: helx-ldap.enabled
     version: "0.1.5"
-    repository: "file://../../../services/helx-ldap/chart"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ldap-sync
     condition: ldap-sync.enabled
     version: "2.3.0"
-    repository: "file://../../../services/ldap-sync/chart"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: pod-reaper
     condition: pod-reaper.enabled
     version: "0.2.5"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: resty
     condition: resty.enabled
-    version: "1.0.5"
+    version: "2.0.0"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ui
     condition: ui.enabled
-    version: "1.6.0"
+    version: "1.6.1"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: user-mutator
     condition: user-mutator.enabled
     version: "2.0.0"
-    repository: "file://../../../services/user-mutator/chart"
+    repository: "oci://ghcr.io/helxplatform/helm-charts"

@@ -91,10 +91,14 @@ openldap:
     image:
       # -- Image containing kubectl and /bin/sh used by the pre-upgrade hook.
       repository: registry.k8s.io/kubectl
+      # -- Migration hook image tag.
       tag: v1.31.0
+      # -- Image pull policy for the migration hook.
       pullPolicy: IfNotPresent
     job:
+      # -- Number of retries for the migration hook Job.
       backoffLimit: 0
+      # -- Maximum runtime for the migration hook Job.
       activeDeadlineSeconds: 600
 
   replication:

@@ -13,6 +13,19 @@
 {{- if ne $configuredPvc $legacyPvc -}}
   {{- fail (printf "ldap-sync: postgres.persistence.existingClaim must match postgres.migration.legacyPvc %q, got %q" $legacyPvc $configuredPvc) -}}
 {{- end -}}
+{{/*
+The copy is one-shot. Once the target holds postgres-password the hook stops
+rendering, so a later upgrade that still has migration enabled cannot delete and
+recreate the Secret the PostgreSQL dependency authenticates against. Helm
+ignores helm.sh/resource-policy on hook resources, so not rendering the hook is
+the only way to close that window.
+*/}}
+{{- $targetSecret := lookup "v1" "Secret" .Release.Namespace $targetName -}}
+{{- $targetData := dict -}}
+{{- if $targetSecret -}}
+  {{- $targetData = default (dict) $targetSecret.data -}}
+{{- end -}}
+{{- if empty (default "" (get $targetData "postgres-password")) }}
 {{- $payload := include "helx-common.secret.payload.v1" (dict
   "root" .
   "targetName" $targetName
@@ -36,4 +49,5 @@ metadata:
 type: Opaque
 data:
 {{ toYaml $data | nindent 2 }}
+{{- end }}
 {{- end }}

@@ -8,7 +8,8 @@ appRegistry:
 controller:
   image:
     repository: containers.renci.org/helxplatform/appstore-prepuller
-    tag: latest
+    # -- Overrides the image tag, which defaults to v<chart appVersion>.
+    tag: ""
     pullPolicy: IfNotPresent
   # CronJob schedule (default: every 5 minutes)
   schedule: "*/5 * * * *"

@@ -1,9 +1,9 @@
 dependencies:
 - name: helx-common
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 0.1.0
+  version: 0.1.1
 - name: postgresql
   repository: https://charts.bitnami.com/bitnami
   version: 16.7.26
-digest: sha256:b0ddd772ef1974f4428d26c56a78079ec958def0f596225043d216d3934839ef
-generated: "2026-08-18T03:53:46Z"
+digest: sha256:b653cc535c7a7ca03783b88c19adf63809d959e09e2a5d32615f603f53cd918a
+generated: '2026-08-25T03:41:15.780715+00:00'

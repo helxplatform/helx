@@ -288,6 +288,24 @@ irodsUnbranded:
 atlas:
   # -- Disabling will turn off the creation of secrets/configmaps for Atlas
   enabled: true
+  # The `atlas-env` Secret keeps that exact name because the launched Atlas app
+  # spec references it, so this contract has no `existingSecret` mode.
+  secret:
+    # -- Render the chart-managed `atlas-env` Secret. Set to false to create and
+    # own that Secret outside the chart under the same name.
+    create: true
+    # -- Key/value pairs merged over the values derived from `apps`. Chart
+    # values are authoritative for every key in this Secret.
+    values: {}
+    # -- Configure an ExternalSecret that populates `atlas-env`. Mutually
+    # exclusive with the chart-managed keys above.
+    externalSecret:
+      enabled: false
+      refreshInterval: 1h
+      secretStoreRef:
+        name: vault
+        kind: SecretStore
+      remoteRef: ""
 imagej:
   # -- Disabling will turn off the creation of secrets/configmaps for ImageJ
   enabled: true
@@ -297,6 +315,27 @@ octave:
 pgadmin:
   # -- Disabling will turn off the creation of secrets/configmaps for PgAdmin
   enabled: true
+  # The `pgadmin-env` Secret keeps that exact name because the launched pgAdmin
+  # app spec references it, so this contract has no `existingSecret` mode.
+  secret:
+    # -- Render the chart-managed `pgadmin-env` Secret. Set to false to create
+    # and own that Secret outside the chart under the same name.
+    create: true
+    # -- Key/value pairs for the chart-managed `pgadmin-env` Secret. Set
+    # `PGADMIN_DEFAULT_PASSWORD` here to pin the password; otherwise it is
+    # generated on first install and then preserved from the live Secret, which
+    # only a cluster-aware Helm upgrade can read. Client-side renderers such as
+    # Argo CD must set it explicitly or use `externalSecret`.
+    values: {}
+    # -- Configure an ExternalSecret that populates `pgadmin-env`. Mutually
+    # exclusive with the chart-managed keys above.
+    externalSecret:
+      enabled: false
+      refreshInterval: 1h
+      secretStoreRef:
+        name: vault
+        kind: SecretStore
+      remoteRef: ""
 webtop:
   # -- Disabling will turn off the creation of secrets/configmaps for Webtop
   enabled: true

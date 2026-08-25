@@ -1,5 +1,11 @@
 {{- if .Values.openldap.migration.enabled }}
 {{- $migrationName := include "helx-ldap.migrationName" . -}}
+{{- /*
+These run at weights below the migration Job so the Job can authenticate.
+hook-succeeded is safe alongside that: Helm deletes succeeded hooks only after
+every hook in the pre-upgrade phase has completed, so this RBAC outlives the
+Job. A failed Job leaves it in place for debugging.
+*/}}
 apiVersion: v1
 kind: ServiceAccount
 metadata:

@@ -4,6 +4,39 @@ This document describes migrations from older Helm deployments to the current
 HeLx umbrella chart. It separates required migration conditions from recommended
 preparation and verification steps.
 
+## Handing a chart-managed Secret to another owner
+
+Every chart-managed Secret rendered through the shared `helx-common` helper —
+appstore, appstore-sockets, helx-ldap, ldap-sync, resty, and user-mutator —
+carries `helm.sh/resource-policy: keep`. Without that annotation, pointing
+`secret.existingSecret` at the name Helm already manages removes the Secret from
+the rendered manifest, and Helm deletes the live credentials during the same
+upgrade even though the workload is about to mount that name.
+
+Helm reads the annotation from the **live** object, so it protects only a Secret
+that already carries it. Split the handoff across two upgrades:
+
+1. Upgrade to the current chart with the Secret still chart-managed. This
+   applies the annotation to the live Secret. Confirm it before continuing:
+
+   ```sh
+   kubectl get secret "<secret-name>" --namespace "$NAMESPACE" -o \
+     jsonpath='{.metadata.annotations.helm\.sh/resource-policy}{"\n"}'
+   ```
+
+2. In a later upgrade, set `secret.existingSecret` to that same name. Helm
+   leaves the object in place with its release ownership metadata intact, so
+   returning to chart-managed mode later re-adopts the same object.
+
+Handing a same-named Secret to External Secrets needs one extra step. An
+ExternalSecret with `creationPolicy: Owner` refuses to overwrite a Secret it
+does not own, so either set `secret.externalSecret.targetName` to a new name, or
+delete the retained Secret after the backend is populated and verified.
+
+The appstore `atlas-env` Secret is deliberately exempt from retention because
+every key in it is derived from chart values. The `webtop-*-env` Secrets are not
+rendered through the helper at all, for the same reason.
+
 ## Appstore
 
 This procedure covers upgrading an existing appstore Helm release to the current
@@ -106,29 +139,45 @@ Django restart required by that rotation.
 Secret and must not be configured as `appstore.secret.existingSecret`. When
 `appstore.pgadmin.enabled` is true, the current `pgadmin-secrets.yaml` renders
 it through the shared Secret helper with `pgadmin-env` as its exact target name.
+The name is fixed because the launched pgAdmin app spec references it, so this
+Secret has no `existingSecret` mode. To own it outside the chart, create it
+under the same name and set `appstore.pgadmin.secret.create: false`.
 
-On an upgrade, the helper looks up the existing `pgadmin-env` Secret and treats
-its data as canonical. The generated values in the chart are only fallbacks for
-keys that are absent. This specifically preserves the existing
-`PGADMIN_DEFAULT_PASSWORD` and avoids replacing the old pgAdmin password with a
-new random value. Keep `pgadmin-env` in the namespace and verify that
-`PGADMIN_DEFAULT_PASSWORD` exists before upgrading. Do not delete or rename it
-as part of the appstore primary Secret migration.
+On an upgrade, the helper looks up the existing `pgadmin-env` Secret and
+preserves `PGADMIN_DEFAULT_PASSWORD` from it, so the old pgAdmin password is not
+replaced with a new random value. Keep `pgadmin-env` in the namespace and verify
+that `PGADMIN_DEFAULT_PASSWORD` exists before upgrading. Do not delete or rename
+it as part of the appstore primary Secret migration.
+
+The password is the only preserved key. The remaining entries
+(`PGADMIN_DEFAULT_EMAIL`, `HELX_DB_HOSTNAME`, `PGADMIN_LISTEN_PORT`, and the
+`PGADMIN_CONFIG_*` flags) are plain configuration and continue to track
+`appstore.apps.*` on every upgrade. Changing `apps.PGADMIN_EMAIL` or
+`apps.HELX_DB_HOSTNAME` after the migration therefore takes effect normally.
 
 This behavior is independent of `appstore.secret.migration.enabled`; the
-`pgadmin-env` lookup is handled by its own template. If values such as
-`apps.PGADMIN_EMAIL` or `apps.HELX_DB_HOSTNAME` need to change after migration,
-remember that existing Secret keys take precedence over those generated
-fallbacks. Change the canonical `pgadmin-env` Secret deliberately rather than
-expecting a Helm values change to overwrite it.
+`pgadmin-env` lookup is handled by its own template. The generated password is
+only reachable through a cluster-aware Helm upgrade. Under Argo CD or any other
+client-side renderer, set
+`appstore.pgadmin.secret.values.PGADMIN_DEFAULT_PASSWORD` explicitly or populate
+the Secret through `appstore.pgadmin.secret.externalSecret`.
 
-The chart also renders other auxiliary Secrets, including `atlas-env`,
-`imagej-env`, `octave-env`, `webtop-env`, and `webtop-pgadmin-env`. They are not
-part of the appstore primary Secret migration. In particular, the current
-`imagej-env` and `octave-env` templates still generate random `VNC_PW` values;
-this procedure does not guarantee preservation of those values. Inventory any
-enabled auxiliary service and arrange separate Secret ownership or migration if
-its existing credential must remain unchanged.
+`atlas-env` follows the same fixed-name pattern through
+`appstore.atlas.secret`, with one difference: every one of its keys is derived
+from `appstore.apps.*`, so none is preserved from the live Secret and chart
+values stay authoritative.
+
+The remaining auxiliary Secrets are not part of the appstore primary Secret
+migration:
+
+- `webtop-env`, `webtop-image-apps-env`, `webtop-octave-env`, and
+  `webtop-pgadmin-env` hold only `PUID`/`PGID` from `appstore.apps.*`. They
+  contain no credentials and render identically on every upgrade.
+- `imagej-env` and `octave-env` still generate a random `VNC_PW` on every
+  render, deliberately left unchanged because these apps are not in use. Their
+  passwords are not preserved across upgrades. Arrange separate Secret ownership
+  before enabling either app in an environment where the VNC password must stay
+  stable.
 
 ### Preparation and values review
 
@@ -260,6 +309,9 @@ After the new appstore pod and data access have been validated:
   passed.
 - Keep `appstore.secret.values` stable. It is not a credential-rotation
   mechanism, and values for keys already persisted in the Secret are ignored.
+- Change Secret ownership in its own later upgrade, never in the same upgrade
+  that first renders the new chart. See
+  [Handing a chart-managed Secret to another owner](#handing-a-chart-managed-secret-to-another-owner).
 - Keep `pgadmin-env` in place while pgAdmin is enabled. Its existing data is
   preserved on later upgrades by the same lookup-based helper.
 - Do not delete or recreate the database PVC, SQLite PVC, user-storage PVC, or
@@ -414,13 +466,21 @@ required credential keys, copies the data without deleting the old Secret, and
 leaves `openldap-credentials` caller-managed for future upgrades. It cannot be
 used with `secret.externalSecret.enabled: true` during the same migration.
 
+The copy is one-shot. Once `openldap-credentials` holds both required keys the
+hook stops rendering, so leaving `secret.migration.enabled` true for one more
+upgrade cannot delete and recreate the canonical Secret, and the upgrade no
+longer depends on the legacy Secret still existing. Still disable the flag once
+the migration is verified, and keep the legacy Secret and a backup until then:
+Helm ignores `helm.sh/resource-policy` on hook resources, so a hook that does
+render replaces the target object rather than patching it.
+
 The normal supported path assumes the existing canonical Secret is
 caller-managed. If the old chart created a Helm-managed credentials Secret,
-verify its ownership before upgrading; do not assume that setting
-`secret.existingSecret` alone will preserve a resource that the old release
-manifest owned and the new chart no longer renders. Establish a deliberate
-caller-managed or external-secret strategy first, without committing plaintext
-credentials to the repository.
+verify its ownership before upgrading; setting `secret.existingSecret` alone
+preserves a Helm-owned Secret only under the conditions in
+[Handing a chart-managed Secret to another owner](#handing-a-chart-managed-secret-to-another-owner).
+Establish a deliberate caller-managed or external-secret strategy first, without
+committing plaintext credentials to the repository.
 
 ### Upgrade procedure
 
@@ -538,3 +598,22 @@ service may require deploying the previous chart/controller against that PVC.
 For the chart-specific defaults and migration values, see
 [`services/helx-ldap/README.md`](services/helx-ldap/README.md) and
 [`deploy/helm/helx-chart/examples/ldap-migration-values.yaml`](deploy/helm/helx-chart/examples/ldap-migration-values.yaml).
+
+## LDAP sync
+
+`ldap-sync` is a separate service with its own PostgreSQL dependency, and it is
+not covered by the HeLx LDAP procedure above. Renaming its PostgreSQL release
+objects has its own one-shot Secret and PVC handoff, documented in
+[`services/ldap-sync/README.md`](services/ldap-sync/README.md) under
+"Renaming/Upgrading an Existing Installation".
+
+Two points matter operationally:
+
+- `postgres.auth.existingSecret` stays set permanently after the migration. The
+  migrated Secret is a Helm hook resource that the PostgreSQL dependency does
+  not own, so clearing the value asks the dependency to create a Secret that
+  already exists under that name.
+- The copy is one-shot. Once the target Secret holds a non-empty
+  `postgres-password`, the hook stops rendering, so leaving
+  `postgres.migration.enabled` true for one more upgrade cannot delete and
+  recreate the live Secret. Disable it once the migration is verified.

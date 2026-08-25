@@ -199,6 +199,14 @@ make build REPOSITORY=your-registry/ldap-sync TAG=v3.1.0
 make push
 ```
 
+## CI/CD
+
+`ldap-sync` is registered in the monorepo CI image inventory. Pull requests build
+its Docker image when files under `services/ldap-sync` change, excluding Helm
+chart-only changes. The `ldap-sync` image can also be selected from the manual
+`CI` workflow dispatch. See the [HeLx CI/CD documentation](../../.github/README.md)
+for the image and chart validation workflow.
+
 ## Configuration
 
 ### LDAP Configuration
@@ -367,14 +375,23 @@ postgres:
 Verify both legacy names with `kubectl` first. Scale the old PostgreSQL
 StatefulSet down before upgrading so the old and renamed StatefulSets do not
 mount the same ReadWriteOnce claim simultaneously. After the upgrade succeeds,
-set `postgres.migration.enabled` to `false` and clear
-`postgres.auth.existingSecret`; keep `postgres.persistence.existingClaim` set
-if the old PVC should continue to hold the database.
+set `postgres.migration.enabled` to `false` and keep both
+`postgres.auth.existingSecret` and `postgres.persistence.existingClaim` set.
+
+Keep `postgres.auth.existingSecret` set permanently. The migration writes the
+target Secret as a Helm hook resource, so it is not part of the release manifest
+and the PostgreSQL dependency never takes ownership of it. Clearing
+`postgres.auth.existingSecret` asks the dependency to create a Secret that
+already exists under that name, which fails on ownership metadata or replaces
+the live password. Treat the migrated Secret as caller-managed from then on:
+rotate it in the cluster, not through chart values.
 
 The migration mode copies `postgres-password` from the old Secret into the
-new fullname-based Secret during the pre-upgrade hook. It does not copy or
-rename PVC storage; `persistence.existingClaim` is the explicit storage
-handoff.
+new fullname-based Secret during the pre-upgrade hook. It is one-shot: once the
+target Secret holds a non-empty `postgres-password` the hook stops rendering, so
+leaving the flag enabled for one more upgrade cannot delete and recreate the
+live Secret. It does not copy or rename PVC storage;
+`persistence.existingClaim` is the explicit storage handoff.
 
 #### Database Schema
 

@@ -2,7 +2,7 @@
 
 A Helm chart for deploying HeLx to Kubernetes.
 
-![Version: 4.5.4](https://img.shields.io/badge/Version-4.5.4-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.6.4](https://img.shields.io/badge/AppVersion-3.6.4-informational?style=flat-square)
+![Version: 4.6.2](https://img.shields.io/badge/Version-4.6.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 3.6.4](https://img.shields.io/badge/AppVersion-3.6.4-informational?style=flat-square)
 
 HeLx puts the most advanced analytical scientific models at investigator’s finger tips using equally advanced cloud native, container orchestrated, distributed computing systems. HeLx can be applied in many domains. Its ability to empower researchers to leverage advanced analytical tools without installation or other infrastructure concerns has broad reaching benefits.
 
@@ -11,11 +11,11 @@ HeLx puts the most advanced analytical scientific models at investigator’s fin
 NAMESPACE=helx
 helm registry login ghcr.io
 helm -n $NAMESPACE --create-namespace install helx \
-  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.5.4
+  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.6.2
 
 # Deploy to a non-GKE cluster.
 helm -n $NAMESPACE --create-namespace install helx \
-  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.5.4 \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.6.2 \
   --set appstore.userStorage.createPVC=true,nfs-server.enabled=false
 
 # Review the output of the Helm install command.  To review the output use the
@@ -60,7 +60,7 @@ nginx:
 To deploy HeLx using the values.yaml use the following command.
 ```
 helm -n $NAMESPACE --create-namespace install helx \
-  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.5.4 \
+  oci://ghcr.io/helxplatform/helm-charts/helx --version 4.6.2 \
   --values values.yaml
 ```
 
@@ -102,13 +102,14 @@ flags on the next upgrade, but keep `helx-ldap.openldap.persistence.existingClai
 set permanently. The optional Secret migration is a live Helm pre-upgrade hook;
 it copies the old Secret into the canonical `openldap-credentials` target and
 does not delete the old Secret.
-
 You can view the README.md files for each subchart to see the variables that exist.
 
 ## Values
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| ambassador.enabled | bool | `true` | enable/disable deployment of Ambassador |
+| appstore-prepuller.enabled | bool | `true` | enable/disable deployment of appstore-prepuller |
 | appstore-sockets.enabled | bool | `true` | enable/disable deployment of appstore websockets service |
 | appstore.enabled | bool | `true` | enable/disable deployment of appstore |
 | backup-pvc-cronjob.enabled | bool | `false` | enable/disable deployment of backup-pvc-cronjob |
@@ -118,6 +119,7 @@ You can view the README.md files for each subchart to see the variables that exi
 | global.restartr_api_service_name | string | `"helx-restartr-api-service"` |  |
 | global.stdnfsPvc | string | `"stdnfs"` |  |
 | helx-ldap.enabled | bool | `true` | enable/disable deployment of the HeLx LDAP service |
+| ldap-sync.enabled | bool | `true` | enable/disable deployment of ldap-sync |
 | image-utils.enabled | bool | `false` | enable/disable deployment of image-utils (imagepullsecret-patcher and imagepuller) |
 | monitoring.enabled | bool | `false` | enable/disable deployment of monitoring (kube-prometheus-stack, cost-analyzer, etc.) |
 | nfs-server.enabled | bool | `false` | enable/disable deployment of nfs-server |

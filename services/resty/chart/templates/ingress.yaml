@@ -1,4 +1,17 @@
 {{- if .Values.ingress.create }}
+{{- /*
+The TLS Secret has its own certificate lifecycle and stays caller-managed, so
+require it explicitly instead of rendering an empty secretName.
+*/}}
+{{- $tlsSecret := "" -}}
+{{- if .Values.ingress.tls.enabled -}}
+  {{- if .Values.SSL -}}
+    {{- $tlsSecret = default "" .Values.SSL.nginxTLSSecret -}}
+  {{- end -}}
+  {{- if not $tlsSecret -}}
+    {{- fail "resty: ingress.tls.enabled requires SSL.nginxTLSSecret to name an existing TLS Secret; create the Secret and set that value, or set ingress.tls.enabled=false" -}}
+  {{- end -}}
+{{- end -}}
 {{- if .Values.basicAuth.enabled }}
   {{- $_ := set .Values.ingress.annotations "nginx.ingress.kubernetes.io/auth-type" "basic" }}
   {{- $_ := set .Values.ingress.annotations "nginx.ingress.kubernetes.io/auth-secret" (include "resty.basicAuthSecretName" .) }}
@@ -19,7 +32,7 @@ spec:
   tls:
   - hosts:
       - "{{ .Values.service.serverName }}"
-    secretName: "{{ .Values.SSL.nginxTLSSecret }}"
+    secretName: "{{ $tlsSecret }}"
 {{- end}}
   rules:
   - host: "{{ .Values.service.serverName }}"
@@ -50,7 +63,7 @@ spec:
   tls:
   - hosts:
       - "{{ .Values.service.serverName }}"
-    secretName: "{{ .Values.SSL.nginxTLSSecret }}"
+    secretName: "{{ $tlsSecret }}"
 {{- end}}
   rules:
   - host: "{{ .Values.service.serverName }}"

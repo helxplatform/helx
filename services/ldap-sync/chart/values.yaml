@@ -212,7 +212,9 @@ postgres:
     # Secret. Set this to a pre-created Secret to manage the password outside
     # the dependency chart. During migration, set this to the new fullname so
     # the migration hook can create the target Secret before the dependency
-    # starts.
+    # starts, and keep it set afterwards: the migrated Secret is a hook resource
+    # the dependency does not own, so clearing this asks the dependency to
+    # create a Secret that already exists.
     existingSecret: ""
     secretKeys:
       adminPasswordKey: postgres-password

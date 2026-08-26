@@ -316,7 +316,7 @@ appstore-sockets.monitoring.image.tag   user-mutator.image.tag
 appstore-prepuller.controller.image.tag
 ```
 
-Two of those are not `image.tag` because those charts read a different key; see
+Two of those are not simply `<service-name>.image.tag` because those charts read a different key; see
 `tag_path` in [`.github/ci/images.yaml`](.github/ci/images.yaml).
 
 Set them on the command line:

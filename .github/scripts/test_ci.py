@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Iterator
 import importlib.util
 import io
 import json
@@ -14,6 +15,18 @@ import unittest
 import yaml
 from pathlib import Path
 from unittest.mock import patch
+
+@contextlib.contextmanager
+def captured_stderr() -> Iterator[io.StringIO]:
+    """Capture stderr so advisory warnings never reach the suite's own output.
+
+    A warning printed by a test is indistinguishable from one CI should act on,
+    so anything that deliberately triggers one captures it here instead.
+    """
+    buffer = io.StringIO()
+    with contextlib.redirect_stderr(buffer):
+        yield buffer
+
 
 SCRIPT = Path(__file__).with_name("ci.py")
 SPEC = importlib.util.spec_from_file_location("helx_ci", SCRIPT)
@@ -940,10 +953,11 @@ class LocalServiceBuildTests(TempTreeTest):
         self.assertEqual(overlay["worker"]["image"]["tag"], "local-abc1234")
 
     def test_a_custom_registry_replaces_the_configured_one(self) -> None:
-        plan = ci.image_plan(
-            self.root, ["worker"], config_path=self.config,
-            registry="myregistry.example.org/helx",
-        )
+        with captured_stderr():
+            plan = ci.image_plan(
+                self.root, ["worker"], config_path=self.config,
+                registry="myregistry.example.org/helx",
+            )
         self.assertEqual(
             [item["reference"] for item in plan],
             [
@@ -1097,7 +1111,9 @@ class ImagePlanContractTests(TempTreeTest):
     def run_cli(self, *argv: str) -> list[list[str]]:
         buffer = io.StringIO()
         with patch.object(ci, "ROOT", self.root), contextlib.redirect_stdout(buffer):
-            self.assertEqual(ci.main(list(argv)), 0)
+            with captured_stderr() as errors:
+                self.assertEqual(ci.main(list(argv)), 0)
+        self.stderr = errors.getvalue()
         return [line.split("\t") for line in buffer.getvalue().splitlines() if line]
 
     def test_cli_emits_the_documented_columns_in_order(self) -> None:
@@ -1121,6 +1137,9 @@ class ImagePlanContractTests(TempTreeTest):
         self.assertEqual(
             row[self.COLUMNS.index("reference")], "reg.example.org/team/renamed-api"
         )
+        # The missing-project warning must stay on stderr: the Makefile reads
+        # this plan from stdout, and a stray line would be parsed as an image.
+        self.assertIn("::warning::", self.stderr)
 
     def test_makefile_read_order_matches_the_cli(self) -> None:
         makefile = SCRIPT.resolve().parents[2] / "Makefile"

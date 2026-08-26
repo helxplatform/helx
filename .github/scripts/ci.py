@@ -25,6 +25,14 @@ IMAGES_FILE = Path(".github/ci/images.yaml")
 UMBRELLA_DIR = Path("deploy/helm/helx-chart")
 COMMON_DIR = Path("deploy/helm/helx-common/chart")
 REGISTRY = "containers.renci.org/helxplatform"
+# The project path every HeLx image sits under. Derived so it cannot drift
+# from REGISTRY. An override that omits it is legal -- someone may really be
+# hosting at the registry root -- but it is far more often a forgotten path
+# segment, which yields references nothing ever pushed, so it is warned about.
+REGISTRY_PROJECT = REGISTRY.partition("/")[2]
+# Scratch registries beside a local cluster serve from their root, so they are
+# exempt from the missing-project warning.
+LOCAL_REGISTRY_HOST = "localhost"
 
 SEMVER_RE = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -37,7 +45,15 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 VALUES_PART_RE = re.compile(r"^[A-Za-z_][0-9A-Za-z_-]*$")
 SHORT_SHA_LENGTH = 7
 OCI_TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+# A registry base URL, split the way an image reference is: host[:port]
+# followed by zero or more lowercase path segments.
+REGISTRY_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+REGISTRY_HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?::[0-9]{1,5})?$")
+REGISTRY_PATH_RE = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 DEFAULT_TAG_PATH = "image.tag"
+# The values key that names an image's registry and repository. Derived from
+# tag_path, so a chart that nests its image block needs no extra configuration.
+REPOSITORY_KEY = "repository"
 # Field order of Helm's chart.Dependency struct. Everything except name and
 # repository carries omitempty, which the lock digest depends on reproducing.
 HELM_DEPENDENCY_FIELDS = (
@@ -504,7 +520,7 @@ def _configured_path(root: Path, value: Any, label: str) -> Path:
     return root.joinpath(*pure.parts)
 
 
-IMAGE_OVERRIDE_FIELDS = frozenset(REQUIRED_IMAGE_FIELDS) | {"tag_path"}
+IMAGE_OVERRIDE_FIELDS = frozenset(REQUIRED_IMAGE_FIELDS) | {"tag_path", "repository_path"}
 
 
 def _simple_name(value: Any, label: str) -> str:
@@ -528,13 +544,26 @@ def _service_path(service: str, value: Any, label: str) -> str:
 
 
 def _tag_path(value: Any, label: str) -> str:
-    """Validate the dotted values path that overrides one image tag."""
+    """Validate a dotted values path that overrides one image field."""
     if not isinstance(value, str) or not value.strip():
         raise CIError(f"{label} must be a non-empty dotted values path")
     parts = value.strip().split(".")
     if not all(VALUES_PART_RE.fullmatch(part) for part in parts):
         raise CIError(f"{label} must be a dotted values path: {value!r}")
     return ".".join(parts)
+
+
+def derived_repository_path(tag_path: str) -> str:
+    """Return the repository key that sits beside a chart's image tag key."""
+    return ".".join([*tag_path.split(".")[:-1], REPOSITORY_KEY])
+
+
+def image_repository_path(image: dict[str, Any]) -> str:
+    """Return the values path that names one image's registry and repository."""
+    configured = image.get("repository_path")
+    if configured:
+        return str(configured)
+    return derived_repository_path(image.get("tag_path", DEFAULT_TAG_PATH))
 
 
 def _image_overrides(values: dict[str, Any], label: str) -> dict[str, Any]:
@@ -572,6 +601,10 @@ def _expand_service_image(
         image[field] = [_service_path(service, item, f"{service}.{field}") for item in raw]
     image["tag_path"] = _tag_path(
         values.get("tag_path", DEFAULT_TAG_PATH), f"{service}.tag_path"
+    )
+    image["repository_path"] = _tag_path(
+        values.get("repository_path", derived_repository_path(image["tag_path"])),
+        f"{service}.repository_path",
     )
     return image
 
@@ -692,13 +725,19 @@ def validate_images(root: Path, config_path: Path) -> dict[str, Any]:
             # A tag_path the chart does not declare would make candidate image
             # pins silently ineffective, so require it to resolve in values.yaml.
             tag_path = image.get("tag_path", DEFAULT_TAG_PATH)
+            repository_path = image_repository_path(image)
             values_path = chart_path.parent / "values.yaml"
             if values_path.is_file():
-                if not values_path_exists(read_yaml(values_path), tag_path):
-                    raise CIError(
-                        f"Image {name!r} tag_path {tag_path!r} is not declared in "
-                        f"{values_path}; set tag_path to the key the chart reads"
-                    )
+                values_data = read_yaml(values_path)
+                for field, dotted in (
+                    ("tag_path", tag_path),
+                    ("repository_path", repository_path),
+                ):
+                    if not values_path_exists(values_data, dotted):
+                        raise CIError(
+                            f"Image {name!r} {field} {dotted!r} is not declared in "
+                            f"{values_path}; set {field} to the key the chart reads"
+                        )
         except CIError as exc:
             errors.append(str(exc))
     if errors:
@@ -1220,6 +1259,50 @@ def assign_values_path(values: dict[str, Any], path: str, value: str) -> None:
     target[parts[-1]] = value
 
 
+def validate_registry(value: str) -> str:
+    """Validate a registry base URL and return it as an image reference prefix."""
+    if not isinstance(value, str) or not value.strip():
+        raise CIError(
+            "Registry must be a non-empty base URL, "
+            "for example registry.example.org/helx"
+        )
+    # A base URL is a natural thing to paste, but an image reference carries no
+    # scheme: http versus https is the daemon's decision, not the tag's.
+    prefix = REGISTRY_SCHEME_RE.sub("", value.strip()).strip("/")
+    host, _, path = prefix.partition("/")
+    if not REGISTRY_HOST_RE.fullmatch(host):
+        raise CIError(f"Not a valid registry host: {host!r} (from {value!r})")
+    for segment in path.split("/") if path else []:
+        if not REGISTRY_PATH_RE.fullmatch(segment):
+            raise CIError(
+                f"Not a valid registry path segment: {segment!r} (from {value!r}). "
+                "Path segments must be non-empty and lowercase."
+            )
+    return prefix
+
+
+def warn_if_registry_omits_project(prefix: str, supplied: str) -> None:
+    """Warn when an overridden registry does not end in the HeLx project path."""
+    if not REGISTRY_PROJECT or prefix.split("/")[-1] == REGISTRY_PROJECT:
+        return
+    # A registry running beside the cluster is normally served from its root, so
+    # a missing project path there is deliberate rather than a forgotten segment.
+    if prefix.partition("/")[0].partition(":")[0] == LOCAL_REGISTRY_HOST:
+        return
+    print(
+        f"::warning::IMAGE_REGISTRY={supplied!r} does not end in "
+        f"{REGISTRY_PROJECT!r}. Images will be referenced as "
+        f"{prefix}/<image>, not {prefix}/{REGISTRY_PROJECT}/<image>.",
+        file=sys.stderr,
+    )
+    print(
+        f"          If you pushed to {prefix}/{REGISTRY_PROJECT}, re-run with "
+        f"IMAGE_REGISTRY={prefix}/{REGISTRY_PROJECT}.\n"
+        f"          Continuing with {prefix} as given.",
+        file=sys.stderr,
+    )
+
+
 def validate_image_tag(tag: str) -> str:
     """Validate a literal image tag supplied by a developer."""
     if not isinstance(tag, str) or not OCI_TAG_RE.fullmatch(tag):
@@ -1227,13 +1310,24 @@ def validate_image_tag(tag: str) -> str:
     return tag
 
 
-def component_images(root: Path, config_path: Path | None = None) -> dict[str, list[dict[str, Any]]]:
-    """Group configured images by the chart component that owns them."""
+def component_images(
+    root: Path,
+    config_path: Path | None = None,
+    registry: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Group configured images by the chart component that owns them.
+
+    `registry` replaces the configured base URL, so a developer can build,
+    push, and pin against a registry other than Harbor.
+    """
     config = load_images_config(config_path or root / IMAGES_FILE)
+    base = validate_registry(registry or config["registry"])
+    if registry:
+        warn_if_registry_omits_project(base, registry)
     grouped: dict[str, list[dict[str, Any]]] = {}
     for image in config["images"]:
         entry = dict(image)
-        entry["reference"] = f"{config['registry']}/{image['repository']}"
+        entry["reference"] = f"{base}/{image['repository']}"
         grouped.setdefault(image["component"], []).append(entry)
     return grouped
 
@@ -1261,9 +1355,10 @@ def image_plan(
     root: Path,
     services: Iterable[str] | None = None,
     config_path: Path | None = None,
+    registry: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return the build inputs for each image, optionally limited to some services."""
-    grouped = component_images(root, config_path)
+    grouped = component_images(root, config_path, registry)
     selected = _selected_components(grouped, services)
     plan: list[dict[str, Any]] = []
     for component in sorted(grouped):
@@ -1280,15 +1375,18 @@ def candidate_values(
     config_path: Path | None = None,
     services: Iterable[str] | None = None,
     tag: str | None = None,
+    registry: str | None = None,
 ) -> dict[str, Any]:
     """Pin locked umbrella dependency images to a candidate tag.
 
     `services` limits the override to those components, leaving everything else
     on its released tag, which is what a developer rebuilding one service wants.
-    `tag` replaces the computed channel tag with a literal one.
+    `tag` replaces the computed channel tag with a literal one. `registry`
+    additionally repoints those images at another registry, since a tag pushed
+    somewhere other than Harbor is only reachable if the chart says so.
     """
     image_tag = validate_image_tag(tag) if tag else candidate_image_tag(channel, commit)
-    grouped = component_images(root, config_path)
+    grouped = component_images(root, config_path, registry)
     selected = _selected_components(grouped, services)
     locked = {dependency.name for dependency in exact_locked_dependencies(root / UMBRELLA_DIR)}
     if selected is not None:
@@ -1310,6 +1408,12 @@ def candidate_values(
                 image.get("tag_path", DEFAULT_TAG_PATH),
                 image_tag,
             )
+            if registry:
+                assign_values_path(
+                    overlay.setdefault(component, {}),
+                    image_repository_path(image),
+                    image["reference"],
+                )
     if not overlay:
         raise CIError("No locked umbrella dependency owns a configured image")
     return overlay
@@ -1553,12 +1657,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     plan = commands.add_parser("image-plan")
     plan.add_argument("--services", default="")
+    plan.add_argument("--registry", default="")
 
     overlay = commands.add_parser("candidate-values")
     overlay.add_argument("--channel", required=True)
     overlay.add_argument("--commit", required=True)
     overlay.add_argument("--services", default="")
     overlay.add_argument("--tag")
+    overlay.add_argument("--registry", default="")
     overlay_destination = overlay.add_mutually_exclusive_group(required=True)
     overlay_destination.add_argument("--output")
     overlay_destination.add_argument("--merge-into")
@@ -1635,7 +1741,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 print(candidate)
         elif args.command == "image-plan":
-            for image in image_plan(ROOT, args.services.split() or None):
+            plan = image_plan(
+                ROOT, args.services.split() or None, registry=args.registry or None
+            )
+            for image in plan:
                 print(
                     "\t".join(
                         (
@@ -1654,6 +1763,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.commit,
                 services=args.services.split() or None,
                 tag=args.tag,
+                registry=args.registry or None,
             )
             destination = output_path(ROOT, args.merge_into or args.output)
             if args.merge_into:

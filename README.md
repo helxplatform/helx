@@ -177,7 +177,7 @@ that commit's images:
 ```bash
 helm registry login ghcr.io
 helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version <umbrella-version>-develop -n helx --create-namespace
+  --version <umbrella-version>-develop -n <deploy-namespace>
 ```
 
 It is a SemVer prerelease, so it always sorts below the matching release. To
@@ -215,7 +215,7 @@ a candidate with your commit's images already pinned:
 ```bash
 helm registry login ghcr.io
 helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version $(make -s ci-candidate-version) -n helx --create-namespace \
+  --version $(make -s ci-candidate-version) -n <deploy-namespace> \
   --values my-values.yaml
 ```
 
@@ -231,7 +231,7 @@ reach GitHub:
    make ci-build-helx-images SERVICES="user-mutator ui"
    ```
 
-   `TAG` defaults to `local-<short-sha>`. A service with several image variants,
+   `TAG` defaults to `test-<short-sha>`. A service with several image variants,
    like `appstore-sockets`, builds all of them.
 3. Get those images to your cluster. For a local cluster, load them directly —
    no registry involved:
@@ -257,11 +257,26 @@ reach GitHub:
    picks up your modified charts. Passing `SERVICES` additionally writes your
    image tag into the packaged values for **only those services** — everything
    else stays on its released `v<appVersion>`. No `--set` flags needed.
+
+   `SERVICES` rewrites image tags and nothing else. It does not set
+   `enabled: true` for the services you name or `enabled: false` for the rest —
+   the ones you leave out are still installed, just on their released images.
+   What gets deployed is decided only by the `<name>.enabled` values in
+   [`deploy/helm/helx-chart/values.yaml`](deploy/helm/helx-chart/values.yaml)
+   and whatever your own `--values` file says. To install just what you
+   rebuilt, turn the others off yourself at install time:
+
+   ```bash
+   helm upgrade --install helx /path/to/helx-<version>-local.tgz \
+     -n <deploy-namespace> --values my-values.yaml \
+     --set appstore.enabled=false --set appstore-sockets.enabled=false
+   ```
+
 5. Install the `.tgz` it prints:
 
    ```bash
    helm upgrade --install helx /path/to/helx-<version>-local.tgz \
-     -n helx --create-namespace --values my-values.yaml
+     -n <deploy-namespace> --values my-values.yaml
    ```
 
 Use the same `SERVICES` and `TAG` for every step. Setting them once is easiest:
@@ -271,8 +286,28 @@ export SERVICES="user-mutator ui" TAG=dev-1
 make ci-build-helx-images ci-load-helx-images ci-build-helx-chart
 ```
 
-To override an image tag by hand instead, the keys are the umbrella dependency
-name plus the chart's own tag key:
+`TAG` reaches the chart only through `SERVICES`. There is no flag that retags
+everything at once: with `CHART_CHANNEL` and no `SERVICES`,
+`make ci-build-helx-chart` computes the tag itself as `<channel>-<short-sha>`
+and ignores `TAG` entirely. To put one tag of your choosing on every image,
+name every service:
+
+```bash
+make ci-build-helx-chart TAG=my-tag \
+  SERVICES="appstore appstore-prepuller appstore-sockets ldap-sync ui user-mutator"
+```
+
+That is the full list of components with an image in
+[`.github/ci/images.yaml`](.github/ci/images.yaml), and it covers all seven
+images — `appstore-sockets` owns two. The chart-only dependencies `helx-ldap`,
+`pod-reaper`, and `resty` build no image, so nothing pins them; they keep the
+tags their own charts ship. Only pin services you actually built and pushed at
+that tag, or the chart will point at images that do not exist.
+
+To override an image tag by hand instead, pass it to `helm` at install time.
+The packaged `.tgz` does not have to be rebuilt — these are ordinary subchart
+values, and the key is the umbrella dependency name plus the chart's own tag
+key:
 
 ```text
 appstore.image.tag                      ldap-sync.image.tag
@@ -283,6 +318,33 @@ appstore-prepuller.controller.image.tag
 
 Two of those are not `image.tag` because those charts read a different key; see
 `tag_path` in [`.github/ci/images.yaml`](.github/ci/images.yaml).
+
+Set them on the command line:
+
+```bash
+helm upgrade --install helx /path/to/helx-<version>.tgz -n <deploy-namespace> \
+  --values my-values.yaml \
+  --set ui.image.tag=my-tag \
+  --set appstore-sockets.monitoring.image.tag=my-tag
+```
+
+or, better for anything you want to keep, in your own values file, where the
+dependency name is a top-level key:
+
+```yaml
+ui:
+  image:
+    tag: my-tag
+appstore-sockets:
+  monitoring:
+    image:
+      tag: my-tag
+```
+
+Both win over whatever `ci-build-helx-chart` baked into the packaged values, so
+this also works to correct a pin after the fact. The image has to exist at that
+tag in `containers.renci.org/helxplatform` — overriding the tag does not build
+or push anything.
 
 ### Working on the CI itself
 

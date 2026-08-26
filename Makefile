@@ -77,7 +77,7 @@ HOOKS_PATH                      ?= .githooks
 # Local image builds. SERVICES names the services you rebuilt; only those get
 # pinned in the umbrella, so everything else stays on its released tag.
 SERVICES                        ?=
-TAG                             ?= local-$(shell git rev-parse --short=7 HEAD 2>/dev/null)
+TAG                             ?= test-$(shell git rev-parse --short=7 HEAD 2>/dev/null)
 # auto picks whichever of kind, minikube, or k3d is installed.
 CLUSTER_TOOL                    ?= auto
 CLUSTER_NAME                    ?=
@@ -190,7 +190,7 @@ help:
 	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
 	@echo '  SERVICE=<name>         Required by the per-service targets above'
 	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
-	@echo '  TAG=<tag>              Image tag for local builds (default local-<short-sha>)'
+	@echo '  TAG=<tag>              Image tag for local builds (default test-<short-sha>)'
 	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
 	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
 	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'

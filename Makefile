@@ -78,6 +78,22 @@ HOOKS_PATH                      ?= .githooks
 # pinned in the umbrella, so everything else stays on its released tag.
 SERVICES                        ?=
 TAG                             ?= test-$(shell git rev-parse --short=7 HEAD 2>/dev/null)
+# Registry the local image targets build, push, and pin against. Empty means
+# the registry in .github/ci/images.yaml, which is Harbor. Set it to a base URL
+# -- host, optional port, optional project path -- to use your own instead:
+#   IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+#   IMAGE_REGISTRY=localhost:5000
+# Images live under the registry's 'helxplatform' project, so an override
+# that omits it warns -- loudly, but it still builds, in case you meant it.
+# A localhost registry is exempt: those serve from their root by convention.
+# Any http:// or https:// prefix is dropped, since an image reference has no
+# scheme. Use the same value for build, push, and ci-build-helx-chart, or the
+# packaged chart will point somewhere the images were never pushed.
+IMAGE_REGISTRY                  ?=
+# Passed to every ci.py image-plan call, so one registry override reaches the
+# build, load, and push targets identically.
+IMAGE_PLAN_FLAGS                 = --services "$(SERVICES)" \
+                                   $(if $(IMAGE_REGISTRY),--registry "$(IMAGE_REGISTRY)")
 # auto picks whichever of kind, minikube, or k3d is installed.
 CLUSTER_TOOL                    ?= auto
 CLUSTER_NAME                    ?=
@@ -180,10 +196,10 @@ help:
 	@echo '  make ci-candidate-version                Print the candidate chart version  [CHANNEL]'
 	@echo
 	@echo 'Deploying a local build (see README.md "DevEx"):'
-	@echo '  make ci-build-helx-images SERVICES="a b"  Build and tag images for those services  [TAG]'
+	@echo '  make ci-build-helx-images SERVICES="a b"  Build and tag images for those services  [TAG, IMAGE_REGISTRY]'
 	@echo '  make ci-load-helx-images  SERVICES="a b"  Load them into kind/minikube/k3d  [CLUSTER_TOOL, CLUSTER_NAME]'
-	@echo '  make ci-push-helx-images  SERVICES="a b"  Push them to Harbor instead  [TAG]'
-	@echo '  make ci-build-helx-chart  SERVICES="a b"  Package the umbrella pinned to TAG for those services'
+	@echo '  make ci-push-helx-images  SERVICES="a b"  Push them to a registry instead  [TAG, IMAGE_REGISTRY]'
+	@echo '  make ci-build-helx-chart  SERVICES="a b"  Package the umbrella pinned to TAG for those services  [IMAGE_REGISTRY]'
 	@echo
 	@echo 'Environment variables:'
 	@echo '  PYTHON=<path>          Interpreter to use (default $(VENV_PYTHON); skips venv setup)'
@@ -191,6 +207,8 @@ help:
 	@echo '  SERVICE=<name>         Required by the per-service targets above'
 	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
 	@echo '  TAG=<tag>              Image tag for local builds (default test-<short-sha>)'
+	@echo '  IMAGE_REGISTRY=<url>   Build, push, and pin against this registry instead'
+	@echo '                         of Harbor, e.g. myregistry.azurecr.io/helx'
 	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
 	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
 	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
@@ -507,12 +525,12 @@ endef
 ci-build-helx-images: $(PYTHON_READY)
 	$(call require-services)
 	@set -euo pipefail; \
-	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan --services "$(SERVICES)"); \
+	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan $(IMAGE_PLAN_FLAGS)); \
 	while IFS=$$'\t' read -r component name reference context dockerfile; do \
 		echo "Building $$reference:$(TAG)"; \
 		docker build -f "$$dockerfile" -t "$$reference:$(TAG)" "$$context"; \
 	done <<< "$$plan"
-	@echo 'Next: make ci-load-helx-images or make ci-push-helx-images, with the same SERVICES and TAG'
+	@echo 'Next: make ci-load-helx-images or make ci-push-helx-images, with the same SERVICES and TAG$(if $(IMAGE_REGISTRY), and IMAGE_REGISTRY)'
 
 # ci-load-helx-images: Load the built images straight into a local cluster, so
 # nothing has to reach a registry.
@@ -527,14 +545,14 @@ ci-load-helx-images: $(PYTHON_READY)
 	fi; \
 	if test "$$tool" = auto; then \
 		echo "No local cluster tool found. Install kind, minikube, or k3d,"; \
-		echo "or use 'make ci-push-helx-images' to push to Harbor instead."; \
+		echo "or use 'make ci-push-helx-images' to push to a registry instead."; \
 		exit 1; \
 	fi; \
-	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan --services "$(SERVICES)"); \
+	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan $(IMAGE_PLAN_FLAGS)); \
 	while IFS=$$'\t' read -r component name reference context dockerfile; do \
 		if ! docker image inspect "$$reference:$(TAG)" >/dev/null 2>&1; then \
 			echo "$$reference:$(TAG) has not been built."; \
-			echo 'Run: make ci-build-helx-images SERVICES="$(SERVICES)" TAG=$(TAG)'; \
+			echo 'Run: make ci-build-helx-images SERVICES="$(SERVICES)" TAG=$(TAG)$(if $(IMAGE_REGISTRY), IMAGE_REGISTRY=$(IMAGE_REGISTRY))'; \
 			exit 1; \
 		fi; \
 		echo "Loading $$reference:$(TAG) into $$tool"; \
@@ -546,16 +564,18 @@ ci-load-helx-images: $(PYTHON_READY)
 		esac; \
 	done <<< "$$plan"
 
-# ci-push-helx-images: Push the built images to Harbor, for a cluster that
-# cannot be loaded into directly. Requires docker login containers.renci.org.
+# ci-push-helx-images: Push the built images to a registry, for a cluster that
+# cannot be loaded into directly. Defaults to Harbor, so it requires
+# docker login containers.renci.org; set IMAGE_REGISTRY to push elsewhere,
+# after logging in to that registry.
 ci-push-helx-images: $(PYTHON_READY)
 	$(call require-services)
 	@set -euo pipefail; \
-	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan --services "$(SERVICES)"); \
+	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan $(IMAGE_PLAN_FLAGS)); \
 	while IFS=$$'\t' read -r component name reference context dockerfile; do \
 		if ! docker image inspect "$$reference:$(TAG)" >/dev/null 2>&1; then \
 			echo "$$reference:$(TAG) has not been built."; \
-			echo 'Run: make ci-build-helx-images SERVICES="$(SERVICES)" TAG=$(TAG)'; \
+			echo 'Run: make ci-build-helx-images SERVICES="$(SERVICES)" TAG=$(TAG)$(if $(IMAGE_REGISTRY), IMAGE_REGISTRY=$(IMAGE_REGISTRY))'; \
 			exit 1; \
 		fi; \
 		echo "Pushing $$reference:$(TAG)"; \
@@ -576,12 +596,19 @@ ci-build-helx-chart: $(PYTHON_READY)
 	if test -n "$$channel" && test -z "$$commit"; then \
 		commit=$$(git rev-parse HEAD); \
 	fi; \
+	if test -n "$(IMAGE_REGISTRY)" && test -z "$$channel"; then \
+		echo "IMAGE_REGISTRY only reaches the chart through an image pin, and"; \
+		echo "nothing is pinned here. Add SERVICES=\"a b\" for the services you"; \
+		echo "pushed, or CHART_CHANNEL=<name> to pin every image."; \
+		exit 1; \
+	fi; \
 	if test -n "$(SERVICES)"; then \
-		echo "Pinning $(SERVICES) to $(TAG); every other image stays on its released tag"; \
+		echo "Pinning $(SERVICES) to $(TAG)$(if $(IMAGE_REGISTRY), at $(IMAGE_REGISTRY)); every other image stays on its released tag"; \
 	fi; \
 	PYTHON="$(PYTHON)" CHART_CHANNEL="$$channel" CHART_CHANNEL_COMMIT="$$commit" \
 	CHART_CHANNEL_SERVICES="$(SERVICES)" \
 	CHART_IMAGE_TAG="$(if $(SERVICES),$(TAG),)" \
+	CHART_IMAGE_REGISTRY="$(IMAGE_REGISTRY)" \
 		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
 
 # docker-build: Build one service image exactly as CI builds it

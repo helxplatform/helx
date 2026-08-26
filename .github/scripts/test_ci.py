@@ -133,7 +133,10 @@ class ConfigValidationTests(TempTreeTest):
         self.write_chart("services/app/chart", name="app", app_version="2.0.0")
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
         self.write_chart("deploy/helm/helx-chart", name="helx")
-        self.write("services/app/chart/values.yaml", "controller:\n  image:\n    tag: latest\n")
+        self.write(
+            "services/app/chart/values.yaml",
+            "controller:\n  image:\n    repository: example/app\n    tag: latest\n",
+        )
         self.write("sources/Dockerfile", "FROM scratch\n")
         image = {
             "name": "app",
@@ -936,6 +939,118 @@ class LocalServiceBuildTests(TempTreeTest):
         )
         self.assertEqual(overlay["worker"]["image"]["tag"], "local-abc1234")
 
+    def test_a_custom_registry_replaces_the_configured_one(self) -> None:
+        plan = ci.image_plan(
+            self.root, ["worker"], config_path=self.config,
+            registry="myregistry.example.org/helx",
+        )
+        self.assertEqual(
+            [item["reference"] for item in plan],
+            [
+                "myregistry.example.org/helx/worker",
+                "myregistry.example.org/helx/worker/sidecar",
+            ],
+        )
+
+    def test_a_custom_registry_also_repoints_the_chart(self) -> None:
+        # Pushing elsewhere is useless if the chart still names Harbor, so the
+        # repository beside each tag key is rewritten too.
+        overlay = ci.candidate_values(
+            self.root, "local", "abc1234", config_path=self.config,
+            services=["worker"], tag="dev-1", registry="localhost:5000",
+        )
+        self.assertEqual(
+            overlay,
+            {
+                "worker": {
+                    "image": {
+                        "repository": "localhost:5000/worker",
+                        "tag": "dev-1",
+                    },
+                    "sidecar": {
+                        "image": {
+                            "repository": "localhost:5000/worker/sidecar",
+                            "tag": "dev-1",
+                        }
+                    },
+                }
+            },
+        )
+
+    def test_without_a_registry_the_repository_is_left_alone(self) -> None:
+        # Overriding it unasked would rewrite values the chart already ships.
+        overlay = ci.candidate_values(
+            self.root, "local", "abc1234", config_path=self.config,
+            services=["worker"], tag="dev-1",
+        )
+        self.assertEqual(
+            overlay,
+            {"worker": {"image": {"tag": "dev-1"}, "sidecar": {"image": {"tag": "dev-1"}}}},
+        )
+
+    def test_a_registry_without_the_project_path_warns_but_still_builds(self) -> None:
+        # Forgetting /helxplatform yields references nothing was pushed to, but
+        # hosting at the registry root is legal, so this warns rather than fails.
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            plan = ci.image_plan(
+                self.root, ["worker"], config_path=self.config,
+                registry="myregistry.example.org",
+            )
+        self.assertEqual(plan[0]["reference"], "myregistry.example.org/worker")
+        message = stderr.getvalue()
+        self.assertIn("::warning::", message)
+        self.assertIn(ci.REGISTRY_PROJECT, message)
+        self.assertIn("myregistry.example.org/<image>", message)
+
+    def test_a_localhost_registry_is_exempt_from_the_warning(self) -> None:
+        # A scratch registry beside a kind cluster serves from its root, so the
+        # missing project path is intended and nagging about it trains it away.
+        for registry in ("localhost:5000", "localhost", "localhost:5000/scratch"):
+            with self.subTest(registry=registry):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr):
+                    ci.image_plan(
+                        self.root, ["worker"], config_path=self.config,
+                        registry=registry,
+                    )
+                self.assertEqual(stderr.getvalue(), "")
+
+    def test_a_hostname_merely_containing_localhost_still_warns(self) -> None:
+        # Only the literal localhost host is exempt; a remote registry that
+        # happens to spell it is still a real missing project path.
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            ci.image_plan(
+                self.root, ["worker"], config_path=self.config,
+                registry="localhost.example.org",
+            )
+        self.assertIn("::warning::", stderr.getvalue())
+
+    def test_a_registry_with_the_project_path_is_silent(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            ci.image_plan(
+                self.root, ["worker"], config_path=self.config,
+                registry=f"myregistry.example.org/{ci.REGISTRY_PROJECT}",
+            )
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_the_default_registry_never_warns(self) -> None:
+        # It ends in the project path by construction; a warning here would fire
+        # on every ordinary build.
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            ci.image_plan(self.root, ["worker"], config_path=self.config)
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_an_invalid_registry_is_rejected_before_anything_is_built(self) -> None:
+        with self.assertRaisesRegex(ci.CIError, "registry path segment"):
+            ci.image_plan(
+                self.root, ["worker"], config_path=self.config,
+                registry="registry.example.org/Helx",
+            )
+
     def test_literal_tag_is_validated(self) -> None:
         for bad in ("not a tag", "-leading", "x" * 200):
             with self.subTest(tag=bad), self.assertRaisesRegex(ci.CIError, "valid OCI image tag"):
@@ -1001,6 +1116,12 @@ class ImagePlanContractTests(TempTreeTest):
         (row,) = self.run_cli("image-plan")
         self.assertEqual(row[self.COLUMNS.index("reference")], f"{ci.REGISTRY}/renamed-api")
 
+    def test_cli_registry_flag_replaces_the_reference_prefix(self) -> None:
+        (row,) = self.run_cli("image-plan", "--registry", "https://reg.example.org/team/")
+        self.assertEqual(
+            row[self.COLUMNS.index("reference")], "reg.example.org/team/renamed-api"
+        )
+
     def test_makefile_read_order_matches_the_cli(self) -> None:
         makefile = SCRIPT.resolve().parents[2] / "Makefile"
         if not makefile.is_file():  # pragma: no cover - only when run outside the repo
@@ -1009,6 +1130,54 @@ class ImagePlanContractTests(TempTreeTest):
         self.assertTrue(found, "no 'read -r' consumer found in the Makefile")
         for names in found:
             self.assertEqual(tuple(names.split()), self.COLUMNS)
+
+    def test_every_makefile_image_plan_with_services_honours_the_registry(self) -> None:
+        # build, load, and push must agree on the reference, or one of them
+        # silently operates on images the others never touched.
+        makefile = SCRIPT.resolve().parents[2] / "Makefile"
+        if not makefile.is_file():  # pragma: no cover - only when run outside the repo
+            self.skipTest("Makefile not present")
+        text = makefile.read_text(encoding="utf-8")
+        self.assertIn('--registry "$(IMAGE_REGISTRY)"', text)
+        calls = re.findall(r"\$\(CI_SCRIPT\) image-plan([^;\\\n]*)", text)
+        self.assertTrue(calls, "no image-plan call found in the Makefile")
+        # A bare listing needs no flags; anything that selects images must take
+        # them from the shared variable, or build, load, and push would drift.
+        selective = [
+            flags.strip()
+            for flags in calls
+            if flags.strip() and not flags.strip().startswith("|")
+        ]
+        self.assertTrue(selective, "no image-plan call passes flags")
+        for flags in selective:
+            self.assertIn("$(IMAGE_PLAN_FLAGS)", flags)
+
+
+class RegistryUrlTests(unittest.TestCase):
+    """A registry base URL is normalized into an image reference prefix."""
+
+    def test_accepted_forms(self) -> None:
+        for value, expected in (
+            ("containers.renci.org/helxplatform", "containers.renci.org/helxplatform"),
+            ("https://myregistry.azurecr.io/helx", "myregistry.azurecr.io/helx"),
+            ("http://registry.example.org/a/b/", "registry.example.org/a/b"),
+            ("localhost:5000", "localhost:5000"),
+            ("  registry.example.org/team_1  ", "registry.example.org/team_1"),
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(ci.validate_registry(value), expected)
+
+    def test_rejected_forms(self) -> None:
+        for value in (
+            "",
+            "   ",
+            "reg example.org",
+            "reg.example.org/Team",
+            "reg.example.org/a//b",
+            "-reg.example.org",
+        ):
+            with self.subTest(value=value), self.assertRaises(ci.CIError):
+                ci.validate_registry(value)
 
 
 class UmbrellaAboveReleaseTests(TempTreeTest):

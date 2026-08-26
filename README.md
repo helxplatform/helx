@@ -247,6 +247,29 @@ reach GitHub:
    ```bash
    make ci-push-helx-images SERVICES="user-mutator ui"
    ```
+
+   To use a registry other than Harbor — your own ACR, a scratch project, a
+   registry running beside the cluster — set `IMAGE_REGISTRY` to its base URL,
+   after logging in to it:
+
+   ```bash
+   docker login myregistry.azurecr.io
+   export SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   make ci-build-helx-images ci-push-helx-images
+   ```
+
+   The value is a host, an optional port, and an optional project path;
+   `localhost:5000` and `myregistry.azurecr.io/helxplatform` are both fine, and
+   an `https://` prefix is dropped for you. Repository names are unchanged
+   underneath it, so `ui` publishes as
+   `myregistry.azurecr.io/helxplatform/helx-ui`.
+
+   Because the project path is easy to forget and a missing one yields
+   references nothing was ever pushed to, a remote registry not ending in
+   `helxplatform` prints a warning and continues. Ignore it if you meant it. A
+   `localhost` registry never warns, since those serve from their root.
+   Set it on the build too: the reference is baked into the image at build
+   time, so pushing with a registry the build did not use finds nothing.
 4. Package the umbrella with those services pinned to your tag:
 
    ```bash
@@ -272,6 +295,16 @@ reach GitHub:
      --set appstore.enabled=false --set appstore-sockets.enabled=false
    ```
 
+   If you pushed to your own registry, pass it here as well, or the chart will
+   still send the cluster to Harbor for those images:
+
+   ```bash
+   make ci-build-helx-chart SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   ```
+
+   That writes both the tag and the repository for those services. Everything
+   outside `SERVICES` keeps pulling from Harbor, so the cluster needs
+   credentials for both registries unless you mirrored the rest yourself.
 5. Install the `.tgz` it prints:
 
    ```bash
@@ -279,7 +312,8 @@ reach GitHub:
      -n <deploy-namespace> --values my-values.yaml
    ```
 
-Use the same `SERVICES` and `TAG` for every step. Setting them once is easiest:
+Use the same `SERVICES` and `TAG` for every step, plus the same
+`IMAGE_REGISTRY` if you set one. Setting them once is easiest:
 
 ```bash
 export SERVICES="user-mutator ui" TAG=dev-1
@@ -304,8 +338,18 @@ images — `appstore-sockets` owns two. The chart-only dependencies `helx-ldap`,
 tags their own charts ship. Only pin services you actually built and pushed at
 that tag, or the chart will point at images that do not exist.
 
-To override an image tag by hand instead, pass it to `helm` at install time.
-The packaged `.tgz` does not have to be rebuilt — these are ordinary subchart
+Add `IMAGE_REGISTRY=` to that same command to point all of them somewhere other
+than Harbor. Because every service is named, this is the one case where nothing
+is left behind on Harbor, so the cluster needs credentials for your registry
+only:
+
+```bash
+make ci-build-helx-chart TAG=my-tag IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform \
+  SERVICES="appstore appstore-prepuller appstore-sockets ldap-sync ui user-mutator"
+```
+
+To override an image by hand instead, pass it to `helm` at install time. The
+packaged `.tgz` does not have to be rebuilt — these are ordinary subchart
 values, and the key is the umbrella dependency name plus the chart's own tag
 key:
 
@@ -319,12 +363,18 @@ appstore-prepuller.controller.image.tag
 Two of those are not simply `<service-name>.image.tag` because those charts read a different key; see
 `tag_path` in [`.github/ci/images.yaml`](.github/ci/images.yaml).
 
+Each has a `repository` sibling that names the registry, so swapping
+`.tag` for `.repository` in any key above gives you the other half —
+`ui.image.repository`, `appstore-prepuller.controller.image.repository`, and so
+on. That pair is exactly what `IMAGE_REGISTRY` writes for you.
+
 Set them on the command line:
 
 ```bash
 helm upgrade --install helx /path/to/helx-<version>.tgz -n <deploy-namespace> \
   --values my-values.yaml \
   --set ui.image.tag=my-tag \
+  --set ui.image.repository=myregistry.azurecr.io/helxplatform/helx-ui \
   --set appstore-sockets.monitoring.image.tag=my-tag
 ```
 
@@ -335,6 +385,7 @@ dependency name is a top-level key:
 ui:
   image:
     tag: my-tag
+    repository: myregistry.azurecr.io/helxplatform/helx-ui
 appstore-sockets:
   monitoring:
     image:
@@ -342,9 +393,9 @@ appstore-sockets:
 ```
 
 Both win over whatever `ci-build-helx-chart` baked into the packaged values, so
-this also works to correct a pin after the fact. The image has to exist at that
-tag in `containers.renci.org/helxplatform` — overriding the tag does not build
-or push anything.
+this also works to correct a pin after the fact. The image has to already exist
+at that tag in whichever registry the repository names — overriding values does
+not build or push anything.
 
 ### Working on the CI itself
 

@@ -59,7 +59,7 @@ ui:
   enabled: true
 user-mutator:
   # -- enable/disable deployment of user-mutator
-  enabled: false
+  enabled: true
 
 global:
   # tycho_api_service_name: helx-tycho-api

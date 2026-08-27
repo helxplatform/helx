@@ -1,11 +1,15 @@
 # Parent chart for HeLx.
 
-# ambassador:
-#   # -- enable/disable deployment of Ambassador
-#   enabled: true
+ambassador:
+  # -- enable/disable deployment of Ambassador
+  enabled: false
 appstore:
   # -- enable/disable deployment of appstore
   enabled: true
+  tycho:
+    # -- routing data plane for Tycho-launched apps: "proxy" (ClusterIP +
+    # /private, resolved by appstore via resty) or "ambassador" (legacy).
+    appRoutingMode: proxy
 appstore-prepuller:
   # -- enable/disable deployment of appstore-prepuller
   enabled: true

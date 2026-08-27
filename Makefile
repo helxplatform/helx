@@ -66,7 +66,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 
 # Defaults for the developer-facing targets, all overridable on the command line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked
+CHECK_VERSIONS_FLAGS            ?= --include-untracked --umbrella-above-release
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -236,7 +236,9 @@ help:
 	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
 	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
 	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
-	@echo '  CHECK_VERSIONS_FLAGS=  Set empty to compare committed revisions only'
+	@echo '  CHECK_VERSIONS_FLAGS=  Defaults to --include-untracked --umbrella-above-release,'
+	@echo '                         matching CI for a pull request into develop. Set empty for'
+	@echo '                         the strict default-branch rules.'
 	@echo '  CHANNEL=<name>         Candidate channel name (default develop)'
 	@echo '  CHART_CHANNEL=<name>   Build the umbrella as a candidate for this channel'
 	@echo '  CHART_CHANNEL_COMMIT=  Commit whose images the candidate pins (default HEAD)'

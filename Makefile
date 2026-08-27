@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+
 MAX_SUBTREE_BLOB_BYTES ?= 10000000
 
 # Git remotes used by the services/ git subtrees.
@@ -262,7 +263,6 @@ endef
 
 # add-remotes: Add or verify all remotes needed by the service subtrees
 add-remotes:
-	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
 	$(call ensure-remote,appstore,$(APPSTORE_URL))
 	$(call ensure-remote,appstore-chart,$(APPSTORE_CHART_URL))
 	$(call ensure-remote,appstore-prepuller,$(APPSTORE_PREPULLER_URL))
@@ -273,6 +273,7 @@ add-remotes:
 	$(call ensure-remote,ui,$(UI_URL))
 	$(call ensure-remote,ui-chart,$(UI_CHART_URL))
 	$(call ensure-remote,user-mutator,$(USER_MUTATOR_URL))
+	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
 
 # add-subtree: Add a subtree unless its prefix is already present.
 define add-subtree

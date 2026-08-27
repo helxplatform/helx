@@ -230,9 +230,21 @@ reach GitHub:
    make ci-build-helx-images SERVICES="user-mutator ui"
    ```
 
-   `TAG` defaults to `test-<short-sha>`. A service with several image variants,
-   like `appstore-sockets`, builds all of them.
-3. Get those images to your cluster. For a local cluster, load them directly —
+   `TAG` defaults to `test-<short-sha>` but you can override it with
+   `TAG=<tag>`, just make sure to use the same tag for `ci-push-helx-images`
+   and `ci-load-helx-images`. A service with several image variants, like 
+   `appstore-sockets`, builds all of them. If you changed enough that listing
+   them is a chore, `SERVICES=all` stands for every service that builds
+   an image; it works on every step below, and cannot be combined with
+   individual names.
+
+   Images build for `linux/amd64`, the one architecture CI publishes, no matter
+   what your workstation is. On Apple Silicon that means an emulated build, so
+   it is slower than a native one. Override `IMAGE_PLATFORM` when the cluster
+   you are aiming at is not amd64 -- a local `kind`/`minikube`/`k3d` on Apple
+   Silicon wants `IMAGE_PLATFORM=linux/arm64`. Getting this wrong is not subtle:
+   the pod starts and the container exits with `exec format error`.
+3. Get those images to your cluster. For a local cluster, load them directly,
    no registry involved:
 
    ```bash
@@ -247,8 +259,8 @@ reach GitHub:
    make ci-push-helx-images SERVICES="user-mutator ui"
    ```
 
-   To use a registry other than Harbor — your own ACR, a scratch project, a
-   registry running beside the cluster — set `IMAGE_REGISTRY` to its base URL,
+   To use a registry other than Harbor (your own ACR, a scratch project, a
+   registry running beside the cluster) set `IMAGE_REGISTRY` to its base URL,
    after logging in to it:
 
    ```bash
@@ -298,7 +310,8 @@ reach GitHub:
    still send the cluster to Harbor for those images:
 
    ```bash
-   make ci-build-helx-chart SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   make ci-build-helx-chart SERVICES="user-mutator ui" \
+     IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
    ```
 
    That writes both the tag and the repository for those services. Everything
@@ -315,36 +328,42 @@ Use the same `SERVICES` and `TAG` for every step, plus the same
 `IMAGE_REGISTRY` if you set one. Setting them once is easiest:
 
 ```bash
-export SERVICES="user-mutator ui" TAG=dev-1
-make ci-build-helx-images ci-load-helx-images ci-build-helx-chart
+export SERVICES="user-mutator helx-ldap" \
+  TAG=test-ldap-with-user-mutator-changes \
+  IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+make ci-build-helx-images ci-push-helx-images ci-build-helx-chart
 ```
 
 `TAG` reaches the chart only through `SERVICES`. There is no flag that retags
 everything at once: with `CHART_CHANNEL` and no `SERVICES`,
 `make ci-build-helx-chart` computes the tag itself as `<channel>-<short-sha>`
-and ignores `TAG` entirely. To put one tag of your choosing on every image,
-name every service:
+and ignores `TAG` entirely. To put one tag of your choosing on every image, use
+`SERVICES=all`:
 
 ```bash
-make ci-build-helx-chart TAG=my-tag \
-  SERVICES="appstore appstore-prepuller appstore-sockets ldap-sync ui user-mutator"
+make ci-build-helx-chart TAG=my-tag SERVICES=all
 ```
 
-That is the full list of components with an image in
-[`.github/ci/images.yaml`](.github/ci/images.yaml), and it covers all seven
-images — `appstore-sockets` owns two. The chart-only dependencies `helx-ldap`,
-`pod-reaper`, and `resty` build no image, so nothing pins them; they keep the
-tags their own charts ship. Only pin services you actually built and pushed at
-that tag, or the chart will point at images that do not exist.
+`all` expands to every component with an image in
+[`.github/ci/images.yaml`](.github/ci/images.yaml) — currently `appstore`,
+`appstore-prepuller`, `appstore-sockets`, `ldap-sync`, `ui`, and `user-mutator`,
+covering all seven images, since `appstore-sockets` owns two. It is read from
+that file at run time, so a service added there is picked up without touching
+the Makefile. The command prints the list it expanded to. The chart-only
+dependencies `helx-ldap`, `pod-reaper`, and `resty` build no image, so nothing
+pins them; they keep the tags their own charts ship. Only pin services you
+actually built and pushed at that tag, or the chart will point at images that do
+not exist — with `all`, that means having run the build and push steps with
+`all` too.
 
 Add `IMAGE_REGISTRY=` to that same command to point all of them somewhere other
-than Harbor. Because every service is named, this is the one case where nothing
+than Harbor. Because every service is pinned, this is the one case where nothing
 is left behind on Harbor, so the cluster needs credentials for your registry
 only:
 
 ```bash
-make ci-build-helx-chart TAG=my-tag IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform \
-  SERVICES="appstore appstore-prepuller appstore-sockets ldap-sync ui user-mutator"
+make ci-build-helx-chart TAG=my-tag SERVICES=all \
+  IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
 ```
 
 To override an image by hand instead, pass it to `helm` at install time. The

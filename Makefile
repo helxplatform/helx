@@ -75,7 +75,15 @@ HOOKS_PATH                      ?= .githooks
 
 # Local image builds. SERVICES names the services you rebuilt; only those get
 # pinned in the umbrella, so everything else stays on its released tag.
+# SERVICES=all stands in for every service that builds an image, so the whole
+# list does not have to be typed out; it cannot be mixed with service names.
 SERVICES                        ?=
+# Every component in .github/ci/images.yaml, sorted. Deliberately recursive:
+# it shells out only when SERVICES=all asks it to, and only while a recipe is
+# being expanded, by which point $(PYTHON_READY) has built the venv.
+ALL_IMAGE_SERVICES               = $(shell $(PYTHON) $(CI_SCRIPT) image-plan | cut -f1 | sort -u)
+# The list every target below acts on: SERVICES, with all expanded.
+RESOLVED_SERVICES                = $(if $(filter all,$(SERVICES)),$(ALL_IMAGE_SERVICES),$(SERVICES))
 TAG                             ?= test-$(shell git rev-parse --short=7 HEAD 2>/dev/null)
 # Registry the local image targets build, push, and pin against. Empty means
 # the registry in .github/ci/images.yaml, which is Harbor. Set it to a base URL
@@ -91,8 +99,15 @@ TAG                             ?= test-$(shell git rev-parse --short=7 HEAD 2>/
 IMAGE_REGISTRY                  ?=
 # Passed to every ci.py image-plan call, so one registry override reaches the
 # build, load, and push targets identically.
-IMAGE_PLAN_FLAGS                 = --services "$(SERVICES)" \
+IMAGE_PLAN_FLAGS                 = --services "$(RESOLVED_SERVICES)" \
                                    $(if $(IMAGE_REGISTRY),--registry "$(IMAGE_REGISTRY)")
+# Architecture the local image targets build for. CI builds linux/amd64 only
+# (.github/actions/build-service pins `platforms: linux/amd64`), so that is the
+# default here too: without it, `docker build` on an Apple Silicon Mac produces
+# a linux/arm64 image that dies with "exec format error" on an amd64 node.
+# Override it when the target is not amd64 -- notably a local kind/minikube/k3d
+# cluster on Apple Silicon, which wants IMAGE_PLATFORM=linux/arm64.
+IMAGE_PLATFORM                  ?= linux/amd64
 # auto picks whichever of kind, minikube, or k3d is installed.
 CLUSTER_TOOL                    ?= auto
 CLUSTER_NAME                    ?=
@@ -197,6 +212,7 @@ help:
 	@echo 'Deploying a local build (see README.md "DevEx"):'
 	@echo '  Set these in your shell; every target below reads them:'
 	@echo '    export SERVICES="a b"                Services you rebuilt; only these get pinned (required)'
+	@echo '                                         or SERVICES=all for every service that builds an image'
 	@echo '    export TAG=<tag>                     Image tag to build, push, and pin (default test-<short-sha>)'
 	@echo '    export IMAGE_REGISTRY=<url>          Registry to build, push, and pin against (default Harbor)'
 	@echo '  make ci-build-helx-images              Build and tag images for those services'
@@ -211,9 +227,12 @@ help:
 	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
 	@echo '  SERVICE=<name>         Required by the per-service targets above'
 	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
+	@echo '  SERVICES=all           Every service that builds an image, without listing them'
 	@echo '  TAG=<tag>              Image tag to build, push, and pin (default test-<short-sha>)'
 	@echo '  IMAGE_REGISTRY=<url>   Build, push, and pin against this registry instead'
 	@echo '                         of Harbor, e.g. myregistry.azurecr.io/helx'
+	@echo '  IMAGE_PLATFORM=<arch>  Architecture to build for (default linux/amd64, as CI'
+	@echo '                         publishes); linux/arm64 for a local cluster on Apple Silicon'
 	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
 	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
 	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
@@ -514,11 +533,24 @@ ci-locked-deps: $(PYTHON_READY)
 ci-candidate-version: $(PYTHON_READY)
 	@$(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)"
 
+# check-services: 'all' is the whole list, so mixing it with service names means
+# one of the two was not meant. Every target that reads SERVICES runs this,
+# including the ones where SERVICES is optional.
+define check-services
+	@if test -n '$(filter all,$(SERVICES))' && test '$(words $(SERVICES))' -ne 1; then \
+		echo 'SERVICES=all already covers every service; remove the other names.'; \
+		exit 1; \
+	fi
+endef
+
 # require-services: the local image targets act on an explicit list, so that a
 # bare invocation cannot accidentally build every image in the repository.
+# SERVICES=all is that list, spelled once, for when you did rebuild everything.
 define require-services
+	$(call check-services)
 	@if test -z "$(SERVICES)"; then \
 		echo 'SERVICES is required, for example: make $@ SERVICES="user-mutator ui"'; \
+		echo 'Use SERVICES=all for every service listed below.'; \
 		echo "Services that produce images:"; \
 		$(PYTHON) $(CI_SCRIPT) image-plan | cut -f1 | sort -u | sed 's/^/  /'; \
 		exit 1; \
@@ -532,8 +564,8 @@ ci-build-helx-images: $(PYTHON_READY)
 	@set -euo pipefail; \
 	plan=$$($(PYTHON) $(CI_SCRIPT) image-plan $(IMAGE_PLAN_FLAGS)); \
 	while IFS=$$'\t' read -r component name reference context dockerfile; do \
-		echo "Building $$reference:$(TAG)"; \
-		docker build -f "$$dockerfile" -t "$$reference:$(TAG)" "$$context"; \
+		echo "Building $$reference:$(TAG) for $(IMAGE_PLATFORM)"; \
+		docker build --platform "$(IMAGE_PLATFORM)" -f "$$dockerfile" -t "$$reference:$(TAG)" "$$context"; \
 	done <<< "$$plan"
 	@echo 'Next: make ci-load-helx-images or make ci-push-helx-images, with the same SERVICES and TAG$(if $(IMAGE_REGISTRY), and IMAGE_REGISTRY)'
 
@@ -595,8 +627,12 @@ ci-build-common-chart: $(PYTHON_READY)
 # ci-build-helx-chart: Package the umbrella chart. Set CHART_CHANNEL to build a
 # candidate; CHART_CHANNEL_COMMIT defaults to HEAD.
 ci-build-helx-chart: $(PYTHON_READY)
+	$(call check-services)
 	@channel="$(CHART_CHANNEL)"; \
-	if test -n "$(SERVICES)" && test -z "$$channel"; then channel=local; fi; \
+	services="$(RESOLVED_SERVICES)"; \
+	image_tag=""; \
+	if test -n "$$services"; then image_tag="$(TAG)"; fi; \
+	if test -n "$$services" && test -z "$$channel"; then channel=local; fi; \
 	commit="$(CHART_CHANNEL_COMMIT)"; \
 	if test -n "$$channel" && test -z "$$commit"; then \
 		commit=$$(git rev-parse HEAD); \
@@ -604,15 +640,16 @@ ci-build-helx-chart: $(PYTHON_READY)
 	if test -n "$(IMAGE_REGISTRY)" && test -z "$$channel"; then \
 		echo "IMAGE_REGISTRY only reaches the chart through an image pin, and"; \
 		echo "nothing is pinned here. Add SERVICES=\"a b\" for the services you"; \
-		echo "pushed, or CHART_CHANNEL=<name> to pin every image."; \
+		echo "pushed, SERVICES=all if that was all of them, or"; \
+		echo "CHART_CHANNEL=<name> to pin every image."; \
 		exit 1; \
 	fi; \
-	if test -n "$(SERVICES)"; then \
-		echo "Pinning $(SERVICES) to $(TAG)$(if $(IMAGE_REGISTRY), at $(IMAGE_REGISTRY)); every other image stays on its released tag"; \
+	if test -n "$$services"; then \
+		echo "Pinning $$services to $(TAG)$(if $(IMAGE_REGISTRY), at $(IMAGE_REGISTRY)); every other image stays on its released tag"; \
 	fi; \
 	PYTHON="$(PYTHON)" CHART_CHANNEL="$$channel" CHART_CHANNEL_COMMIT="$$commit" \
-	CHART_CHANNEL_SERVICES="$(SERVICES)" \
-	CHART_IMAGE_TAG="$(if $(SERVICES),$(TAG),)" \
+	CHART_CHANNEL_SERVICES="$$services" \
+	CHART_IMAGE_TAG="$$image_tag" \
 	CHART_IMAGE_REGISTRY="$(IMAGE_REGISTRY)" \
 		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
 
@@ -622,7 +659,7 @@ docker-build:
 	@if test ! -f "services/$(SERVICE)/Dockerfile"; then \
 		echo "services/$(SERVICE) has no Dockerfile; it is chart-only"; exit 1; \
 	fi
-	@docker build -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
+	@docker build --platform "$(IMAGE_PLATFORM)" -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
 
 # pre-push: Every check CI will run that can run locally
 pre-push: ci-tests ci-validate-everything ci-check-versions check-locks

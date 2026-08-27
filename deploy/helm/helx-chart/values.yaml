@@ -1,11 +1,15 @@
 # Parent chart for HeLx.
 
-# ambassador:
-#   # -- enable/disable deployment of Ambassador
-#   enabled: true
+ambassador:
+  # -- enable/disable deployment of Ambassador
+  enabled: false
 appstore:
   # -- enable/disable deployment of appstore
   enabled: true
+  tycho:
+    # -- routing data plane for Tycho-launched apps: "proxy" (ClusterIP +
+    # /private, resolved by appstore via resty) or "ambassador" (legacy).
+    appRoutingMode: proxy
 appstore-prepuller:
   # -- enable/disable deployment of appstore-prepuller
   enabled: true
@@ -18,44 +22,18 @@ helx-ldap:
 ldap-sync:
   # -- enable/disable deployment of ldap-sync
   enabled: true
-backup-pvc-cronjob:
-  # -- enable/disable deployment of backup-pvc-cronjob
-  enabled: false
-image-utils:
-  # -- enable/disable deployment of image-utils (imagepullsecret-patcher and
-  # imagepuller)
-  enabled: false
-monitoring:
-  # -- enable/disable deployment of monitoring (kube-prometheus-stack,
-  # cost-analyzer, etc.)
-  enabled: false
-nfs-server:
-  # -- enable/disable deployment of nfs-server
-  enabled: false
-nfsrods:
-  # -- enable/disable deployment of nfsrods
-  enabled: false
-nginx:
-  # -- enable/disable deployment of nginx
-  enabled: false
 pod-reaper:
   # -- enable/disable deployment of pod-reaper
   enabled: true
 resty:
   # -- enable/disable deployment of resty
   enabled: true
-search:
-  # -- enable/disable deployment of search
-  enabled: false
-# tycho-api:
-#   # -- enable/disable deployment of tycho-api
-#   enabled: false
 ui:
   # -- enable/disable deployment of helx-ui
   enabled: true
 user-mutator:
   # -- enable/disable deployment of user-mutator
-  enabled: false
+  enabled: true
 
 global:
   # tycho_api_service_name: helx-tycho-api

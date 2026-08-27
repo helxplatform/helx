@@ -39,6 +39,13 @@
   However, even though the prefix of these variables is `CONTAINERHUB_`, the actual
   name of the registry is Harbor. Please use that name when referring to the registry
   itself.
+- That applies to the workflows. The local image targets in the Makefile take
+  `IMAGE_REGISTRY=<base url>` to build, push, and pin against a different
+  registry; it defaults to the `registry` in `.github/ci/images.yaml`, which is
+  Harbor. The override reaches `ci.py` as `image-plan --registry` and
+  `candidate-values --registry`, and the latter rewrites each image's
+  `repository` alongside its tag, so the packaged chart names the registry the
+  images were actually pushed to. CI never sets it.
 
 ## Candidate channels
 
@@ -58,7 +65,11 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
 - Candidate image tags are written into the umbrella's `values.yaml` before
   packaging and restored afterwards, because `helm package` cannot take value
   overrides. Add `tag_path` to a service in `.github/ci/images.yaml` when its
-  chart does not read `image.tag`.
+  chart does not read `image.tag`. `repository_path` is its sibling, defaults
+  to the `repository` key in the same block, and is only written when a
+  registry override is in play. `validate-config` requires both keys to exist
+  in the owning chart's `values.yaml`, since a pin that lands nowhere is
+  invisible.
 - The immutability preflight is skipped for candidates and must stay that way;
   it exists to protect released versions only.
 

@@ -236,7 +236,7 @@ jobs:
             echo "helm registry login ghcr.io"
             echo "helm upgrade --install helx \\"
             echo "  oci://ghcr.io/helxplatform/helm-charts/helx \\"
-            echo "  --version $CHART_VERSION -n helx --create-namespace"
+            echo "  --version $CHART_VERSION -n <deploy-namespace>"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

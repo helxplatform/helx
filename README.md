@@ -46,7 +46,29 @@ make setup            # add every subtree remote and any missing service subtree
 make install-hooks    # run the pre-push checks automatically (optional)
 ```
 
-`make help` lists every target and the environment variables each one accepts.
+`make help` lists the setup targets and indexes the rest by topic:
+`make help-subtrees`, `make help-ci`, `make help-locks`, and
+`make help-all-vars` for every variable the targets accept.
+
+Those topics are generated from the Makefile itself by
+[deploy/local-dev/make-help.awk](deploy/local-dev/make-help.awk), so adding a
+target means documenting it in one place. Put a comment block directly above
+it, separated by a blank line from whatever came before, whose first line names
+the target:
+
+```make
+##@ ci Building and inspecting one service
+
+# docker-build SERVICE=<name>: Build one service image as CI builds it
+# Further comment lines continue the description.
+docker-build:
+```
+
+A block that does not open with `<target>:` is a note to whoever reads the
+Makefile and stays out of the help. `##@ <topic> <title>` opens a section, and
+`##>` emits a line verbatim; sections are buffered by title, so a target lands
+in the right group no matter where it sits in the file. Comments cannot expand
+`$(VARIABLES)`, so spell out anything a reader needs to see.
 
 ### Commands you will use often
 
@@ -61,10 +83,16 @@ make install-hooks    # run the pre-push checks automatically (optional)
 | `make check-locks` | Verify every lock without writing |
 | `make ci-build-chart SERVICE=<name>` | Vendor dependencies, lint, and package one service chart |
 | `make ci-build-helx-chart` | Package the umbrella chart |
+| `make ci-helm-deploy` | Install or upgrade a release from that package |
+| `make ci-uninstall-release RELEASE=<name>` | Uninstall a release and delete the storage and credentials it leaves behind |
 | `make docker-build SERVICE=<name>` | Build one service image as CI builds it |
 | `make ci-locked-deps SERVICE=<name>` | Print that chart's resolved dependency tuples |
 | `make ci-candidate-version` | Print the version the candidate channel publishes under |
-| `make help` | Every target, with the variables each accepts |
+| `make help` | Setup targets, plus an index of the help topics below |
+| `make help-subtrees` | Subtree pulls and vendored chart mirrors |
+| `make help-ci` | Checks, chart and image builds, and local deploys |
+| `make help-locks` | Chart.lock maintenance |
+| `make help-all-vars` | Every variable the targets accept |
 
 ### Working on a chart
 
@@ -143,7 +171,7 @@ bump `version:` in the owning chart.
 Most services are git subtrees:
 
 ```bash
-make pull-user-mutator      # or pull-appstore, pull-ui, ... ; make help lists them
+make pull-user-mutator      # or pull-appstore, pull-ui, ... ; make help-subtrees lists them
 make pull-remotes           # every subtree in sequence
 ```
 
@@ -324,6 +352,10 @@ reach GitHub:
      -n <deploy-namespace> --values my-values.yaml
    ```
 
+   Or let `make ci-helm-deploy` find that archive and your values files for
+   you; see [Deploying and tearing down a local
+   build](#deploying-and-tearing-down-a-local-build).
+
 Use the same `SERVICES` and `TAG` for every step, plus the same
 `IMAGE_REGISTRY` if you set one. Setting them once is easiest:
 
@@ -414,6 +446,126 @@ Both win over whatever `ci-build-helx-chart` baked into the packaged values, so
 this also works to correct a pin after the fact. The image has to already exist
 at that tag in whichever registry the repository names — overriding values does
 not build or push anything.
+
+### Deploying and tearing down a local build
+
+`make ci-helm-deploy` installs what `make ci-build-helx-chart` just packaged,
+and `make ci-uninstall-release` removes an installed release along with the
+storage and credentials Helm deliberately leaves behind. Both talk to whatever
+cluster your current `kubectl` context points at, and both print the context and
+namespace before they do anything.
+
+#### Installing
+
+```bash
+make ci-build-helx-chart SERVICES="user-mutator ui"
+make ci-helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace>
+```
+
+You do not name the archive. `ci-build-helx-chart` writes its path to
+`dist/charts/.helx-chart.path`, and `ci-helm-deploy` reads it from there, so
+the two always agree on which build is being installed — a candidate build
+derives its version from the channel and commit, so the file name is not
+something you could predict anyway. If that pointer is missing, or names an
+archive that has been deleted, the deploy stops and tells you to package again.
+
+`RELEASE` defaults to `helx`. `NAMESPACE` defaults to whatever your context
+selects; if it selects none either, the deploy stops rather than assuming
+`default`. The namespace is created if it does not exist.
+
+Values files come from two places, applied in this order:
+
+1. every path listed in `deploy/local-dev/local-values-files.env`
+2. every path in `VALUES="a.yaml b.yaml"`, so those win on any shared key
+
+That first file is the point: local deploys usually need several values files,
+including ones holding secrets, and retyping `--values` for each of them every
+time is how they get forgotten. It is one path per line, each relative to the
+repository root, with `~/` expanded for you; blank lines and `#` comments are
+ignored. It is gitignored, so your cluster's paths and secrets stay out of the
+repository:
+
+```text
+# deploy/local-dev/local-values-files.env
+~/helm-values/my-cluster/helx/values.yaml
+~/helm-values/my-cluster/appstore/secrets.yaml
+```
+
+A missing list, an empty one, or a line naming a file that is not there is a
+warning rather than an error — but since the usual result is a release quietly
+missing its secrets, the deploy asks before continuing. `ASSUME_YES=1` answers
+that in advance for a non-interactive run, and with no terminal to ask on it
+cancels instead of assuming yes.
+
+`HELM_FLAGS` is passed through to `helm upgrade --install` last, which is how
+you get a dry run:
+
+```bash
+make ci-helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace> \
+  HELM_FLAGS="--dry-run --debug"
+```
+
+#### Tearing down
+
+```bash
+make ci-uninstall-release RELEASE=helx NAMESPACE=<deploy-namespace>
+```
+
+`helm uninstall` on its own does not leave the namespace clean. The
+chart-managed Secrets are annotated `helm.sh/resource-policy: keep`, so that
+handing a Secret's ownership to `existingSecret` or External Secrets does not
+delete the live credentials mid-migration. The shared user storage claim
+`stdnfs` carries that same annotation, and the `data-*` claims belong to
+StatefulSet `volumeClaimTemplates`, which Helm never owned in the first place.
+All of that survives the uninstall and is then adopted by the next install,
+which is exactly wrong when you are trying to start clean.
+
+So this target uninstalls the release and then deletes those leftovers:
+
+| Variable | Default |
+| --- | --- |
+| `UNINSTALL_PVCS` | `appstore-postgresql-pvc`, `stdnfs`, `data-$(RELEASE)-postgresql-0`, `data-$(RELEASE)-ldap-sync-postgres-0`, `data-openldap-0` |
+| `UNINSTALL_SECRETS` | `$(RELEASE)-appstore-secrets`, `$(RELEASE)-appstore-sockets`, `$(RELEASE)-ldap-sync-secrets`, `$(RELEASE)-postgresql`, `openldap-credentials`, `pgadmin-env` |
+
+`appstore-postgresql-pvc` is the one entry Helm normally deletes with the
+release; it is listed so that a copy left behind by an older install goes too.
+
+Only the names that actually exist are touched, and everything found is listed
+for confirmation before anything is deleted:
+
+```text
+Uninstalling helx
+  context   my-cluster
+  namespace my-namespace
+  release   installed
+  pvcs      appstore-postgresql-pvc stdnfs data-helx-postgresql-0
+  secrets   helx-appstore-secrets pgadmin-env
+Deleting those claims destroys the data in them; this cannot be undone.
+Proceed? [y/N]
+```
+
+`ASSUME_YES=1` skips that prompt; with no terminal to ask on, the target
+cancels rather than assuming yes.
+
+Unlike every other target here, `RELEASE` has to be named explicitly — the
+`helx` default is not assumed for a command that deletes data. `NAMESPACE`
+resolves exactly as it does for the deploy.
+
+A release that is already gone is not an error: the uninstall is skipped and
+only the leftovers are deleted, which is what lets this finish a teardown that
+stopped halfway. If nothing is there at all, it says so and exits cleanly.
+
+Set either variable to override the list, or to empty to leave that kind of
+resource alone:
+
+```bash
+make ci-uninstall-release RELEASE=helx UNINSTALL_PVCS=
+```
+
+Two things it deliberately does not do. It deletes nothing the charts did not
+create, `PersistentVolume`s included: a `Retain` volume outlives its claim, and
+removing it is yours to do. And it takes no `HELM_FLAGS` — there is no dry run,
+because the confirmation listing already is one.
 
 ### Working on the CI itself
 

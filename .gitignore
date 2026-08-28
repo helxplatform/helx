@@ -1,8 +1,17 @@
 # Editor
 .claude
 .DS_Store
-# Helm dependencies are rebuilt from committed Chart.lock files.
+
+# Helm
 **/chart/charts/
 deploy/helm/helx-chart/charts/
 
+# Virtual environment (created by `make venv`)
 .venv
+
+# Packaged charts from `make ci-build-helx-chart`
+dist/
+
+# Local development. The tooling in deploy/local-dev/ is tracked; only a
+# developer's own list of values files, read by `make ci-helm-deploy`, is not.
+deploy/local-dev/local-values-files.env

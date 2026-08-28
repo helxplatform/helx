@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+# 10MB
 MAX_SUBTREE_BLOB_BYTES ?= 10000000
 
 # Git remotes used by the services/ git subtrees.
@@ -108,6 +109,58 @@ IMAGE_PLAN_FLAGS                 = --services "$(RESOLVED_SERVICES)" \
 # Override it when the target is not amd64 -- notably a local kind/minikube/k3d
 # cluster on Apple Silicon, which wants IMAGE_PLATFORM=linux/arm64.
 IMAGE_PLATFORM                  ?= linux/amd64
+# Where the local chart targets leave packaged archives, next to a pointer file
+# naming the archive each build produced. Only the local targets set this; CI
+# reads the path out of $$GITHUB_OUTPUT and keeps using a scratch directory.
+CHART_DIST                      ?= dist/charts
+# The pointer ci-build-helx-chart writes and ci-helm-deploy reads. It is named
+# after the chart directory because that is the one part of the archive's
+# identity known before the build runs -- a candidate build derives its version
+# from the channel and commit, so the file name is not predictable.
+UMBRELLA_PACKAGE_POINTER         = $(CHART_DIST)/.$(notdir $(UMBRELLA_CHART)).path
+# Release ci-helm-deploy installs or upgrades, and where it puts it. An empty
+# NAMESPACE means whatever namespace the current kubectl context selects; if the
+# context selects none either, the deploy stops rather than assuming 'default'.
+RELEASE                         ?= helx
+NAMESPACE                       ?=
+# Values files for ci-helm-deploy, space separated; each is passed as one -f.
+# These are applied after LOCAL_VALUES_FILE's, so they win on any shared key.
+VALUES                          ?=
+# Untracked list of local values files, one path per line. A relative path is
+# relative to the repository root, and a leading ~/ is expanded to $$HOME --
+# the shell never sees these paths, so nothing else expands for them. Blank
+# lines and # comments are ignored. Missing entries warn and ask before
+# deploying rather than silently leaving values out.
+LOCAL_VALUES_FILE               ?= deploy/local-dev/local-values-files.env
+# Answer that confirmation prompt -- and the one ci-uninstall-release always
+# asks -- in advance, for a non-interactive run.
+ASSUME_YES                      ?=
+# Anything else to hand helm, e.g. HELM_FLAGS="--dry-run --debug"
+HELM_FLAGS                      ?=
+# What ci-uninstall-release deletes once the release itself is gone. helm
+# uninstall leaves every one of these behind: the Secrets are chart-managed and
+# annotated helm.sh/resource-policy: keep, the appstore and user storage claims
+# carry that same annotation, and the data-* claims come from StatefulSet
+# volumeClaimTemplates, which helm never owned in the first place. Names the
+# charts build out of the release name are written with $(RELEASE); the rest are
+# fixed by whichever chart creates them. Set either variable empty to leave that
+# kind of resource alone.
+UNINSTALL_PVCS                  ?= appstore-postgresql-pvc \
+                                   stdnfs \
+                                   data-$(RELEASE)-postgresql-0 \
+                                   data-$(RELEASE)-ldap-sync-postgres-0 \
+                                   data-openldap-0
+UNINSTALL_SECRETS               ?= $(RELEASE)-appstore-secrets \
+                                   $(RELEASE)-appstore-sockets \
+                                   $(RELEASE)-ldap-sync-secrets \
+                                   $(RELEASE)-postgresql \
+                                   openldap-credentials \
+                                   pgadmin-env
+# make help and its topic targets are generated from the comments above each
+# target, so documentation cannot drift from what it documents. See the header
+# of $(HELP_AWK) for the markers involved.
+HELP_AWK                         = deploy/local-dev/make-help.awk
+THIS_MAKEFILE                    = $(firstword $(MAKEFILE_LIST))
 # auto picks whichever of kind, minikube, or k3d is installed.
 CLUSTER_TOOL                    ?= auto
 CLUSTER_NAME                    ?=
@@ -123,7 +176,8 @@ CLUSTER_NAME                    ?=
 # to only the listed targets' prerequisites.
 .NOTPARALLEL:
 
-.PHONY: help setup add-remotes add-subtrees \
+.PHONY: help help-subtrees help-ci help-locks help-all-vars \
+        setup add-remotes add-subtrees \
         add-subtree-appstore \
         add-subtree-appstore-chart \
         add-subtree-appstore-prepuller \
@@ -163,69 +217,49 @@ CLUSTER_NAME                    ?=
         ci-build-helx-images \
         ci-load-helx-images \
         ci-push-helx-images \
+        ci-helm-deploy \
+        ci-uninstall-release \
         docker-build \
         pre-push \
         install-hooks
 
-#help: Show the available repository setup and subtree tasks
+#help: Show repository setup and index the other help topics
 help:
-	@echo 'Repository setup:'
-	@echo '  make setup          Add all remotes and missing service subtrees'
-	@echo '  make add-remotes    Add or verify all subtree remotes'
-	@echo '  make add-subtrees   Add all missing service subtrees'
+	@echo 'HeLx monorepo. Targets are grouped by topic; run the help target'
+	@echo 'for a group to see what it contains.'
 	@echo
-	@echo 'Subtree updates:'
-	@echo '  make pull-remotes                  Pull all configured service subtrees'
-	@echo '  make pull-appstore                 Pull appstore/develop into services/appstore'
-	@echo '  make pull-appstore-chart           Pull appstore-chart/main'
-	@echo '  make pull-appstore-prepuller       Pull appstore-prepuller/main'
-	@echo '  make pull-appstore-sockets         Pull appstore-sockets/master into services/appstore-sockets'
-	@echo '  make pull-appstore-sockets-chart   Pull appstore-sockets-chart/master into services/appstore-sockets/chart'
-	@echo '  make pull-helx-ldap                Pull helx-ldap/develop into services/helx-ldap'
-	@echo '  make pull-ldap-sync                Pull ldap-sync/master into services/ldap-sync'
-	@echo '  make pull-ui                       Pull ui/develop into services/ui'
-	@echo '  make pull-ui-chart                 Pull ui-chart/master into services/ui/chart'
-	@echo '  make pull-user-mutator             Pull user-mutator/$(USER_MUTATOR_BRANCH)'
+	@awk -f $(HELP_AWK) -v topic=setup $(THIS_MAKEFILE)
 	@echo
-	@echo 'Vendored charts (mirrored by content, not git subtree):'
-	@echo '  make pull-helx-chart               Mirror every chart below'
-	@echo '  make pull-resty                    Mirror helx-chart/$(HELX_CHART_BRANCH) charts/resty'
-	@echo '  make pull-pod-reaper               Mirror helx-chart/$(HELX_CHART_BRANCH) charts/pod-reaper'
-	@echo '  Local edits to these charts are overwritten; FORCE=1 skips the dirty check.'
+	@echo 'More help:'
+	@echo '  make help-subtrees    Pulling service subtrees, mirroring vendored charts'
+	@echo '  make help-ci          Checks, chart and image builds, and local deploys'
+	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
+	@echo '  make help-all-vars    Every variable those targets accept'
+
+#help-subtrees: Show subtree pulls and the vendored chart mirrors
+help-subtrees:
+	@awk -f $(HELP_AWK) -v topic=subtrees $(THIS_MAKEFILE)
 	@echo
-	@echo 'Developer checks (see README.md "DevEx"):'
-	@echo '  make ci-pip-install                Create $(VENV) and install CI requirements'
-	@echo '  make ci-validate-everything        Validate every chart, lock, .helmignore, and image'
-	@echo '  make ci-check-versions             Run the version gate  [BASE, CHECK_VERSIONS_FLAGS]'
-	@echo '  make ci-tests                      Run the CI suite unit tests'
-	@echo '  make pre-push                      Everything above plus check-locks and whitespace'
-	@echo '  make install-hooks                 Run pre-push automatically via git hooks'
+	@echo 'Every variable these accept: make help-all-vars'
+
+#help-ci: Show the CI-shaped checks, builds, and local deploy flow
+help-ci:
+	@awk -f $(HELP_AWK) -v topic=ci $(THIS_MAKEFILE)
 	@echo
-	@echo 'Building and inspecting one service:'
-	@echo '  make ci-build-chart SERVICE=<name>       Vendor deps, lint, package services/<name>/chart'
-	@echo '  make ci-locked-deps SERVICE=<name>       Print the resolved dependency tuples for it'
-	@echo '  make docker-build SERVICE=<name>         Build the image for that service'
-	@echo '  make ci-build-common-chart               Vendor deps, lint, package $(COMMON_CHART)'
-	@echo '  make ci-build-helx-chart                 Package the umbrella  [CHART_CHANNEL, CHART_CHANNEL_COMMIT]'
-	@echo '  make ci-candidate-version                Print the candidate chart version  [CHANNEL]'
+	@echo 'Every variable these accept: make help-all-vars'
+
+#help-locks: Show Chart.lock maintenance
+help-locks:
+	@awk -f $(HELP_AWK) -v topic=locks $(THIS_MAKEFILE)
 	@echo
-	@echo 'Deploying a local build (see README.md "DevEx"):'
-	@echo '  Set these in your shell; every target below reads them:'
-	@echo '    export SERVICES="a b"                Services you rebuilt; only these get pinned (required)'
-	@echo '                                         or SERVICES=all for every service that builds an image'
-	@echo '    export TAG=<tag>                     Image tag to build, push, and pin (default test-<short-sha>)'
-	@echo '    export IMAGE_REGISTRY=<url>          Registry to build, push, and pin against (default Harbor)'
-	@echo '  make ci-build-helx-images              Build and tag images for those services'
-	@echo '  make ci-load-helx-images               Load them into kind/minikube/k3d  [CLUSTER_TOOL, CLUSTER_NAME]'
-	@echo '  make ci-push-helx-images               Push them to a registry instead'
-	@echo '  make ci-build-helx-chart               Package the umbrella with those services pinned'
-	@echo '  Exporting TAG is what keeps all four agreeing; left unset it is recomputed from'
-	@echo '  HEAD each command. Unset SERVICES to leave every image on its released tag.'
-	@echo
+	@echo 'Every variable these accept: make help-all-vars'
+
+#help-all-vars: Show every variable the targets accept
+help-all-vars:
 	@echo 'Environment variables:'
 	@echo '  PYTHON=<path>          Interpreter to use (default $(VENV_PYTHON); skips venv setup)'
 	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
-	@echo '  SERVICE=<name>         Required by the per-service targets above'
+	@echo '  SERVICE=<name>         Required by the per-service targets (make help-ci)'
 	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
 	@echo '  SERVICES=all           Every service that builds an image, without listing them'
 	@echo '  TAG=<tag>              Image tag to build, push, and pin (default test-<short-sha>)'
@@ -235,6 +269,22 @@ help:
 	@echo '                         publishes); linux/arm64 for a local cluster on Apple Silicon'
 	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
 	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
+	@echo '  RELEASE=<name>         Release ci-helm-deploy installs or upgrades (default helx);'
+	@echo '                         ci-uninstall-release requires it to be named explicitly'
+	@echo '  NAMESPACE=<ns>         Namespace to deploy into or uninstall from (default: the'
+	@echo '                         kubectl context'"'"'s; required when the context selects none)'
+	@echo '  VALUES="a.yaml b.yaml" Extra values files for ci-helm-deploy, applied last'
+	@echo '  LOCAL_VALUES_FILE=<f>  Untracked list of values files, one path per line'
+	@echo '                         (default deploy/local-dev/local-values-files.env)'
+	@echo '  UNINSTALL_PVCS="a b"   Claims ci-uninstall-release deletes once the release is'
+	@echo '                         gone (default: the postgres, openldap, and shared storage'
+	@echo '                         claims helm uninstall keeps)'
+	@echo '  UNINSTALL_SECRETS="a"  Secrets it deletes as well (default: the chart-managed'
+	@echo '                         ones annotated helm.sh/resource-policy: keep)'
+	@echo '  ASSUME_YES=1           Skip the confirmation prompt a missing file triggers, and'
+	@echo '                         the one ci-uninstall-release always asks'
+	@echo '  HELM_FLAGS=<flags>     Extra helm arguments, e.g. --dry-run --debug'
+	@echo '  CHART_DIST=<dir>       Where packaged charts land (default dist/charts)'
 	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
 	@echo '  CHECK_VERSIONS_FLAGS=  Defaults to --include-untracked --umbrella-above-release,'
 	@echo '                         matching CI for a pull request into develop. Set empty for'
@@ -244,15 +294,9 @@ help:
 	@echo '  CHART_CHANNEL_COMMIT=  Commit whose images the candidate pins (default HEAD)'
 	@echo '  FORCE=1                Let the chart mirrors overwrite uncommitted work'
 	@echo
-	@echo 'Chart.lock maintenance:'
-	@echo '  make sync-locks                    Regenerate every chart lock that has dependencies'
-	@echo '  make sync-helx-lock                Regenerate only $(UMBRELLA_CHART)'
-	@echo '  make check-locks                   Verify every lock without writing'
-	@echo '  Python setup is automatic; run make ci-pip-install to do it explicitly'
-	@echo
-	@echo 'For another branch or prefix, use:'
-	@echo '  make pull-subtree REMOTE=appstore PREFIX=services/appstore BRANCH=develop'
+	@echo 'Target groups: make help'
 
+##@ setup Repository setup
 # setup: Add all remotes and missing service subtrees, plus install git hooks
 setup: add-subtrees install-hooks
 
@@ -322,6 +366,7 @@ add-subtrees: add-remotes \
 	add-subtree-ui-chart \
 	add-subtree-user-mutator
 
+##@ subtrees Adding a single subtree
 # add-subtree-appstore: Add the appstore subtree
 add-subtree-appstore: add-remotes
 	$(call add-subtree,$(APPSTORE_PREFIX),appstore,$(APPSTORE_BRANCH))
@@ -362,6 +407,7 @@ add-subtree-ui-chart: add-remotes
 add-subtree-user-mutator: add-remotes
 	$(call add-subtree,$(USER_MUTATOR_PREFIX),user-mutator,$(USER_MUTATOR_BRANCH))
 
+##@ subtrees Subtree updates
 # pull-subtree: Pull one subtree using REMOTE, PREFIX, and BRANCH variables.
 pull-subtree: add-remotes
 	@if test -z "$(REMOTE)" || test -z "$(PREFIX)" || test -z "$(BRANCH)"; then \
@@ -450,6 +496,7 @@ define mirror-chart
 	echo "Mirrored charts/$(1) -> $(2) ($$(sed -n 's/^version: *//p' "$(2)/Chart.yaml" | tr -d '\"'))"
 endef
 
+##@ subtrees Vendored charts (mirrored by content, not git subtree)
 # pull-resty: Mirror the resty chart out of helxplatform/helx-chart.
 # Refuses to clobber uncommitted work; override with FORCE=1. To undo a pull:
 #   git checkout HEAD -- <prefix> && git clean -fd <prefix>
@@ -464,6 +511,7 @@ pull-pod-reaper: add-remotes
 
 # pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart
 pull-helx-chart: pull-resty pull-pod-reaper
+##> Local edits to these charts are overwritten; FORCE=1 skips the dirty check.
 
 # require-pyyaml: fail with an actionable message instead of a raw traceback.
 define require-pyyaml
@@ -498,6 +546,7 @@ $(VENV_STAMP): $(CI_REQUIREMENTS)
 	@"$(VENV_PYTHON)" -m pip install --quiet --requirement "$(CI_REQUIREMENTS)"
 	@touch "$@"
 
+##@ ci Developer checks (see README.md "DevEx")
 # ci-pip-install: Create the virtualenv and install the CI requirements into it
 ci-pip-install: $(VENV_STAMP)
 	@echo "Ready: $(VENV_PYTHON)"
@@ -518,6 +567,7 @@ ci-check-versions: $(PYTHON_READY)
 ci-tests: $(PYTHON_READY)
 	@$(PYTHON) -m unittest discover -s .github/scripts -p 'test_*.py'
 
+##@ ci Building and inspecting one service
 # ci-build-chart: Vendor dependencies, lint, and package one service chart
 ci-build-chart: $(PYTHON_READY)
 	$(call require-service)
@@ -559,6 +609,12 @@ define require-services
 	fi
 endef
 
+##@ ci Deploying a local build (see README.md "DevEx")
+##> Set these in your shell; every target below reads them:
+##>   export SERVICES="a b"              Services you rebuilt; only these get pinned (required)
+##>                                      or SERVICES=all for every service that builds an image
+##>   export TAG=<tag>                   Image tag to build, push, and pin (default test-<short-sha>)
+##>   export IMAGE_REGISTRY=<url>        Registry to build, push, and pin against (default Harbor)
 # ci-build-helx-images: Build and tag one image per configured variant of each
 # named service, using the same context and Dockerfile CI uses.
 ci-build-helx-images: $(PYTHON_READY)
@@ -604,9 +660,8 @@ ci-load-helx-images: $(PYTHON_READY)
 	done <<< "$$plan"
 
 # ci-push-helx-images: Push the built images to a registry, for a cluster that
-# cannot be loaded into directly. Defaults to Harbor, so it requires
-# docker login containers.renci.org; set IMAGE_REGISTRY to push elsewhere,
-# after logging in to that registry.
+# cannot be loaded into directly. Defaults to Harbor, so docker login
+# containers.renci.org first, or set IMAGE_REGISTRY to push elsewhere.
 ci-push-helx-images: $(PYTHON_READY)
 	$(call require-services)
 	@set -euo pipefail; \
@@ -621,6 +676,8 @@ ci-push-helx-images: $(PYTHON_READY)
 		docker push "$$reference:$(TAG)"; \
 	done <<< "$$plan"
 
+##> Then make ci-build-helx-chart, listed above, to package the umbrella
+##@ ci Building and inspecting one service
 # ci-build-common-chart: Vendor dependencies, lint, and package the shared
 # library chart. It lives outside services/, so ci-build-chart cannot reach it.
 ci-build-common-chart: $(PYTHON_READY)
@@ -653,8 +710,209 @@ ci-build-helx-chart: $(PYTHON_READY)
 	CHART_CHANNEL_SERVICES="$$services" \
 	CHART_IMAGE_TAG="$$image_tag" \
 	CHART_IMAGE_REGISTRY="$(IMAGE_REGISTRY)" \
+	CHART_PACKAGE_DIR="$(CHART_DIST)" \
 		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
+	@echo 'Next: make ci-helm-deploy RELEASE=<name> NAMESPACE=<ns> VALUES="a.yaml b.yaml"'
 
+##@ ci Deploying a local build (see README.md "DevEx")
+# ci-helm-deploy: Install or upgrade RELEASE from the archive ci-build-helx-chart
+# packaged, found through the pointer that build leaves behind. Values files
+# come from LOCAL_VALUES_FILE, then VALUES.
+ci-helm-deploy:
+	@set -euo pipefail; \
+	pointer="$(UMBRELLA_PACKAGE_POINTER)"; \
+	if test ! -f "$$pointer"; then \
+		echo "No packaged umbrella chart at $$pointer."; \
+		echo 'Run: make ci-build-helx-chart'; \
+		exit 1; \
+	fi; \
+	package=$$(cat "$$pointer"); \
+	if test ! -f "$$package"; then \
+		echo "$$pointer names $$package, which no longer exists."; \
+		echo 'Run: make ci-build-helx-chart to package it again.'; \
+		exit 1; \
+	fi; \
+	list="$(LOCAL_VALUES_FILE)"; \
+	warnings=0; \
+	values_shown=""; \
+	values_args=(); \
+	if test -f "$$list"; then \
+		line_number=0; \
+		entries=0; \
+		while read -r entry || test -n "$$entry"; do \
+			line_number=$$((line_number + 1)); \
+			case "$$entry" in ''|'#'*) continue ;; esac; \
+			entries=$$((entries + 1)); \
+			case "$$entry" in \
+				'~') entry="$$HOME" ;; \
+				'~/'*) entry="$$HOME/$${entry#'~/'}" ;; \
+			esac; \
+			if test ! -f "$$entry"; then \
+				echo "WARNING: $$list line $$line_number names $$entry, which does not exist."; \
+				echo "         That file's values will not reach this release."; \
+				warnings=$$((warnings + 1)); \
+				continue; \
+			fi; \
+			values_args+=(--values "$$entry"); \
+			values_shown="$$values_shown $$entry"; \
+		done < "$$list"; \
+		if test "$$entries" -eq 0; then \
+			echo "WARNING: $$list names no values files."; \
+			echo "         Add one values-file path per line, each relative to the"; \
+			echo "         repository root; blank lines and # comments are ignored."; \
+			warnings=$$((warnings + 1)); \
+		fi; \
+	else \
+		echo "WARNING: no local values file at $$list."; \
+		echo "         Create it there, with one values-file path per line,"; \
+		echo "         each relative to the repository root, for example:"; \
+		echo "           deploy/local-dev/my-cluster-values.yaml"; \
+		echo "           deploy/local-dev/my-secret-values.yaml"; \
+		echo "         It is gitignored, so it stays out of the repository."; \
+		warnings=$$((warnings + 1)); \
+	fi; \
+	context=$$(kubectl config current-context 2>/dev/null || echo '<none>'); \
+	namespace="$(NAMESPACE)"; \
+	if test -z "$$namespace"; then \
+		namespace=$$(kubectl config view --minify --output jsonpath='{..namespace}' 2>/dev/null); \
+		if test -z "$$namespace"; then \
+			echo "No namespace to deploy into: NAMESPACE is unset and context"; \
+			echo "$$context selects none. Deploying into 'default' is not assumed."; \
+			echo 'Name one for this command:'; \
+			echo '  make ci-helm-deploy NAMESPACE=<ns>'; \
+			echo 'or set one on the context, for every command that follows:'; \
+			echo '  kubectl config set-context --current --namespace=<ns>'; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "Deploying $$package"; \
+	echo "  release   $(RELEASE)"; \
+	echo "  context   $$context"; \
+	echo "  namespace $$namespace"; \
+	echo "  values   $${values_shown:- (none)}$(if $(VALUES), $(VALUES))"; \
+	if test "$$warnings" -gt 0; then \
+		if test -n "$(ASSUME_YES)"; then \
+			echo "ASSUME_YES is set; continuing past $$warnings warning(s)."; \
+		elif (: < /dev/tty) 2>/dev/null; then \
+			printf 'Proceed with the deploy anyway? [y/N] ' > /dev/tty; \
+			read -r reply < /dev/tty || reply=''; \
+			case "$$reply" in \
+				y|Y) ;; \
+				*) echo 'Cancelled; nothing was deployed.'; exit 1 ;; \
+			esac; \
+		else \
+			echo 'No terminal to ask on, so cancelling rather than assuming yes.'; \
+			echo 'Set ASSUME_YES=1 to deploy past warnings without the prompt.'; \
+			exit 1; \
+		fi; \
+	fi; \
+	helm upgrade --install "$(RELEASE)" "$$package" \
+		--namespace "$$namespace" --create-namespace \
+		$${values_args[@]+"$${values_args[@]}"} \
+		$(foreach values_file,$(VALUES),--values "$(values_file)") \
+		$(HELM_FLAGS)
+##> Exporting TAG is what keeps all four agreeing; left unset it is recomputed from
+##> HEAD each command. Unset SERVICES to leave every image on its released tag.
+
+##@ ci Tearing down a release
+# ci-uninstall-release RELEASE=<name>: Uninstall RELEASE, then delete the
+# storage and credentials helm leaves behind -- UNINSTALL_PVCS and
+# UNINSTALL_SECRETS name them, and only the ones that exist are touched.
+# Everything is listed for confirmation before anything is deleted. RELEASE has
+# to be named explicitly: this deletes data, so the default is not assumed. A
+# release that is already gone is not an error, which is what lets this finish a
+# teardown that stopped halfway.
+ci-uninstall-release:
+	@set -euo pipefail; \
+	if test '$(origin RELEASE)' = file; then \
+		echo 'RELEASE is required, for example: make $@ RELEASE=$(RELEASE)'; \
+		echo 'This deletes the release and its data, so no default is assumed.'; \
+		exit 1; \
+	fi; \
+	context=$$(kubectl config current-context 2>/dev/null || echo '<none>'); \
+	namespace="$(NAMESPACE)"; \
+	if test -z "$$namespace"; then \
+		namespace=$$(kubectl config view --minify --output jsonpath='{..namespace}' 2>/dev/null); \
+		if test -z "$$namespace"; then \
+			echo "No namespace to uninstall from: NAMESPACE is unset and context"; \
+			echo "$$context selects none. Uninstalling from 'default' is not assumed."; \
+			echo 'Name one for this command:'; \
+			echo '  make ci-uninstall-release RELEASE=$(RELEASE) NAMESPACE=<ns>'; \
+			echo 'or set one on the context, for every command that follows:'; \
+			echo '  kubectl config set-context --current --namespace=<ns>'; \
+			exit 1; \
+		fi; \
+	fi; \
+	release_present=yes; \
+	if ! helm status "$(RELEASE)" --namespace "$$namespace" >/dev/null 2>&1; then \
+		release_present=no; \
+	fi; \
+	pvcs=(); \
+	pvcs_shown=""; \
+	for name in $(UNINSTALL_PVCS); do \
+		if kubectl get persistentvolumeclaim "$$name" --namespace "$$namespace" >/dev/null 2>&1; then \
+			pvcs+=("$$name"); \
+			pvcs_shown="$$pvcs_shown $$name"; \
+		fi; \
+	done; \
+	secrets=(); \
+	secrets_shown=""; \
+	for name in $(UNINSTALL_SECRETS); do \
+		if kubectl get secret "$$name" --namespace "$$namespace" >/dev/null 2>&1; then \
+			secrets+=("$$name"); \
+			secrets_shown="$$secrets_shown $$name"; \
+		fi; \
+	done; \
+	release_shown='installed'; \
+	if test "$$release_present" = no; then \
+		release_shown='not installed'; \
+		if test -n "$$pvcs_shown$$secrets_shown"; then \
+			release_shown='not installed; deleting only what it left behind'; \
+		fi; \
+	fi; \
+	echo "Uninstalling $(RELEASE)"; \
+	echo "  context   $$context"; \
+	echo "  namespace $$namespace"; \
+	echo "  release   $$release_shown"; \
+	echo "  pvcs     $${pvcs_shown:- (none present)}"; \
+	echo "  secrets  $${secrets_shown:- (none present)}"; \
+	if test "$$release_present" = no && test -z "$$pvcs_shown$$secrets_shown"; then \
+		echo 'Nothing to uninstall or delete.'; \
+		exit 0; \
+	fi; \
+	if test -n "$$pvcs_shown"; then \
+		echo 'Deleting those claims destroys the data in them; this cannot be undone.'; \
+	fi; \
+	if test -n "$(ASSUME_YES)"; then \
+		echo 'ASSUME_YES is set; continuing without asking.'; \
+	elif (: < /dev/tty) 2>/dev/null; then \
+		printf 'Proceed? [y/N] ' > /dev/tty; \
+		read -r reply < /dev/tty || reply=''; \
+		case "$$reply" in \
+			y|Y) ;; \
+			*) echo 'Cancelled; nothing was deleted.'; exit 1 ;; \
+		esac; \
+	else \
+		echo 'No terminal to ask on, so cancelling rather than assuming yes.'; \
+		echo 'Set ASSUME_YES=1 to uninstall without the prompt.'; \
+		exit 1; \
+	fi; \
+	if test "$$release_present" = yes; then \
+		helm uninstall "$(RELEASE)" --namespace "$$namespace"; \
+	fi; \
+	if test -n "$$pvcs_shown"; then \
+		kubectl delete persistentvolumeclaim --namespace "$$namespace" \
+			--ignore-not-found $${pvcs[@]+"$${pvcs[@]}"}; \
+	fi; \
+	if test -n "$$secrets_shown"; then \
+		kubectl delete secret --namespace "$$namespace" \
+			--ignore-not-found $${secrets[@]+"$${secrets[@]}"}; \
+	fi
+##> A claim can sit in Terminating until the pods using it are gone; kubectl waits
+##> it out. Anything the charts did not create is left alone, PersistentVolumes
+##> included -- a Retain volume outlives its claim and is yours to delete.
+
+##@ ci Building and inspecting one service
 # docker-build: Build one service image exactly as CI builds it
 docker-build:
 	$(call require-service)
@@ -663,17 +921,19 @@ docker-build:
 	fi
 	@docker build --platform "$(IMAGE_PLATFORM)" -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
 
+##@ ci Developer checks (see README.md "DevEx")
 # pre-push: Every check CI will run that can run locally
 pre-push: ci-tests ci-validate-everything ci-check-versions check-locks
 	@git diff --check
 	@echo "pre-push checks passed"
 
-# install-hooks: Point git at $(HOOKS_PATH) so pre-push runs automatically
+# install-hooks: Run pre-push automatically via git hooks
 install-hooks:
 	@git config core.hooksPath "$(HOOKS_PATH)"
 	@echo "core.hooksPath = $(HOOKS_PATH)"
 	@echo "Undo with: git config --unset core.hooksPath"
 
+##@ locks Chart.lock maintenance
 # sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
 # Charts without dependencies are skipped rather than treated as an error.
 sync-locks:
@@ -689,7 +949,9 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
+##@ subtrees Subtree updates
 # pull-remotes: Pull every configured service subtree in sequence
 pull-remotes: pull-appstore \
 	pull-appstore-chart \

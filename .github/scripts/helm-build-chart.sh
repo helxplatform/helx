@@ -173,9 +173,18 @@ package_chart() {
   local chart_dir=$1
   local chart_name=$2
   local chart_version=$3
-  local package_dir package
+  local package_dir package pointer
 
-  package_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/helm-package.XXXXXX")
+  # CHART_PACKAGE_DIR puts the archive somewhere the caller can predict, so a
+  # later step -- make ci-helm-deploy -- can deploy exactly what this build
+  # produced. CI leaves it unset: it reads the path from $GITHUB_OUTPUT and has
+  # no second invocation to hand it to.
+  if [[ -n "${CHART_PACKAGE_DIR:-}" ]]; then
+    package_dir="$CHART_PACKAGE_DIR"
+    mkdir -p "$package_dir"
+  else
+    package_dir=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/helm-package.XXXXXX")
+  fi
   if candidate_mode; then
     helm package "$chart_dir" --destination "$package_dir" --version "$chart_version"
   else
@@ -186,6 +195,15 @@ package_chart() {
     echo "::error::helm package did not create $package" >&2
     return 1
   }
+
+  # A caller cannot name the archive itself: a candidate build derives the
+  # version from the channel and commit, so only this script knows it by the
+  # time packaging is done. Leave a pointer named after the chart directory,
+  # which callers do know statically, holding the path just written.
+  if [[ -n "${CHART_PACKAGE_DIR:-}" ]]; then
+    pointer="$package_dir/.$(basename "${chart_dir%/}").path"
+    printf '%s\n' "$package" > "$pointer"
+  fi
 
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {

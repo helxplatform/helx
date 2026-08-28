@@ -23,6 +23,7 @@ Session.vim
 # Helm
 **/charts/*.tgz
 *.tgz
+**/.helm_ls_cache/
 .helm-ls-cache
 
 .history

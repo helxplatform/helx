@@ -40,7 +40,9 @@ DEV_PHASE:
   dev: False
 
 # The TLS Secret has a separate certificate lifecycle and remains caller-managed;
-# this chart does not create it. Uncomment these lines after creating the Secret.
+# this chart does not create it. Uncomment the SSL block after creating the Secret.
+# Note: an SSL block whose Secret name is empty renders an Ingress without a
+# secretName, which asks the ingress controller for its default certificate.
 # kubectl create secret tls resty-tls-secret --key resty.key --cert resty.crt
 # SSL:
 #   nginxTLSSecret: resty-tls-secret
@@ -72,6 +74,15 @@ varStorage:
 basicAuth:
   # -- Enables basic authentication for the site using the Secret selected below.
   enabled: false
+  # -- Username the htpasswd entry is derived from. Only used in chart-managed
+  # mode, and only when `secret.values.auth` is unset. There is no default, so a
+  # deployment that enabled basic auth without choosing credentials now fails to
+  # render instead of shipping a publicly known one.
+  username: ""
+  # -- Password the htpasswd entry is derived from. Must be set together with
+  # `basicAuth.username`. bcrypt salts are random, so the derived entry is
+  # rewritten on every render; set `secret.values.auth` to pin it.
+  password: ""
 
 secret:
   # -- Name of a caller-managed Secret containing a precomputed htpasswd entry
@@ -79,7 +90,9 @@ secret:
   existingSecret: ""
 
   # -- Key/value pairs used for the chart-managed basic-auth Secret. Provide a
-  # precomputed htpasswd entry under the required key `auth`.
+  # precomputed htpasswd entry under the required key `auth`. Takes precedence
+  # over persisted cluster data, and is mutually exclusive with
+  # `basicAuth.username`/`basicAuth.password`.
   values: {}
 
   # -- Configure an ExternalSecret to populate a Secret containing the

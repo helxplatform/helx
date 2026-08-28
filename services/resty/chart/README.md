@@ -13,31 +13,55 @@ A Helm chart for Kubernetes
 ## Basic authentication Secrets
 
 Set `basicAuth.enabled=true` to enable ingress basic authentication. The selected
-Secret must contain an `auth` key whose value is a precomputed htpasswd entry;
-this chart no longer accepts a username or password and does not compute the
-entry from plaintext credentials.
+Secret must contain an `auth` key whose value is a precomputed htpasswd entry.
+
+There are two ways to supply that entry in chart-managed mode:
+
+- `secret.values.auth` takes the precomputed entry directly. Prefer it: the value
+  is stable, so the Secret is not rewritten on every upgrade.
+- `basicAuth.username` and `basicAuth.password` are the pre-2.0 spelling and
+  still work. The chart derives the entry from them, exactly as it did before.
+  bcrypt salts are random, so a derived entry differs on every render and Helm
+  rewrites the Secret on each upgrade.
+
+The two are mutually exclusive, and neither has a default. A deployment that
+enables basic authentication without choosing credentials fails to render rather
+than shipping the publicly known `defaultUser`/`defaultPassword` pair the chart
+used to install.
 
 The chart supports three mutually exclusive ownership modes:
 
 1. **Chart-managed:** leave `secret.existingSecret` empty and
-   `secret.externalSecret.enabled=false`, then provide the precomputed entry as
-   `secret.values.auth`. The Secret name remains exactly
-   `<release>-nginx-htpasswd`. During a cluster-aware Helm upgrade, existing data
-   at that name takes precedence so the entry is preserved.
+   `secret.externalSecret.enabled=false`, then supply the entry by either route
+   above. The Secret name remains exactly `<release>-nginx-htpasswd`. During a
+   cluster-aware Helm upgrade, a supplied value wins so that rotating the
+   credential through values takes effect; when no value is supplied, existing
+   data at that name is preserved.
 2. **Caller-managed:** set `secret.existingSecret` to the name of a Secret that
    already contains `auth`. The chart creates no Secret resource.
 3. **ESO-managed:** set `secret.externalSecret.enabled=true` and configure its
    store and remote reference. ESO populates `targetName`, which defaults to
    `<release>-nginx-htpasswd`.
 
+`basicAuth.username` and `basicAuth.password` only populate the chart-managed
+Secret. Setting them alongside `secret.existingSecret` or an ExternalSecret is an
+error rather than a silently ignored credential.
+
 Managed mode requires a non-empty `auth` value on a fresh install. Because
 client-side renderers such as Argo CD cannot use Helm upgrade lookups to recover
 cluster data, provide a stable managed value there or use `existingSecret` or
 External Secrets.
 
+## The TLS Secret
+
 The Secret configured by `SSL.nginxTLSSecret` is intentionally separate and
 caller-managed. TLS certificates have a different lifecycle from basic-auth
 credentials, and this chart does not create or rotate the TLS Secret.
+
+When `ingress.tls.enabled` is true, the `SSL` block must exist. An `SSL` block
+with no Secret name renders an Ingress without a `secretName`, which asks the
+ingress controller for its default certificate; a missing block is an error,
+where it previously raised a nil pointer.
 
 ## Values
 
@@ -47,6 +71,8 @@ credentials, and this chart does not create or rotate the TLS Secret.
 | airflow.authenticate | bool | `true` |  |
 | artifactCache | object | `{"authenticate":false,"enabled":false,"port":8080,"serviceName":"artifact-cache"}` | Optional /artifact route to an in-cluster artifact-cache service (replaces the ambassador Mapping for /artifact). Enable in envs that serve the helx-apps registry/specs from an artifact cache (e.g. air-gapped OpenShift). Off by default. Set authenticate=true to require the auth_request gate on /artifact. |
 | basicAuth.enabled | bool | `false` | Enables basic authentication for the site using the Secret selected below. |
+| basicAuth.password | string | `""` | Password the htpasswd entry is derived from. Must be set together with `basicAuth.username`. bcrypt salts are random, so the derived entry is rewritten on every render; set `secret.values.auth` to pin it. |
+| basicAuth.username | string | `""` | Username the htpasswd entry is derived from. Only used in chart-managed mode, and only when `secret.values.auth` is unset. There is no default, so a deployment that enabled basic auth without choosing credentials now fails to render instead of shipping a publicly known one. |
 | dnsResolver | string | `"kube-dns.kube-system.svc.cluster.local"` | PROTOTYPE (ambassador removal): cluster DNS used to re-resolve the dynamic /private/ upstreams at request time. Must point at your cluster DNS (CoreDNS/kube-dns). Some nginx builds require an IP here rather than a name -- set the CoreDNS service ClusterIP if the hostname form fails. |
 | external_http_host | bool | `false` | If using an external http proxy host set this to true and specify serverName.  Used for TACC. |
 | fullnameOverride | string | `""` |  |
@@ -81,7 +107,7 @@ credentials, and this chart does not create or rotate the TLS Secret.
 | secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate a Secret containing the precomputed htpasswd key `auth`. Mutually exclusive with existingSecret. |
 | secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to <release>-nginx-htpasswd. |
 | secret.migration.enabled | bool | `false` | No differently named legacy Secret exists; the managed name is preserved. |
-| secret.values | object | `{}` | Key/value pairs used for the chart-managed basic-auth Secret. Provide a precomputed htpasswd entry under the required key `auth`. |
+| secret.values | object | `{}` | Key/value pairs used for the chart-managed basic-auth Secret. Provide a precomputed htpasswd entry under the required key `auth`. Takes precedence over persisted cluster data, and is mutually exclusive with `basicAuth.username`/`basicAuth.password`. |
 | service.IP | string | `nil` | The static IP for this service, assigned to you by cluster administrators. Ignored if ingress.create=true. |
 | service.httpPort | int | `80` |  |
 | service.httpTargetPort | int | `8080` |  |

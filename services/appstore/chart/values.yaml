@@ -98,8 +98,6 @@ secret:
   # Optional appstore settings:
   #   AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames
   #   REMOVE_AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames
-  #   CSRF_DOMAINS: comma-separated origins including scheme, for example
-  #   "https://app.example.org,https://other.example.org"
   #   EMAIL_HOST: SMTP hostname or IP address
   #   EMAIL_PORT: decimal SMTP port number as a string, for example "25" or "587"
   #   EMAIL_USE_TLS: empty string disables TLS; any non-empty string enables TLS because the app currently
@@ -253,6 +251,9 @@ django:
 
   # -- should be 'live' unless you are doing some kind of development
   DEV_PHASE: "live"
+
+  # -- allowed domains to make post requests to the appstore
+  CSRF_DOMAINS: "https://*.renci.org,https://*.renci.unc.edu"
 
 saml:
   cache:

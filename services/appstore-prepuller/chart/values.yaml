@@ -1,6 +1,6 @@
 # -- App registry (source of the image list via the tycho API)
 appRegistry:
-  repo: ""
+  repo: "https://github.com/helxplatform/helx-apps/raw"
   branch: ""
   brand: ""
 

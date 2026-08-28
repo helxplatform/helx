@@ -59,6 +59,11 @@ spec:
         - name: GRADER_API_URL
           value: {{ .Values.graderApiUrl }}
         {{- end }}
+        - name: CSRF_DOMAINS
+          valueFrom:
+            configMapKeyRef:
+              key: CSRF_DOMAINS
+              name: {{ include "appstore.fullname" . }}-env
         - name: GUNICORN_WORKERS
           valueFrom:
             configMapKeyRef:

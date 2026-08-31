@@ -63,15 +63,18 @@ Keeping the old TLS Secret also means keeping the `MutatingWebhookConfiguration`
 
 Letting the chart generate instead is the simpler path: it produces a certificate whose SANs cover the Service it renders and a webhook configuration carrying the matching CA bundle, and the old TLS Secret can be deleted with the old release.
 
-### 2. Capture the old MutatingWebhookConfiguration before deleting it
+### 2. Delete the old MutatingWebhookConfiguration
 
-Selectors added out of band are not reproducible from chart values. Save the object, then re-express anything custom in `webhook.extraMatchExpressions`:
+The chart creates its own, so the one built by `make mutate-config` has to go. Back it up first: selectors added out of band are not reproducible from chart values, and anything custom belongs in `webhook.extraMatchExpressions` afterwards.
 
 ```sh
 kubectl get mutatingwebhookconfiguration "$NAME" -o yaml > "$NAME.backup.yaml"
+kubectl delete mutatingwebhookconfiguration "$NAME"
 ```
 
-Installing the chart with `webhook.enabled` requires cluster-level permission on `admissionregistration.k8s.io`.
+Deleting it needs the same cluster-level permission on `admissionregistration.k8s.io` that installing the chart with `webhook.enabled` needs, so this adds no new access requirement.
+
+Leaving it in place is the thing to avoid. These objects are cluster-scoped and the old one almost certainly has a different name from the chart's, so nothing collides and nothing errors: both configurations match the namespace and both are invoked on every Deployment create and update. The old one's `caBundle` no longer matches the certificate the pod now serves, so its call fails TLS, and `failurePolicy: Ignore` means the API server swallows that failure. Mutation keeps working through the new object while every admission pays for a dead webhook call.
 
 ### config.secrets was removed
 
@@ -79,7 +82,7 @@ Installing the chart with `webhook.enabled` requires cluster-level permission on
 
 ### Service naming under the umbrella
 
-A subchart's fullname is release-qualified, so a `helx` release yields `helx-user-mutator` where the standalone chart yielded `user-mutator`. That only matters when reusing a certificate or webhook configuration built for the old name; pin it with `user-mutator.fullnameOverride: user-mutator`, or let the chart generate both and ignore the difference.
+A subchart's fullname is release-qualified, so a `helx` release yields `helx-user-mutator` where the standalone chart yielded `user-mutator`. That matters only when keeping a TLS Secret whose certificate SANs were issued for the old Service name: pin it with `user-mutator.fullnameOverride: user-mutator`. Letting the chart generate the certificate makes the difference irrelevant, since it issues SANs for whatever Service it renders.
 
 ### The make targets still work
 

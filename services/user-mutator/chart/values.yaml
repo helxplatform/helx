@@ -143,16 +143,6 @@ ldap:
         kind: SecretStore
       remoteRef: ""
 
-# Configure optional features. To enable LDAP, provide its connection settings;
-# doing so also activates the ldap.secret contract above.
-#
-# features:
-#   ldap:
-#     host: "ldap.example.org"
-#     port: 389
-#     username: "cn=admin,dc=example,dc=org"
-#     user_base_dn: "ou=users,dc=example,dc=org"
-#     group_base_dn: "ou=groups,dc=example,dc=org"
 # Cluster-scoped MutatingWebhookConfiguration, rendered by default so that
 # installing the chart produces a working webhook with no out-of-band steps.
 #
@@ -211,49 +201,6 @@ webhook:
         - UPDATE
       resources:
         - deployments
-
-  # -- Configure an ExternalSecret to populate the webhook TLS Secret.
-  externalSecret:
-    enabled: false
-    # -- Optional ESO target Secret name. Defaults to <fullname>-tls.
-    targetName: ""
-    refreshInterval: 1h
-    secretStoreRef:
-      name: vault
-      kind: SecretStore
-    remoteRef: ""
-
-  migration:
-    # -- Automatic migration is not supported because the historical TLS Secret
-    # is created and owned outside Helm.
-    enabled: false
-
-ldap:
-  secret:
-    # -- Name of a caller-managed Secret containing the password key. This
-    # contract is only rendered and mounted when config.features.ldap is enabled.
-    existingSecret: user-mutator-ldap-password
-
-    # -- Plaintext values for the chart-managed LDAP Secret. password is
-    # required in managed mode.
-    values: {}
-
-    # -- Configure an ExternalSecret to populate the LDAP password Secret.
-    externalSecret:
-      enabled: false
-      # -- Optional ESO target Secret name. Defaults to
-      # <fullname>-ldap-password.
-      targetName: ""
-      refreshInterval: 1h
-      secretStoreRef:
-        name: vault
-        kind: SecretStore
-      remoteRef: ""
-
-    migration:
-      # -- Automatic migration is not supported because the historical LDAP
-      # Secret is created and owned outside Helm.
-      enabled: false
 
 # Configure optional features. To enable LDAP, provide its connection settings;
 # doing so also activates the ldap.secret contract above.

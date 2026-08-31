@@ -36,7 +36,7 @@ delete the retained Secret after the backend is populated and verified.
 The appstore `atlas-env` Secret is deliberately exempt from retention because
 every key in it is derived from chart values.
 
-## user-mutator
+## User Mutator
 
 ### Chart 2.0.0 renders the webhook itself
 
@@ -647,7 +647,7 @@ For the chart-specific defaults and migration values, see
 [`services/helx-ldap/README.md`](services/helx-ldap/README.md) and
 [`deploy/helm/helx-chart/examples/ldap-migration-values.yaml`](deploy/helm/helx-chart/examples/ldap-migration-values.yaml).
 
-## LDAP sync
+## LDAP Sync
 
 `ldap-sync` is a separate service with its own PostgreSQL dependency, and it is
 not covered by the HeLx LDAP procedure above. Renaming its PostgreSQL release

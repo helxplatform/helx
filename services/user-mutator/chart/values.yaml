@@ -82,13 +82,15 @@ tolerations: []
 affinity: {}
 
 
-# Webhook TLS Secret contract. The caller-managed historical Secret remains the
-# default for backward compatibility. Set existingSecret to "" to select either
-# chart-managed values or External Secrets Operator mode.
+# Webhook TLS Secret contract. The chart generates the serving certificate by
+# default; set generate.enabled to false and pick another mode to opt out.
 secret:
-  # -- Name of a caller-managed TLS Secret. Mutually exclusive with
-  # secret.externalSecret.enabled.
-  existingSecret: user-mutator-cert-tls
+  # -- Name of a caller-managed TLS Secret. Point this at a Secret preserved
+  # from an earlier deployment to keep using it; the historical name was
+  # user-mutator-cert-tls. Mutually exclusive with secret.generate.enabled and
+  # secret.externalSecret.enabled, so selecting this mode means also setting
+  # secret.generate.enabled to false.
+  existingSecret: ""
 
   # -- Plaintext values for the chart-managed TLS Secret. tls.crt and tls.key
   # are required in managed mode; ca.crt is optional.
@@ -105,16 +107,25 @@ secret:
       kind: SecretStore
     remoteRef: ""
 
-  migration:
-    # -- Automatic migration is not supported because the historical TLS Secret
-    # is created and owned outside Helm.
-    enabled: false
+  # -- Fourth ownership mode: the chart generates a self-signed CA and serving
+  # certificate for the webhook. Mutually exclusive with existingSecret,
+  # values, and externalSecret. Requires secret.existingSecret: "". Generated
+  # material is persisted, so upgrades never rotate it out from under a
+  # MutatingWebhookConfiguration; rotate by deleting the Secret named
+  # <fullname>-tls and upgrading again.
+  generate:
+    enabled: true
+    # -- Certificate lifetime. There is no automatic rotation, so this is long
+    # by default.
+    validityDays: 3650
 
 ldap:
   secret:
-    # -- Name of a caller-managed Secret containing the password key. This
-    # contract is only rendered and mounted when config.features.ldap is enabled.
-    existingSecret: user-mutator-ldap-password
+    # -- Name of a caller-managed Secret containing the password key. Only
+    # rendered and mounted when config.features.ldap is enabled. Point this at
+    # a Secret preserved from an earlier deployment to keep using it; the
+    # historical name was user-mutator-ldap-password.
+    existingSecret: ""
 
     # -- Plaintext values for the chart-managed LDAP Secret. `password` is
     # required in managed mode.
@@ -132,11 +143,6 @@ ldap:
         kind: SecretStore
       remoteRef: ""
 
-    migration:
-      # -- Automatic migration is not supported because the historical LDAP
-      # Secret is created and owned outside Helm.
-      enabled: false
-
 # Configure optional features. To enable LDAP, provide its connection settings;
 # doing so also activates the ldap.secret contract above.
 #
@@ -147,6 +153,62 @@ ldap:
 #     username: "cn=admin,dc=example,dc=org"
 #     user_base_dn: "ou=users,dc=example,dc=org"
 #     group_base_dn: "ou=groups,dc=example,dc=org"
+# Cluster-scoped MutatingWebhookConfiguration, rendered by default so that
+# installing the chart produces a working webhook with no out-of-band steps.
+#
+# Namespaces are selected by their automatic kubernetes.io/metadata.name label,
+# so no namespace has to be labelled for mutation to take effect.
+#
+# To manage this object yourself, set enabled to false.
+webhook:
+  # -- Render the MutatingWebhookConfiguration. Requires a CA bundle, from
+  # either secret.generate.enabled or webhook.caBundle.
+  enabled: true
+
+  # -- Name of the configuration. Defaults to <fullname>-<namespace>, which is
+  # qualified by namespace because the object is cluster-scoped. Set this to
+  # adopt a configuration created out of band.
+  name: ""
+
+  # -- Namespaces whose Deployments are mutated. Defaults to the release
+  # namespace.
+  namespaces: []
+
+  # -- Base64 CA bundle that signed the serving certificate. Only used when
+  # secret.generate.enabled is false.
+  caBundle: ""
+
+  # -- Optional additional namespaceSelector matchLabels. Set this to
+  # {enable-<webhook.name>: "true"} to keep the historical opt-in label as a
+  # per-namespace toggle.
+  matchLabels: {}
+
+  # -- Additional namespaceSelector matchExpressions, ANDed with the
+  # kubernetes.io/metadata.name clause. The defaults keep the webhook away from
+  # control-plane and AKS-managed namespaces.
+  extraMatchExpressions:
+    - key: control-plane
+      operator: NotIn
+      values:
+        - "true"
+
+  failurePolicy: Ignore
+  reinvocationPolicy: Never
+  timeoutSeconds: 10
+  path: /mutate
+
+  # -- Resources the webhook is called for.
+  rules:
+    - apiGroups:
+        - apps
+      apiVersions:
+        - v1
+      operations:
+        - CREATE
+        - UPDATE
+      resources:
+        - deployments
+
 config:
   enabled: true
   maps:
@@ -158,10 +220,8 @@ config:
   # overridden here.
   additionalSecrets: {}
 
-  # config.secrets is deprecated and intentionally has no entry here. Its
-  # absence is what lets the chart tell a caller-supplied map apart from a
-  # chart default, so do not add it back. When supplied, its cert and
-  # ldap-password entries are honoured only if the matching contract above is
-  # untouched; every other entry behaves as config.additionalSecrets. Migrate
-  # to secret.existingSecret, ldap.secret.existingSecret, and
-  # config.additionalSecrets.
+  # config.secrets was removed in 2.0.0 and intentionally has no entry here.
+  # Its absence lets the chart detect a caller-supplied map and fail, rather
+  # than ignoring a custom Secret name. Do not add it back. Move its cert entry
+  # to secret.existingSecret, its ldap-password entry to
+  # ldap.secret.existingSecret, and anything else to config.additionalSecrets.

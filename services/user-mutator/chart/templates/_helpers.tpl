@@ -98,91 +98,104 @@ Name of the LDAP password Secret consumed by the Deployment.
 {{- end -}}
 
 {{/*
-Historical default names for the known contracts. A contract still carrying its
-historical default, with no values and no ExternalSecret, means the caller has
-not selected any of the three ownership modes, so a deprecated config.secrets
-entry may still supply the name.
-*/}}
-{{- define "user-mutator.legacyTlsSecretName" -}}user-mutator-cert-tls{{- end -}}
-{{- define "user-mutator.legacyLdapSecretName" -}}user-mutator-ldap-password{{- end -}}
+Build the application Secret alias-to-resource-name map consumed by config.json
+and the Deployment's volumes. Known aliases are reserved so additional
+caller-managed entries cannot silently replace them.
 
-{{/*
-Report whether a contract is untouched. Arguments: contract, legacyDefault.
-Renders "true" when untouched and the empty string otherwise.
-*/}}
-{{- define "user-mutator.contractUntouched" -}}
-{{- $contract := .contract -}}
-{{- $externalSecret := default (dict) $contract.externalSecret -}}
-{{- if and
-  (eq $contract.existingSecret .legacyDefault)
-  (empty $contract.values)
-  (not (default false (get $externalSecret "enabled")))
--}}true{{- end -}}
-{{- end -}}
-
-{{/*
-Resolve one known contract's Secret name, honouring a deprecated config.secrets
-entry when the caller has not selected a new ownership mode. Arguments:
-alias, resolved, legacyNames, legacyPresent, contract, legacyDefault.
-*/}}
-{{- define "user-mutator.resolveKnownSecretName" -}}
-{{- $resolved := .resolved -}}
-{{- $legacyNames := .legacyNames -}}
-{{- if and .legacyPresent (hasKey $legacyNames .alias) -}}
-  {{- $legacyName := get $legacyNames .alias -}}
-  {{- $untouched := include "user-mutator.contractUntouched" (dict "contract" .contract "legacyDefault" .legacyDefault) -}}
-  {{- if $untouched -}}
-    {{- $resolved = $legacyName -}}
-  {{- else if ne $legacyName $resolved -}}
-    {{- fail (printf "user-mutator: config.secrets.%s is deprecated and conflicts with the new contract, which resolves to %q; remove config.secrets.%s" .alias $resolved .alias) -}}
-  {{- end -}}
-{{- end -}}
-{{- $resolved -}}
-{{- end -}}
-
-{{/*
-Build the application Secret alias-to-resource-name map. Known contracts are
-reserved so additional caller-managed entries cannot silently replace them.
-
-config.secrets is deprecated. It is deliberately absent from values.yaml so that
-hasKey distinguishes a caller-supplied map from a chart default, which is what
-lets a legacy name win only when no new-style mode has been chosen.
+config.secrets was removed in chart 2.0.0. It is deliberately absent from
+values.yaml, so hasKey detects a caller-supplied map and fails rather than
+ignoring it: silently dropping a custom Secret name would leave the webhook
+serving a certificate the caller never chose. Point secret.existingSecret and
+ldap.secret.existingSecret at those Secrets instead.
 */}}
 {{- define "user-mutator.effectiveSecretNames" -}}
-{{- $legacyPresent := hasKey .Values.config "secrets" -}}
-{{- $legacyNames := default (dict) (get .Values.config "secrets") -}}
+{{- if hasKey .Values.config "secrets" -}}
+  {{- fail "user-mutator: config.secrets was removed in chart 2.0.0; move its cert entry to secret.existingSecret, its ldap-password entry to ldap.secret.existingSecret, and any other entry to config.additionalSecrets" -}}
+{{- end -}}
 {{- $additionalSecrets := default (dict) .Values.config.additionalSecrets -}}
 {{- range $reservedKey := list "cert" "ldap-password" -}}
   {{- if hasKey $additionalSecrets $reservedKey -}}
     {{- fail (printf "user-mutator: config.additionalSecrets cannot override reserved key %q" $reservedKey) -}}
   {{- end -}}
 {{- end -}}
-{{- $secretNames := dict "cert" (include "user-mutator.resolveKnownSecretName" (dict
-  "alias" "cert"
-  "resolved" (include "user-mutator.tlsSecretName" .)
-  "legacyNames" $legacyNames
-  "legacyPresent" $legacyPresent
-  "contract" .Values.secret
-  "legacyDefault" (include "user-mutator.legacyTlsSecretName" .)
-)) -}}
+{{- $secretNames := dict "cert" (include "user-mutator.tlsSecretName" .) -}}
 {{- if .Values.config.features.ldap -}}
-  {{- $_ := set $secretNames "ldap-password" (include "user-mutator.resolveKnownSecretName" (dict
-    "alias" "ldap-password"
-    "resolved" (include "user-mutator.ldapSecretName" .)
-    "legacyNames" $legacyNames
-    "legacyPresent" $legacyPresent
-    "contract" .Values.ldap.secret
-    "legacyDefault" (include "user-mutator.legacyLdapSecretName" .)
-  )) -}}
-{{- end -}}
-{{/* Unknown deprecated entries behave exactly as config.additionalSecrets. */}}
-{{- range $key, $secretName := $legacyNames -}}
-  {{- if not (has $key (list "cert" "ldap-password")) -}}
-    {{- $_ := set $secretNames $key $secretName -}}
-  {{- end -}}
+  {{- $_ := set $secretNames "ldap-password" (include "user-mutator.ldapSecretName" .) -}}
 {{- end -}}
 {{- range $key, $secretName := $additionalSecrets -}}
   {{- $_ := set $secretNames $key $secretName -}}
 {{- end -}}
 {{- toYaml $secretNames -}}
+{{- end -}}
+
+{{/*
+Name of the cluster-scoped MutatingWebhookConfiguration. It is cluster-scoped,
+so the default is qualified by namespace to keep two releases in one cluster
+from colliding. Set webhook.name to adopt an existing configuration.
+*/}}
+{{- define "user-mutator.webhookName" -}}
+{{- default (printf "%s-%s" (include "user-mutator.fullname" .) .Release.Namespace) .Values.webhook.name -}}
+{{- end -}}
+
+{{/*
+Validate that exactly one webhook TLS ownership mode is selected. generate is a
+fourth mode alongside the three helx-common contracts, so it has to be checked
+here rather than by the library.
+*/}}
+{{- define "user-mutator.validateTlsMode" -}}
+{{- if .Values.secret.generate.enabled -}}
+  {{- if .Values.secret.existingSecret -}}
+    {{- fail "user-mutator: secret.generate.enabled and secret.existingSecret are mutually exclusive; set secret.existingSecret to \"\" to let the chart generate the webhook certificate" -}}
+  {{- end -}}
+  {{- if .Values.secret.externalSecret.enabled -}}
+    {{- fail "user-mutator: secret.generate.enabled and secret.externalSecret.enabled are mutually exclusive" -}}
+  {{- end -}}
+  {{- if .Values.secret.values -}}
+    {{- fail "user-mutator: secret.generate.enabled ignores secret.values; clear one of them" -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve the webhook certificate material, returning base64-encoded tls.crt,
+tls.key, and ca.crt.
+
+Persisted material always wins, so an upgrade never rotates the certificate out
+from under a MutatingWebhookConfiguration that already carries the matching CA
+bundle. The lookup is unconditional rather than gated on Release.IsUpgrade so
+that a Secret retained by helm.sh/resource-policy: keep is reused after a
+delete and reinstall.
+
+lookup returns nothing during helm template, helm lint, and client-side dry
+runs, so those render freshly generated material. That output is only ever
+inspected, never applied, but it does mean rendering the chart twice offline
+produces two different certificates.
+*/}}
+{{- define "user-mutator.webhookCertData" -}}
+{{- $secretName := include "user-mutator.tlsManagedSecretName" . -}}
+{{- $existing := default (dict) (lookup "v1" "Secret" .Release.Namespace $secretName) -}}
+{{- $data := default (dict) (get $existing "data") -}}
+{{- $crt := default "" (get $data "tls.crt") -}}
+{{- $key := default "" (get $data "tls.key") -}}
+{{- $ca := default "" (get $data "ca.crt") -}}
+{{- if and $crt $key $ca -}}
+  {{- dict "tls.crt" $crt "tls.key" $key "ca.crt" $ca | toYaml -}}
+{{- else -}}
+  {{- $serviceName := include "user-mutator.fullname" . -}}
+  {{- $namespace := .Release.Namespace -}}
+  {{- $altNames := list
+    $serviceName
+    (printf "%s.%s" $serviceName $namespace)
+    (printf "%s.%s.svc" $serviceName $namespace)
+    (printf "%s.%s.svc.cluster.local" $serviceName $namespace)
+  -}}
+  {{- $days := int .Values.secret.generate.validityDays -}}
+  {{- $generatedCa := genCA (printf "%s-ca" $serviceName) $days -}}
+  {{- $generatedCert := genSignedCert $serviceName (list) $altNames $days $generatedCa -}}
+  {{- dict
+    "tls.crt" ($generatedCert.Cert | b64enc)
+    "tls.key" ($generatedCert.Key | b64enc)
+    "ca.crt" ($generatedCa.Cert | b64enc)
+  | toYaml -}}
+{{- end -}}
 {{- end -}}

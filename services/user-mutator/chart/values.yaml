@@ -116,7 +116,7 @@ ldap:
     # contract is only rendered and mounted when config.features.ldap is enabled.
     existingSecret: user-mutator-ldap-password
 
-    # -- Plaintext values for the chart-managed LDAP Secret. password is
+    # -- Plaintext values for the chart-managed LDAP Secret. `password` is
     # required in managed mode.
     values: {}
 
@@ -157,3 +157,11 @@ config:
   # Secret resource names. The reserved keys cert and ldap-password cannot be
   # overridden here.
   additionalSecrets: {}
+
+  # config.secrets is deprecated and intentionally has no entry here. Its
+  # absence is what lets the chart tell a caller-supplied map apart from a
+  # chart default, so do not add it back. When supplied, its cert and
+  # ldap-password entries are honoured only if the matching contract above is
+  # untouched; every other entry behaves as config.additionalSecrets. Migrate
+  # to secret.existingSecret, ldap.secret.existingSecret, and
+  # config.additionalSecrets.

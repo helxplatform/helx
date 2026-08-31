@@ -97,7 +97,6 @@ Edit `config.env` to customize:
 - Creates Service, ServiceAccount, RBAC resources
 - Uses the `helx-common` library for the webhook TLS and optional LDAP password Secret contracts
 - Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration
-- The parent chart owns dependency locking; do not create `chart/Chart.lock`
 
 ### Core Workflow
 
@@ -197,6 +196,8 @@ secretsFrom:
 ```
 
 The chart generates the runtime `secrets` map from the known contracts plus `config.additionalSecrets`. Configure webhook TLS through top-level `secret`, LDAP credentials through `ldap.secret`, and unknown caller-managed contracts through `config.additionalSecrets`. The aliases `cert` and `ldap-password` are reserved.
+
+The legacy `config.secrets` map is deprecated but still honoured, so pre-`1.7.0` values keep rendering unchanged. A legacy `cert` or `ldap-password` entry wins only while the matching contract is untouched, meaning its `existingSecret` still holds the historical default, `values` is empty, and `externalSecret.enabled` is false; any other legacy entry behaves as `config.additionalSecrets`. Supplying both a legacy alias and its new contract fails to render rather than picking a winner. `config.secrets` is deliberately absent from `values.yaml` because the chart uses `hasKey` to tell a caller-supplied map from a chart default; do not add it back.
 
 Both known contracts support existing Secret, chart-managed values, and External Secrets Operator modes. Their backward-compatible defaults reference `user-mutator-cert-tls` and `user-mutator-ldap-password`; managed/default targets are `<fullname>-tls` and `<fullname>-ldap-password` respectively. The LDAP contract is only rendered and mounted when `config.features.ldap` is enabled.
 

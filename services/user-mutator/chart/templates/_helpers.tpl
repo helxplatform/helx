@@ -98,22 +98,88 @@ Name of the LDAP password Secret consumed by the Deployment.
 {{- end -}}
 
 {{/*
+Historical default names for the known contracts. A contract still carrying its
+historical default, with no values and no ExternalSecret, means the caller has
+not selected any of the three ownership modes, so a deprecated config.secrets
+entry may still supply the name.
+*/}}
+{{- define "user-mutator.legacyTlsSecretName" -}}user-mutator-cert-tls{{- end -}}
+{{- define "user-mutator.legacyLdapSecretName" -}}user-mutator-ldap-password{{- end -}}
+
+{{/*
+Report whether a contract is untouched. Arguments: contract, legacyDefault.
+Renders "true" when untouched and the empty string otherwise.
+*/}}
+{{- define "user-mutator.contractUntouched" -}}
+{{- $contract := .contract -}}
+{{- $externalSecret := default (dict) $contract.externalSecret -}}
+{{- if and
+  (eq $contract.existingSecret .legacyDefault)
+  (empty $contract.values)
+  (not (default false (get $externalSecret "enabled")))
+-}}true{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve one known contract's Secret name, honouring a deprecated config.secrets
+entry when the caller has not selected a new ownership mode. Arguments:
+alias, resolved, legacyNames, legacyPresent, contract, legacyDefault.
+*/}}
+{{- define "user-mutator.resolveKnownSecretName" -}}
+{{- $resolved := .resolved -}}
+{{- $legacyNames := .legacyNames -}}
+{{- if and .legacyPresent (hasKey $legacyNames .alias) -}}
+  {{- $legacyName := get $legacyNames .alias -}}
+  {{- $untouched := include "user-mutator.contractUntouched" (dict "contract" .contract "legacyDefault" .legacyDefault) -}}
+  {{- if $untouched -}}
+    {{- $resolved = $legacyName -}}
+  {{- else if ne $legacyName $resolved -}}
+    {{- fail (printf "user-mutator: config.secrets.%s is deprecated and conflicts with the new contract, which resolves to %q; remove config.secrets.%s" .alias $resolved .alias) -}}
+  {{- end -}}
+{{- end -}}
+{{- $resolved -}}
+{{- end -}}
+
+{{/*
 Build the application Secret alias-to-resource-name map. Known contracts are
 reserved so additional caller-managed entries cannot silently replace them.
+
+config.secrets is deprecated. It is deliberately absent from values.yaml so that
+hasKey distinguishes a caller-supplied map from a chart default, which is what
+lets a legacy name win only when no new-style mode has been chosen.
 */}}
 {{- define "user-mutator.effectiveSecretNames" -}}
-{{- if hasKey .Values.config "secrets" -}}
-  {{- fail "user-mutator: config.secrets was removed in chart 2.0.0; use secret.existingSecret, ldap.secret.existingSecret, or config.additionalSecrets" -}}
-{{- end -}}
+{{- $legacyPresent := hasKey .Values.config "secrets" -}}
+{{- $legacyNames := default (dict) (get .Values.config "secrets") -}}
 {{- $additionalSecrets := default (dict) .Values.config.additionalSecrets -}}
 {{- range $reservedKey := list "cert" "ldap-password" -}}
   {{- if hasKey $additionalSecrets $reservedKey -}}
     {{- fail (printf "user-mutator: config.additionalSecrets cannot override reserved key %q" $reservedKey) -}}
   {{- end -}}
 {{- end -}}
-{{- $secretNames := dict "cert" (include "user-mutator.tlsSecretName" .) -}}
+{{- $secretNames := dict "cert" (include "user-mutator.resolveKnownSecretName" (dict
+  "alias" "cert"
+  "resolved" (include "user-mutator.tlsSecretName" .)
+  "legacyNames" $legacyNames
+  "legacyPresent" $legacyPresent
+  "contract" .Values.secret
+  "legacyDefault" (include "user-mutator.legacyTlsSecretName" .)
+)) -}}
 {{- if .Values.config.features.ldap -}}
-  {{- $_ := set $secretNames "ldap-password" (include "user-mutator.ldapSecretName" .) -}}
+  {{- $_ := set $secretNames "ldap-password" (include "user-mutator.resolveKnownSecretName" (dict
+    "alias" "ldap-password"
+    "resolved" (include "user-mutator.ldapSecretName" .)
+    "legacyNames" $legacyNames
+    "legacyPresent" $legacyPresent
+    "contract" .Values.ldap.secret
+    "legacyDefault" (include "user-mutator.legacyLdapSecretName" .)
+  )) -}}
+{{- end -}}
+{{/* Unknown deprecated entries behave exactly as config.additionalSecrets. */}}
+{{- range $key, $secretName := $legacyNames -}}
+  {{- if not (has $key (list "cert" "ldap-password")) -}}
+    {{- $_ := set $secretNames $key $secretName -}}
+  {{- end -}}
 {{- end -}}
 {{- range $key, $secretName := $additionalSecrets -}}
   {{- $_ := set $secretNames $key $secretName -}}

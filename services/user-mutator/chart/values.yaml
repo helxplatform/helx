@@ -143,16 +143,6 @@ ldap:
         kind: SecretStore
       remoteRef: ""
 
-# Configure optional features. To enable LDAP, provide its connection settings;
-# doing so also activates the ldap.secret contract above.
-#
-# features:
-#   ldap:
-#     host: "ldap.example.org"
-#     port: 389
-#     username: "cn=admin,dc=example,dc=org"
-#     user_base_dn: "ou=users,dc=example,dc=org"
-#     group_base_dn: "ou=groups,dc=example,dc=org"
 # Cluster-scoped MutatingWebhookConfiguration, rendered by default so that
 # installing the chart produces a working webhook with no out-of-band steps.
 #
@@ -212,6 +202,16 @@ webhook:
       resources:
         - deployments
 
+# Configure optional features. To enable LDAP, provide its connection settings;
+# doing so also activates the ldap.secret contract above.
+#
+# features:
+#   ldap:
+#     host: "ldap.example.org"
+#     port: 389
+#     username: "cn=admin,dc=example,dc=org"
+#     user_base_dn: "ou=users,dc=example,dc=org"
+#     group_base_dn: "ou=groups,dc=example,dc=org"
 config:
   enabled: true
   maps:

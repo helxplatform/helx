@@ -84,6 +84,8 @@ secret:
   #   PG_DB_HOST: derived from the release name and PostgreSQL service name
   #   PG_DB_PORT: derived from db.port, normally "5432"
   #   POSTGRES_ENABLED: "true" when postgresql.enabled is true, otherwise "false"
+  # 
+  #   --------
   #
   # Required for a normal appstore deployment:
   #   SECRET_KEY: non-empty random string; 50 characters is the historical chart length, but the app has
@@ -288,7 +290,7 @@ irodsUnbranded:
 
 atlas:
   # -- Disabling will turn off the creation of secrets/configmaps for Atlas
-  enabled: true
+  enabled: false
   # The `atlas-env` Secret keeps that exact name because the launched Atlas app
   # spec references it, so this contract has no `existingSecret` mode.
   secret:
@@ -309,10 +311,10 @@ atlas:
       remoteRef: ""
 imagej:
   # -- Disabling will turn off the creation of secrets/configmaps for ImageJ
-  enabled: true
+  enabled: false
 octave:
   # -- Disabling will turn off the creation of secrets/configmaps for Octave
-  enabled: true
+  enabled: false
 pgadmin:
   # -- Disabling will turn off the creation of secrets/configmaps for PgAdmin
   enabled: true
@@ -339,7 +341,7 @@ pgadmin:
       remoteRef: ""
 webtop:
   # -- Disabling will turn off the creation of secrets/configmaps for Webtop
-  enabled: true
+  enabled: false
 
 apps:
   DICOMGH_GOOGLE_CLIENT_ID: ""

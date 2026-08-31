@@ -96,8 +96,12 @@ Edit `config.env` to customize:
 - Deploys webhook server as Kubernetes Deployment
 - Creates Service, ServiceAccount, RBAC resources
 - Uses the `helx-common` library for the webhook TLS and optional LDAP password Secret contracts
+- Generates the webhook serving certificate and renders the cluster-scoped `MutatingWebhookConfiguration` **by default** as of chart `2.0.0` (`secret.generate.enabled` and `webhook.enabled` both default to true), so `helm install` needs no `make` targets
+- Opting out means setting both to false and then selecting one of the three ordinary ownership modes; there is no implicit fallback to a historical Secret name
+- `make deploy-webhook-server` passes those two opt-outs, because that target still creates the certificate and the webhook configuration out of band
+- `templates/webhook.yaml` renders the generated Secret and the webhook configuration together on purpose: Helm templates are pure functions, so splitting them would produce a CA bundle that does not match the serving certificate on a fresh install
+- Namespaces are selected by the automatic `kubernetes.io/metadata.name` label, so no namespace has to be labelled and the chart needs no namespace-patching RBAC
 - Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration
-- The parent chart owns dependency locking; do not create `chart/Chart.lock`
 
 ### Core Workflow
 
@@ -198,7 +202,9 @@ secretsFrom:
 
 The chart generates the runtime `secrets` map from the known contracts plus `config.additionalSecrets`. Configure webhook TLS through top-level `secret`, LDAP credentials through `ldap.secret`, and unknown caller-managed contracts through `config.additionalSecrets`. The aliases `cert` and `ldap-password` are reserved.
 
-Both known contracts support existing Secret, chart-managed values, and External Secrets Operator modes. Their backward-compatible defaults reference `user-mutator-cert-tls` and `user-mutator-ldap-password`; managed/default targets are `<fullname>-tls` and `<fullname>-ldap-password` respectively. The LDAP contract is only rendered and mounted when `config.features.ldap` is enabled.
+`config.secrets` was removed in chart `2.0.0`. It is deliberately absent from `values.yaml` so `hasKey` detects a caller-supplied map and fails, rather than ignoring a custom Secret name. Move `cert` to `secret.existingSecret`, `ldap-password` to `ldap.secret.existingSecret`, and anything else to `config.additionalSecrets`.
+
+Neither contract carries a historical default any more: `secret.existingSecret` and `ldap.secret.existingSecret` both default to `""`, and a deployment that wants a Secret preserved from an earlier install names it there.
 
 ### LDAP Integration
 

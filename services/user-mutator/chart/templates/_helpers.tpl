@@ -134,7 +134,7 @@ so the default is qualified by namespace to keep two releases in one cluster
 from colliding. Set webhook.name to adopt an existing configuration.
 */}}
 {{- define "user-mutator.webhookName" -}}
-{{- default (printf "%s-%s" (include "user-mutator.fullname" .) .Release.Namespace) .Values.webhook.name -}}
+{{- default (printf "%s-webhook-%s" (include "user-mutator.fullname" .) .Release.Namespace) .Values.webhook.name -}}
 {{- end -}}
 
 {{/*

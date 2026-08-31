@@ -165,9 +165,12 @@ webhook:
   # either secret.generate.enabled or webhook.caBundle.
   enabled: true
 
-  # -- Name of the configuration. Defaults to <fullname>-<namespace>, which is
-  # qualified by namespace because the object is cluster-scoped. Set this to
-  # adopt a configuration created out of band.
+  # -- Name of the configuration. Defaults to <fullname>-webhook-<namespace>.
+  # The release qualifier keeps two releases in one namespace apart, and the
+  # namespace qualifier keeps one release name in two namespaces apart, which
+  # matters because the object is cluster-scoped. Override it only when you
+  # need a specific name; a configuration created out of band should be
+  # deleted rather than reused.
   name: ""
 
   # -- Namespaces whose Deployments are mutated. Defaults to the release

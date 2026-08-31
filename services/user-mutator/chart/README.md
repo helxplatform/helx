@@ -90,14 +90,14 @@ webhook:
 
 ### Adopting a configuration created out of band
 
-The configuration is cluster-scoped, so `webhook.name` defaults to `<fullname>-<namespace>` to keep two releases in one cluster from colliding. Set it explicitly to match an existing name.
+The configuration is cluster-scoped, so `webhook.name` defaults to `<fullname>-webhook-<namespace>`. Both qualifiers matter: the release name keeps two releases in one namespace apart, and the namespace keeps one release name in two namespaces apart. The `webhook` token makes the object self-describing in a cluster-wide listing.
 
-Helm will refuse to take over an object it does not own. Either delete the old configuration before installing, or label it for adoption first:
+That default matches the `MUTATE_CONFIG` convention the old `make mutate-config` flow used, so a deployment that also sets `fullnameOverride` to the historical Service name will land on the name it already has. Set `webhook.name` explicitly for anything else.
+
+Delete any configuration created out of band before installing. Helm will not take over an object it does not own, and one left in place under a different name keeps firing alongside the chart's with a stale `caBundle`.
 
 ```sh
-kubectl annotate mutatingwebhookconfiguration "$NAME" \
-  meta.helm.sh/release-name="$RELEASE" meta.helm.sh/release-namespace="$NAMESPACE" --overwrite
-kubectl label mutatingwebhookconfiguration "$NAME" app.kubernetes.io/managed-by=Helm --overwrite
+kubectl delete mutatingwebhookconfiguration "$NAME"
 ```
 
 Installing the chart requires cluster-level permission on `admissionregistration.k8s.io`, since that is where the configuration lives.

@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 5.1.5](https://img.shields.io/badge/Version-5.1.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.4.1](https://img.shields.io/badge/AppVersion-4.4.1-informational?style=flat-square)
+![Version: 5.1.7](https://img.shields.io/badge/Version-5.1.7-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.4.2](https://img.shields.io/badge/AppVersion-4.4.2-informational?style=flat-square)
 
 ## CI/CD
 
@@ -33,26 +33,18 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | apps.WEBTOP_PUID | string | `"1000"` | PUID variable in webtop specifies the UID to switch the user to after initialization. |
 | appstoreEntrypointArgs | string | `"make start"` | Allow for a custom entrypoint command via the values file. |
 | atlas.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for Atlas |
+| atlas.secret.create | bool | `true` | Render the chart-managed `atlas-env` Secret. Set to false to create and own that Secret outside the chart under the same name. |
+| atlas.secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"}}` | Configure an ExternalSecret that populates `atlas-env`. Mutually exclusive with the chart-managed keys above. |
+| atlas.secret.values | object | `{}` | Key/value pairs merged over the values derived from `apps`. Chart values are authoritative for every key in this Secret. |
 | db | object | `{"name":"appstore","port":5432}` | appstore database settings |
 | debug | string | `""` |  |
 | django.ALLOW_DJANGO_LOGIN | string | `""` | show Django log in fields (true | false) |
 | django.ALLOW_SAML_LOGIN | string | `""` | show SAML log in fields (true | false) |
-| django.APPSTORE_DJANGO_PASSWORD | string | `""` |  |
-| django.APPSTORE_DJANGO_USERNAME | string | `"admin"` |  |
-| django.AUTHORIZED_USERS | string | `""` | user emails for oauth providers |
 | django.AUTO_WHITELIST_PATTERNS | list | `[]` | Note that these only run on a user's primary alias. If a user has primary@cs.unc.edu as their primary alias, and secondary@renci.org as a secondary alias, they will only be whitelisted automatically if cs.unc.edu emails are allowed. ex. Whitelist all RENCI emails - "^[A-Za-z0-9._%+-]+@renci\\.org$" ex. Whitelist all UNC emails - "^[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\\.)?unc\\.edu$" ex. Whitelist CS dept. (grad./prof.) UNC emails - "^[A-Za-z0-9._%+-]+@cs\\.unc\\.edu$" |
-| django.CSRF_DOMAINS | string | `"https://*.renci.org,https://*.renci.unc.edu"` | allowed domains to make post requests to the appstore |
 | django.DEV_PHASE | string | `"live"` | should be 'live' unless you are doing some kind of development |
 | django.DOCKSTORE_APPS_BRANCH | string | `"v1.6.0"` | Specify the git branch to use for HeLx app specifications.  When declaring 'tycho.externalAppRegistryRepo' leave this as an empty string. |
-| django.EMAIL_HOST | string | `""` | Email Server host ie relay.unc.edu | relay.renci.org |
-| django.EMAIL_HOST_PASSWORD | string | `""` | password of account to use for outgoing emails |
-| django.EMAIL_HOST_USER | string | `""` | email of account to use for outgoing emails |
-| django.EMAIL_PORT | string | `""` | Email Server port ie 25 or other. |
-| django.EMAIL_USE_TLS | bool | `false` | Does the Email Server require TLS connection or not? Boolean (true | false) |
 | django.IMAGE_DOWNLOAD_URL | string | `""` | Specify URL to use for the "Image Download" link on the top part of website. |
 | django.PRODUCT_LINKS | list | `[]` |  |
-| django.RECIPIENT_EMAILS | string | `""` | list of appstore registration emails |
-| django.REMOVE_AUTHORIZED_USERS | string | `""` | user emails to remove from an already-existing database |
 | django.SESSION_IDLE_TIMEOUT | string | `"2592000"` | idle timeout for user web session |
 | djangoSettings | string | `"helx"` | set the theme for appstore (bdc, braini, restartr, scidas) |
 | extraEnv | object | `{}` |  |
@@ -76,20 +68,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | imagePostgresql.tag | string | `"17.6.0-debian-12-r0"` | Image tag for postgresql, coordinate this with postgresql dependency. |
 | imagePullSecrets | list | `[]` | credentials for a private repo |
 | imagej.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for ImageJ |
-| irods.BRAINI_RODS | string | `""` |  |
-| irods.IROD_COLLECTIONS | string | `""` |  |
-| irods.IROD_ZONE | string | `""` |  |
-| irods.NRC_MICROSCOPY_IRODS | string | `""` |  |
-| irods.RODS_PASSWORD | string | `""` |  |
-| irods.RODS_USERNAME | string | `""` |  |
-| irods.enabled | bool | `false` | enable irods support (true | false) |
-| irodsUnbranded.IROD_HOST | string | `""` |  |
-| irodsUnbranded.IROD_PORT | string | `""` |  |
+| irods.enabled | bool | `false` | enable branded iRODS support; provide its environment variables through the selected appstore Secret. |
 | irodsUnbranded.IROD_USER_VALUES | object | `{}` |  |
-| irodsUnbranded.IROD_ZONE | string | `""` |  |
-| irodsUnbranded.NFSRODS_HOST | string | `""` |  |
-| irodsUnbranded.RODS_PASSWORD | string | `""` |  |
-| irodsUnbranded.RODS_USERNAME | string | `""` |  |
 | irodsUnbranded.enabled | bool | `false` |  |
 | ldap.enabled | bool | `false` |  |
 | ldap.groupDN | string | `"cn=users,ou=groups,dc=example,dc=org"` |  |
@@ -102,27 +82,16 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | nameOverride | string | `""` |  |
 | networkPolicyLabels.role | string | `"appstore"` |  |
 | nodeSelector | object | `{}` |  |
-| oauth.CILOGON_CLIENT_ID | string | `""` |  |
-| oauth.CILOGON_NAME | string | `""` |  |
-| oauth.CILOGON_SECRET | string | `""` |  |
-| oauth.GITHUB_CLIENT_ID | string | `""` |  |
-| oauth.GITHUB_NAME | string | `""` |  |
-| oauth.GITHUB_SECRET | string | `""` |  |
-| oauth.GOOGLE_CLIENT_ID | string | `""` |  |
-| oauth.GOOGLE_NAME | string | `""` |  |
-| oauth.GOOGLE_SECRET | string | `""` |  |
-| oauth.OAUTH_PROVIDERS | string | `""` | oauth providers separated by commas (google, github) |
-| oauth.OIDC_CLIENT_ID | string | `""` |  |
-| oauth.OIDC_NAME | string | `""` |  |
-| oauth.OIDC_SECRET | string | `""` |  |
-| oauth.OIDC_SERVER_URL | string | `""` |  |
 | octave.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for Octave |
 | pgadmin.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for PgAdmin |
+| pgadmin.secret.create | bool | `true` | Render the chart-managed `pgadmin-env` Secret. Set to false to create and own that Secret outside the chart under the same name. |
+| pgadmin.secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"}}` | Configure an ExternalSecret that populates `pgadmin-env`. Mutually exclusive with the chart-managed keys above. |
+| pgadmin.secret.values | object | `{}` | Key/value pairs for the chart-managed `pgadmin-env` Secret. Set `PGADMIN_DEFAULT_PASSWORD` here to pin the password; otherwise it is generated on first install and then preserved from the live Secret, which only a cluster-aware Helm upgrade can read. Client-side renderers such as Argo CD must set it explicitly or use `externalSecret`. |
 | podAnnotations | object | `{}` |  |
 | podSecurityContext | object | `{}` |  |
-| postgresql | object | `{"audit":{"logConnections":true,"logHostname":true},"enabled":true,"global":{"postgresql":{"auth":{"database":"appstore-oauth","password":"renciAdmin","postgresPassword":"adminPass","username":"renci"}}},"networkPolicyEnabled":true,"persistence":{"existingClaim":"appstore-postgresql-pvc","storageClass":null},"primary":{"labels":{"np-label":"appstore-db"},"podLabels":{"np-label":"appstore-db"}},"volumePermissions":{"enabled":true}}` | postgresql settings |
+| postgresql | object | `{"audit":{"logConnections":true,"logHostname":true},"enabled":true,"global":{"postgresql":{"auth":{"database":"appstore-oauth","username":"renci"}}},"networkPolicyEnabled":true,"persistence":{"existingClaim":"appstore-postgresql-pvc","storageClass":null},"primary":{"labels":{"np-label":"appstore-db"},"podLabels":{"np-label":"appstore-db"}},"volumePermissions":{"enabled":true}}` | postgresql settings |
 | postgresql.audit | object | `{"logConnections":true,"logHostname":true}` | postgresql logs |
-| postgresql.global.postgresql | object | `{"auth":{"database":"appstore-oauth","password":"renciAdmin","postgresPassword":"adminPass","username":"renci"}}` | postgresql credentials |
+| postgresql.global.postgresql | object | `{"auth":{"database":"appstore-oauth","username":"renci"}}` | postgresql credentials |
 | postgresql.networkPolicyEnabled | bool | `true` | enable/disable postgresql network policy, allows traffic to and from appstore pod only. |
 | postgresql.persistence | object | `{"existingClaim":"appstore-postgresql-pvc","storageClass":null}` | postgresql persistence storage |
 | postgresql.primary | object | `{"labels":{"np-label":"appstore-db"},"podLabels":{"np-label":"appstore-db"}}` | postgresql labels |
@@ -145,6 +114,11 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | saml.cache.enabled | bool | `false` |  |
 | saml.cache.storageClass | string | `""` |  |
 | saml.cache.storageSize | string | `"20M"` |  |
+| secret.existingSecret | string | `""` | Name of a Secret containing the appstore environment variables. When set, the chart does not create or manage a Secret. For an existing legacy release, leave this empty to let the chart migrate the old primary Secret automatically. |
+| secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the appstore Secret. This is mutually exclusive with secret.existingSecret. The external backend must be populated separately when migrating an existing release. |
+| secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to <fullname>-secrets. |
+| secret.migration.enabled | bool | `true` | Enable automatic migration from the legacy appstore Secret. |
+| secret.values | object | `{}` | Key/value pairs used to create the appstore Secret when neither secret.existingSecret nor secret.externalSecret.enabled is set.  Keys are exposed unchanged as appstore container environment variables. Use these same names in this map, in the Secret named by existingSecret, or in the Secret returned by External Secrets.  During an upgrade from the legacy chart, existing Secret data takes priority over this map. The map only supplies missing keys; it does not rotate stored passwords or signing keys automatically. Values for keys already present in the persisted Secret are ignored; rotate those credentials in the canonical Secret instead.  Values are strings because Kubernetes Secret values are exposed as environment variables. Optional keys should be omitted unless the corresponding feature is enabled.  The chart computes and injects these database settings directly from Helm values/templates; *do not* put them in the Secret:   PG_DB_ENGINE: always "postgresql"   PG_DB_DATABASE: derived from postgresql.global.postgresql.auth.database   PG_DB_USERNAME: derived from postgresql.global.postgresql.auth.username   PG_DB_HOST: derived from the release name and PostgreSQL service name   PG_DB_PORT: derived from db.port, normally "5432"   POSTGRES_ENABLED: "true" when postgresql.enabled is true, otherwise "false"  Required for a normal appstore deployment:   SECRET_KEY: non-empty random string; 50 characters is the historical chart length, but the app has   no fixed length requirement (use this name, not legacy APPSTORE_SECRET_KEY)   APPSTORE_DJANGO_USERNAME: non-empty username string; "admin" is the historical default   APPSTORE_DJANGO_PASSWORD: password string; no fixed format or length is required  PostgreSQL password (when PostgreSQL is enabled):   PG_DB_PASSWORD: application database-user password string; when using the   bundled PostgreSQL chart, it must match postgresql.global.postgresql.auth.password  Optional appstore settings:   AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames   REMOVE_AUTHORIZED_USERS: comma- or whitespace-separated email addresses and/or usernames   CSRF_DOMAINS: comma-separated origins including scheme, for example   "https://app.example.org,https://other.example.org"   EMAIL_HOST: SMTP hostname or IP address   EMAIL_PORT: decimal SMTP port number as a string, for example "25" or "587"   EMAIL_USE_TLS: empty string disables TLS; any non-empty string enables TLS because the app currently   reads this value without boolean parsing   EMAIL_HOST_USER: SMTP username, normally an email address   EMAIL_HOST_PASSWORD: SMTP password string   RECIPIENT_EMAILS: comma-separated email addresses  OAuth provider settings (include the group matching each configured provider):   OAUTH_PROVIDERS: comma-separated lowercase provider names with no spaces, e.g. "google,github"   GITHUB_NAME: provider display/name string   GITHUB_CLIENT_ID: provider client ID string   GITHUB_SECRET: provider client secret string   GOOGLE_NAME: provider display/name string   GOOGLE_CLIENT_ID: provider client ID string   GOOGLE_SECRET: provider client secret string   CILOGON_NAME: provider display/name string   CILOGON_CLIENT_ID: provider client ID string   CILOGON_SECRET: provider client secret string   OIDC_NAME: OIDC provider ID/name string; its presence enables OIDC   OIDC_CLIENT_ID: OIDC client ID string   OIDC_SECRET: OIDC client secret string   OIDC_SERVER_URL: OIDC server URL  iRODS settings (when the corresponding feature is enabled):   BRAINI_RODS: application-specific iRODS configuration string   NRC_MICROSCOPY_IRODS: application-specific iRODS configuration string   RODS_USERNAME: iRODS username string   RODS_PASSWORD: iRODS password string   IROD_COLLECTIONS: application-specific iRODS collection configuration string   IROD_ZONE: iRODS zone name string   IROD_HOST: iRODS hostname or IP address; omit this key when iRODS is disabled   IROD_PORT: decimal iRODS port number as a string   NFSRODS_HOST: NFS-RoDS hostname or IP address |
 | security.appEgressAllowedPods | list | `[]` |  |
 | security.dnsPodSelector | object | `{}` |  |
 | security.isolatedApps | bool | `true` |  |
@@ -162,9 +136,9 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | tycho.enableInitContainer | bool | `true` | Start the init container to take care of any needed tasks before the main container is started.  This can be to create certain directories or set file permissions. |
 | tycho.enableTrashCli | bool | `false` | Enable trash-cli functionality in tycho-launched apps |
 | tycho.externalAppRegistryAppSpecsDir | string | `"app-specs"` |  |
-| tycho.externalAppRegistryBranch | string | `nil` | The branch that would be appended to 'externalAppRegistryRepo' to retrieve the app registry and defaults files.  The full URL, if using the externalAppRegistryRepo example for the app registry file would be  'https://github.com/helxplatform/helx-apps/raw/master/app-registry.yaml'. The default value is the AppVersion of this chart prefixed with a 'v' (ex. v2.0.0). |
-| tycho.externalAppRegistryEnabled | bool | `false` | Enable/disable the external app registry file for Tycho.  Set 'django.DOCKSTORE_APPS_BRANCH' to an empty string when when using an external app registry. |
-| tycho.externalAppRegistryRepo | string | `"https://github.com/helxplatform/helx-apps/raw"` | Can be set to a git repo URL for fetching the app registry file or defaults file.  Something in the form of  'https://github.com/helxplatform/helx-apps/raw'. |
+| tycho.externalAppRegistryBranch | string | `nil` | The branch that is appended to externalAppRegistryRepo when the external app registry is enabled. The full URL, using the repository below, would be 'https://github.com/helxplatform/helx-apps/raw/master/app-registry.yaml'. The default value is the AppVersion of this chart prefixed with a 'v' (ex. v2.0.0). |
+| tycho.externalAppRegistryEnabled | bool | `false` | Enable/disable the external app registry file for Tycho. |
+| tycho.externalAppRegistryRepo | string | `"https://github.com/helxplatform/helx-apps/raw"` | Can be set to a git repo URL for fetching the app registry file or defaults file.  Something in the form of 'https://github.com/helxplatform/helx-apps/raw'. |
 | tycho.fsGroup | int | `0` | Application processes launched will also be part of this supplimentary group. |
 | tycho.init | object | `{"resources":{"cpus":"250m","memory":"250Mi"}}` | Resource for Tycho init container. Defaults cpus|250m memory|250Mi |
 | tycho.initImageRepository | string | `"busybox"` | The image repository to use for HeLx app init containers. |
@@ -190,5 +164,5 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | webtop.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for Webtop |
 
 ----------------------------------------------
-Autogenerated from chart metadata using [helm-docs v1.11.0](https://github.com/norwoodj/helm-docs/releases/v1.11.0)
+Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)
 

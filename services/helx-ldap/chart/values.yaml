@@ -45,7 +45,7 @@ openldap:
   replicaCount: 1
 
   global:
-    ldapDomain: example.org
+    ldapDomain: openldap
     # -- Secret name consumed by the upstream OpenLDAP chart. This is target-name
     # compatibility plumbing for the dependency, not a fourth ownership mode.
     # It must match secret.existingSecret or secret.externalSecret.targetName

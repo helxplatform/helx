@@ -74,7 +74,13 @@ The Secret and the configuration are rendered from a single template file. Helm 
 
 `lookup` returns nothing during `helm template`, `helm lint`, and client-side dry runs, so rendering the chart offline twice produces two different certificates. That output is only ever inspected, never applied.
 
-To render the configuration against a certificate the chart does not manage, leave `secret.generate.enabled` false and set `webhook.caBundle` to the base64 CA that signed it. Rendering fails if `webhook.enabled` is set with no CA bundle available from either source.
+To render the configuration against a certificate the chart does not manage, leave `secret.generate.enabled` false and make the CA available one of two ways.
+
+`webhook.caBundle` is the single source in all three of them. The chart never reads the CA out of the TLS Secret: in `existingSecret` and `externalSecret` modes it is handed only a Secret *name* and cannot see the contents, and in `values` mode a `ca.crt` entry is written into the Secret but deliberately not read back, because that same block is inert in the other two modes and a leftover entry would otherwise supply a CA unrelated to the certificate actually mounted.
+
+The field is base64, not PEM, because it is substituted into the configuration verbatim. Pasting raw PEM, a doubly-encoded value, or a truncated one fails at render rather than at runtime, where `failurePolicy: Ignore` would swallow the handshake failure silently.
+
+The `ca.crt` the chart writes in generate mode is a different thing: it is how `webhookCertData` recognises its own persisted CA across upgrades, not a value you set.
 
 ### Namespace selection
 

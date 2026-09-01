@@ -199,3 +199,48 @@ produces two different certificates.
   | toYaml -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Guard webhook.caBundle's encoding. The field is substituted into the
+MutatingWebhookConfiguration verbatim and Kubernetes expects base64 there,
+while every place an operator copies a CA from holds PEM, so pasting raw PEM is
+the likely mistake. Both failures are silent at runtime: the API server cannot
+verify the serving certificate, and webhook.failurePolicy defaults to Ignore.
+
+Takes the bundle string as its context, not the root.
+*/}}
+{{- define "user-mutator.validateCaBundle" -}}
+{{- $caBundle := . -}}
+{{- if $caBundle -}}
+  {{- if hasPrefix "-----BEGIN" $caBundle -}}
+    {{- fail "user-mutator: webhook.caBundle is raw PEM and has to be base64-encoded. Encode it with: base64 < ca.crt | tr -d '\n'" -}}
+  {{- end -}}
+  {{- if not (hasPrefix "-----BEGIN" (b64dec $caBundle)) -}}
+    {{- fail "user-mutator: webhook.caBundle does not decode to a PEM certificate. It must be the base64 of a PEM CA certificate; a doubly-encoded or truncated value fails the TLS handshake silently because webhook.failurePolicy defaults to Ignore." -}}
+  {{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Explain how to supply the CA bundle, naming only the options that apply to the
+ownership mode actually selected and where to read the value from.
+*/}}
+{{- define "user-mutator.missingCaBundleMessage" -}}
+{{- $lines := list "user-mutator: webhook.enabled needs the CA that signed the webhook serving certificate, and none is available." -}}
+{{- if .Values.secret.existingSecret -}}
+  {{- $lines = append $lines (printf "secret.existingSecret is %q, and the chart never reads a caller-managed Secret at render time, so supply the CA yourself:" .Values.secret.existingSecret) -}}
+  {{- $lines = append $lines (printf "  webhook.caBundle=$(kubectl -n %s get secret %s -o jsonpath='{.data.ca\\.crt}')" .Release.Namespace .Values.secret.existingSecret) -}}
+  {{- $lines = append $lines "If that Secret has no ca.crt, the CA is whatever signed its tls.crt; for a self-signed certificate tls.crt is its own CA:" -}}
+  {{- $lines = append $lines (printf "  webhook.caBundle=$(kubectl -n %s get secret %s -o jsonpath='{.data.tls\\.crt}')" .Release.Namespace .Values.secret.existingSecret) -}}
+{{- else if .Values.secret.externalSecret.enabled -}}
+  {{- $lines = append $lines "secret.externalSecret is enabled, and the chart cannot read an ESO-populated Secret at render time, so supply the CA yourself:" -}}
+  {{- $lines = append $lines (printf "  webhook.caBundle=$(kubectl -n %s get secret %s -o jsonpath='{.data.ca\\.crt}')" .Release.Namespace (include "user-mutator.tlsManagedSecretName" .)) -}}
+  {{- $lines = append $lines "That requires the ExternalSecret to have synced at least once." -}}
+{{- else -}}
+  {{- $lines = append $lines "In values mode the chart writes the Secret from secret.values but does not read the CA back out of it, so name it once here:" -}}
+  {{- $lines = append $lines "  webhook.caBundle=$(base64 < ca.crt | tr -d '\\n')" -}}
+  {{- $lines = append $lines "For a self-signed certificate the CA is tls.crt itself." -}}
+{{- end -}}
+{{- $lines = append $lines "Or set secret.generate.enabled=true to have the chart generate and manage the certificate, or webhook.enabled=false to manage the MutatingWebhookConfiguration yourself." -}}
+{{- join "\n" $lines -}}
+{{- end -}}

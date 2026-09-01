@@ -93,7 +93,8 @@ secret:
   existingSecret: ""
 
   # -- Plaintext values for the chart-managed TLS Secret. tls.crt and tls.key
-  # are required in managed mode; ca.crt is optional.
+  # are required in managed mode; ca.crt is accepted but never read back out,
+  # so the CA the webhook trusts comes from webhook.caBundle instead.
   values: {}
 
   # -- Configure an ExternalSecret to populate the webhook TLS Secret.
@@ -167,8 +168,13 @@ webhook:
   # namespace.
   namespaces: []
 
-  # -- Base64 CA bundle that signed the serving certificate. Only used when
-  # secret.generate.enabled is false.
+  # -- Base64 CA bundle that signed the serving certificate, and the single
+  # source of it whenever secret.generate.enabled is false. The chart does not
+  # read the CA out of the TLS Secret in any mode: existingSecret and
+  # externalSecret contents are unknown at render time, and secret.values is
+  # inert in those two modes, so a value read from there could disagree with
+  # the certificate actually mounted. Base64, not PEM; rendering fails if raw
+  # PEM is pasted here.
   caBundle: ""
 
   # -- Optional additional namespaceSelector matchLabels. Set this to

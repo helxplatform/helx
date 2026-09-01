@@ -5,7 +5,15 @@
   {{- $certs = include "user-mutator.webhookCertData" . | fromYaml -}}
   {{- $caBundle = get $certs "ca.crt" -}}
 {{- else -}}
+  {{/*
+  webhook.caBundle is the single source outside generate mode. The chart does
+  not read the CA out of secret.values: that block is inert in existingSecret
+  and externalSecret modes, so consulting it would let a stale entry supply a
+  bundle unrelated to the mounted certificate. In generate mode the chart owns
+  the CA and never looks here at all.
+  */}}
   {{- $caBundle = default "" .Values.webhook.caBundle -}}
+  {{- include "user-mutator.validateCaBundle" $caBundle -}}
 {{- end -}}
 {{- if .Values.secret.generate.enabled }}
 {{/*
@@ -31,7 +39,7 @@ data:
 {{- end }}
 {{- if .Values.webhook.enabled }}
 {{- if not $caBundle }}
-  {{- fail "user-mutator: webhook.enabled requires a CA bundle; enable secret.generate.enabled, or set webhook.caBundle to the base64 CA that signed the serving certificate" -}}
+  {{- fail (include "user-mutator.missingCaBundleMessage" .) -}}
 {{- end }}
 {{- $namespaces := .Values.webhook.namespaces }}
 {{- if not $namespaces }}

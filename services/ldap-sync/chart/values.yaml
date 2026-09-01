@@ -8,7 +8,7 @@ image:
   repository: containers.renci.org/helxplatform/ldap-sync
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: secrets-options-test-1
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -113,10 +113,14 @@ secret:
 # secret.values, or External Secrets rather than committed to this file.
 searchBootstrap:
   enabled: true
-  id: get-groups
-  filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+  # -- The LDAP search ID to use for the bootstrap search. e.g. get-groups
+  id: ""
+  # -- The LDAP search filter to use for the bootstrap search.
+  filter: ""
+  # -- The LDAP search refresh interval in seconds.
   refresh: 60
-  baseDN: ou=groups,dc=unc,dc=edu
+  # -- The LDAP base DN to use for the bootstrap search.
+  baseDN: ""
   oneShot: false
   image:
     repository: curlimages/curl
@@ -146,25 +150,15 @@ searchBootstrap:
         type: RuntimeDefault
 
 config:
-  hooks:
-    - args:
-        - --baseGid=1025
-        - --baseGroup=helx-users
-      image:
-        repository: containers.renci.org/helxplatform/unc-group-x
-        tag: v2.3.2
-      name: unc-group-x
-      url: http://localhost:5001/hook
-  hookRetry:
-    maxRetries: 10
-    initialDelayMs: 100
-    maxDelayMs: 30000
+  hooks: []
+  # -- Configuration for the LDAP source server
   source:
-    url: "ldap://ldap.unc.edu/"
-    bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
+    url: ""
+    bindDN: ""
     # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
     bindPassword: ""
-    baseDN: "dc=unc,dc=edu"
+    baseDN: ""
+  # -- Configuration for the LDAP target server
   target:
     url: "ldap://openldap/"
     bindDN: "cn=admin,dc=example,dc=org"
@@ -177,7 +171,8 @@ config:
     # granting the service account get/list/create on PVCs.
     pvcGroup:
       enabled: true
-      storageClass: azurefile
+      # -- Storage class for the PVC. Change this to the desired storage class.
+      storageClass: ""
       size: 10Gi
       accessModes:
         - ReadWriteMany
@@ -200,13 +195,13 @@ postgres:
     # It is likely data-<release-name>-postgres-0, but verify it in the cluster.
     legacyPvc: ""
 
-  persistence:
+  persistence: 
     enabled: true
     size: 8Gi
   auth:
     # Username for the database
     username: ldapsync
-    # Database name
+    # Name of the database
     database: ldapsync
     # Leave empty to let the PostgreSQL dependency create its fullname-based
     # Secret. Set this to a pre-created Secret to manage the password outside

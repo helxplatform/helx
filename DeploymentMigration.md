@@ -34,8 +34,7 @@ does not own, so either set `secret.externalSecret.targetName` to a new name, or
 delete the retained Secret after the backend is populated and verified.
 
 The appstore `atlas-env` Secret is deliberately exempt from retention because
-every key in it is derived from chart values. The `webtop-*-env` Secrets are not
-rendered through the helper at all, for the same reason.
+every key in it is derived from chart values.
 
 ## Appstore
 

@@ -151,6 +151,10 @@ searchBootstrap:
 
 config:
   hooks: []
+  hookRetry:
+    maxRetries: 10
+    initialDelayMs: 100
+    maxDelayMs: 30000
   # -- Configuration for the LDAP source server
   source:
     url: ""
@@ -195,7 +199,7 @@ postgres:
     # It is likely data-<release-name>-postgres-0, but verify it in the cluster.
     legacyPvc: ""
 
-  persistence: 
+  persistence:
     enabled: true
     size: 8Gi
   auth:

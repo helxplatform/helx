@@ -252,19 +252,24 @@ reach GitHub:
 1. Make your changes, then bump the service chart `version:` and its pin in
    `deploy/helm/helx-chart/Chart.yaml`. `make ci-validate-everything` will tell
    you if you miss either one.
-2. Build images for just the services you changed:
+2. Set environment variables for make targets. Only `SERVICES` is required.
 
    ```bash
-   make ci-build-helx-images SERVICES="user-mutator ui"
+   export SERVICES="user-mutator ui"
+   export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform  # default Harbor
+   export TAG=test-my-branch  # default test-<short-sha>
    ```
 
-   `TAG` defaults to `test-<short-sha>` but you can override it with
-   `TAG=<tag>`, just make sure to use the same tag for `ci-push-helx-images`
-   and `ci-load-helx-images`. A service with several image variants, like 
-   `appstore-sockets`, builds all of them. If you changed enough that listing
-   them is a chore, `SERVICES=all` stands for every service that builds
-   an image; it works on every step below, and cannot be combined with
-   individual names.
+3. Build images for just the services you changed:
+
+   ```bash
+   make ci-build-helx-images
+   ```
+
+   A service with several image variants, like `appstore-sockets`, builds all of them. 
+   If you changed enough that listing them is a chore, `SERVICES=all` stands for every
+   service that builds an image; it works on every step below, and cannot be combined
+   with individual names.
 
    Images build for `linux/amd64`, the one architecture CI publishes, no matter
    what your workstation is. On Apple Silicon that means an emulated build, so
@@ -272,11 +277,11 @@ reach GitHub:
    you are aiming at is not amd64 -- a local `kind`/`minikube`/`k3d` on Apple
    Silicon wants `IMAGE_PLATFORM=linux/arm64`. Getting this wrong is not subtle:
    the pod starts and the container exits with `exec format error`.
-3. Get those images to your cluster. For a local cluster, load them directly,
+4. Get those images to your cluster. For a local cluster, load them directly,
    no registry involved:
 
    ```bash
-   make ci-load-helx-images SERVICES="user-mutator ui"
+   make ci-load-helx-images
    ```
 
    `kind`, `minikube`, and `k3d` are auto-detected; override with
@@ -284,7 +289,7 @@ reach GitHub:
    instead (`docker login containers.renci.org`):
 
    ```bash
-   make ci-push-helx-images SERVICES="user-mutator ui"
+   make ci-push-helx-images
    ```
 
    To use a registry other than Harbor (your own ACR, a scratch project, a
@@ -293,15 +298,14 @@ reach GitHub:
 
    ```bash
    docker login myregistry.azurecr.io
-   export SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
    make ci-build-helx-images ci-push-helx-images
    ```
 
    The value is a host, an optional port, and an optional project path;
    `localhost:5000` and `myregistry.azurecr.io/helxplatform` are both fine, and
    an `https://` prefix is dropped for you. Repository names are unchanged
-   underneath it, so `ui` publishes as
-   `myregistry.azurecr.io/helxplatform/helx-ui`.
+   underneath it, so `ui` publishes as `myregistry.azurecr.io/helxplatform/helx-ui`.
 
    Because the project path is easy to forget and a missing one yields
    references nothing was ever pushed to, a remote registry not ending in
@@ -309,10 +313,10 @@ reach GitHub:
    `localhost` registry never warns, since those serve from their root.
    Set it on the build too: the reference is baked into the image at build
    time, so pushing with a registry the build did not use finds nothing.
-4. Package the umbrella with those services pinned to your tag:
+5. Package the umbrella with those services pinned to your tag:
 
    ```bash
-   make ci-build-helx-chart SERVICES="user-mutator ui"
+   make ci-build-helx-chart
    ```
 
    Every umbrella dependency already resolves from your working tree, so this
@@ -356,16 +360,6 @@ reach GitHub:
    you; see [Deploying and tearing down a local
    build](#deploying-and-tearing-down-a-local-build).
 
-Use the same `SERVICES` and `TAG` for every step, plus the same
-`IMAGE_REGISTRY` if you set one. Setting them once is easiest:
-
-```bash
-export SERVICES="user-mutator helx-ldap" \
-  TAG=test-ldap-with-user-mutator-changes \
-  IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
-make ci-build-helx-images ci-push-helx-images ci-build-helx-chart
-```
-
 `TAG` reaches the chart only through `SERVICES`. There is no flag that retags
 everything at once: with `CHART_CHANNEL` and no `SERVICES`,
 `make ci-build-helx-chart` computes the tag itself as `<channel>-<short-sha>`
@@ -388,18 +382,8 @@ actually built and pushed at that tag, or the chart will point at images that do
 not exist — with `all`, that means having run the build and push steps with
 `all` too.
 
-Add `IMAGE_REGISTRY=` to that same command to point all of them somewhere other
-than Harbor. Because every service is pinned, this is the one case where nothing
-is left behind on Harbor, so the cluster needs credentials for your registry
-only:
-
-```bash
-make ci-build-helx-chart TAG=my-tag SERVICES=all \
-  IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
-```
-
 To override an image by hand instead, pass it to `helm` at install time. The
-packaged `.tgz` does not have to be rebuilt — these are ordinary subchart
+packaged `.tgz` does not have to be rebuilt; these are ordinary subchart
 values, and the key is the umbrella dependency name plus the chart's own tag
 key:
 
@@ -471,7 +455,7 @@ archive that has been deleted, the deploy stops and tells you to package again.
 
 `RELEASE` defaults to `helx`. `NAMESPACE` defaults to whatever your context
 selects; if it selects none either, the deploy stops rather than assuming
-`default`. The namespace is created if it does not exist.
+something.
 
 Values files come from two places, applied in this order:
 

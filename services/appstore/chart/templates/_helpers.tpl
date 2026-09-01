@@ -61,3 +61,29 @@ Create the name of the service account to use
     {{ default "default" .Values.serviceAccount.name }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Name of the chart-managed appstore Secret. Reserve space before adding the
+suffix so the result remains a valid Kubernetes resource name.
+*/}}
+{{- define "appstore.managedSecretName" -}}
+{{- printf "%s-secrets" (include "appstore.fullname" . | trunc 55 | trimSuffix "-") -}}
+{{- end -}}
+
+{{/*
+Name of the Secret consumed by the appstore Deployment.
+*/}}
+{{- define "appstore.secretName" -}}
+{{- include "helx-common.secret.name.v1" (dict
+  "defaultName" (include "appstore.managedSecretName" .)
+  "existingSecret" .Values.secret.existingSecret
+  "externalSecret" .Values.secret.externalSecret
+) -}}
+{{- end -}}
+
+{{/*
+Name of the primary Secret created by the legacy chart.
+*/}}
+{{- define "appstore.legacySecretName" -}}
+{{- include "appstore.fullname" . -}}
+{{- end -}}

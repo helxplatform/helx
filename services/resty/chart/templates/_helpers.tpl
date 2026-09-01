@@ -67,3 +67,31 @@ Resolve the basic-auth Secret selected by managed, existingSecret, or ESO mode.
   "externalSecret" .Values.secret.externalSecret
 ) -}}
 {{- end }}
+
+{{/*
+Resolve the values used for the chart-managed basic-auth Secret.
+
+`secret.values.auth` carries a precomputed htpasswd entry. `basicAuth.username`
+and `basicAuth.password` are the pre-2.0 spelling and still work: the entry is
+derived from them when `secret.values.auth` is unset. Deriving re-hashes on every
+render because bcrypt salts are random, so the Secret is rewritten on each
+upgrade, exactly as it was before; set `secret.values.auth` to pin it.
+*/}}
+{{- define "resty.basicAuthSecretValues" -}}
+{{- $values := deepCopy (default (dict) .Values.secret.values) -}}
+{{- $username := default "" .Values.basicAuth.username -}}
+{{- $password := default "" .Values.basicAuth.password -}}
+{{- if or $username $password -}}
+  {{- if not (and $username $password) -}}
+    {{- fail "resty: basicAuth.username and basicAuth.password must be set together" -}}
+  {{- end -}}
+  {{- if get $values "auth" -}}
+    {{- fail "resty: set either secret.values.auth or basicAuth.username/password, not both" -}}
+  {{- end -}}
+  {{- if or .Values.secret.existingSecret (default false .Values.secret.externalSecret.enabled) -}}
+    {{- fail "resty: basicAuth.username/password only populate the chart-managed Secret; clear them when using secret.existingSecret or secret.externalSecret" -}}
+  {{- end -}}
+  {{- $_ := set $values "auth" (htpasswd $username $password) -}}
+{{- end -}}
+{{- toYaml $values -}}
+{{- end }}

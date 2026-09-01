@@ -154,6 +154,38 @@ here rather than by the library.
     {{- fail "user-mutator: secret.generate.enabled ignores secret.values; clear one of them" -}}
   {{- end -}}
 {{- end -}}
+{{- include "user-mutator.validateSecretValuesUnused" (dict
+  "label" "secret"
+  "existingSecret" .Values.secret.existingSecret
+  "externalSecretEnabled" .Values.secret.externalSecret.enabled
+  "values" .Values.secret.values
+) -}}
+{{- include "user-mutator.validateSecretValuesUnused" (dict
+  "label" "ldap.secret"
+  "existingSecret" .Values.ldap.secret.existingSecret
+  "externalSecretEnabled" .Values.ldap.secret.externalSecret.enabled
+  "values" .Values.ldap.secret.values
+) -}}
+{{- end -}}
+
+{{/*
+Reject a values block that cannot take effect. helx-common renders the
+chart-managed Secret only when neither existingSecret nor externalSecret is
+selected, so values supplied alongside either is silently dropped, and the
+caller is left believing they configured a Secret the chart never writes. This
+chart passes both values blocks through verbatim, so the check is exact; a
+chart that folds unrelated configuration into its values dict would need a
+narrower rule.
+*/}}
+{{- define "user-mutator.validateSecretValuesUnused" -}}
+{{- if .values -}}
+  {{- if .existingSecret -}}
+    {{- fail (printf "user-mutator: %s.values is ignored when %s.existingSecret is set (%q owns the Secret); clear one of them" .label .label .existingSecret) -}}
+  {{- end -}}
+  {{- if .externalSecretEnabled -}}
+    {{- fail (printf "user-mutator: %s.values is ignored when %s.externalSecret.enabled is true (External Secrets owns the Secret); clear one of them" .label .label) -}}
+  {{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

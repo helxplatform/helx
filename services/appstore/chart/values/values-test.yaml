@@ -2,11 +2,13 @@ ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
 debug: "true"
 logLevel: "debug"
 
+secret:
+  values:
+    AUTHORIZED_USERS: muralikk@email.unc.edu,ashokk@email.unc.edu,bo7@ad.unc.edu,howard_lander@unc.edu,isma@email.unc.edu,jeffw@renci.org,jmajikes@cs.unc.edu,mattb523@live.unc.edu,tcheek9@email.unc.edu,baconm@renci.org,tcheek9@renci.org,bennettc@renci.org,cbiii@email.unc.edu
+
 django:
   ALLOW_SAML_LOGIN: true
   DEV_PHASE: dev
-  AUTHORIZED_USERS: muralikk@email.unc.edu,ashokk@email.unc.edu,bo7@ad.unc.edu,howard_lander@unc.edu,isma@email.unc.edu,jeffw@renci.org,jmajikes@cs.unc.edu,mattb523@live.unc.edu,tcheek9@email.unc.edu,baconm@renci.org,tcheek9@renci.org,bennettc@renci.org,cbiii@email.unc.edu
-  DOCKSTORE_APPS_BRANCH:
 
 djangoSettings: eduhelx-dev
 

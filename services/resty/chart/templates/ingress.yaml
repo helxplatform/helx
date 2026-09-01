@@ -1,9 +1,21 @@
 {{- if .Values.ingress.create }}
-{{ if .Values.basicAuth.enabled }}
-   {{ $_ := set .Values.ingress.annotations "nginx.ingress.kubernetes.io/auth-type" "basic" }}
-   {{ $secretName := printf "%s-nginx-htpasswd" .Release.Name}}
-   {{ $_ := set .Values.ingress.annotations "nginx.ingress.kubernetes.io/auth-secret" $secretName}}
-{{ end }}
+{{- /*
+The TLS Secret has its own certificate lifecycle and stays caller-managed, so
+this chart only ever names one. An SSL block with no Secret name still renders,
+which is how a deployment asks the ingress controller for its default
+certificate; only a missing block is an error, and that used to be a nil pointer.
+*/}}
+{{- $tlsSecret := "" -}}
+{{- if .Values.ingress.tls.enabled -}}
+  {{- if not (kindIs "map" .Values.SSL) -}}
+    {{- fail "resty: ingress.tls.enabled requires an SSL block; set SSL.nginxTLSSecret to an existing TLS Secret, set SSL to {} to use the ingress controller's default certificate, or set ingress.tls.enabled=false" -}}
+  {{- end -}}
+  {{- $tlsSecret = default "" .Values.SSL.nginxTLSSecret -}}
+{{- end -}}
+{{- if .Values.basicAuth.enabled }}
+  {{- $_ := set .Values.ingress.annotations "nginx.ingress.kubernetes.io/auth-type" "basic" }}
+  {{- $_ := set .Values.ingress.annotations "nginx.ingress.kubernetes.io/auth-secret" (include "resty.basicAuthSecretName" .) }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -20,7 +32,9 @@ spec:
   tls:
   - hosts:
       - "{{ .Values.service.serverName }}"
-    secretName: "{{ .Values.SSL.nginxTLSSecret }}"
+{{- if $tlsSecret }}
+    secretName: "{{ $tlsSecret }}"
+{{- end }}
 {{- end}}
   rules:
   - host: "{{ .Values.service.serverName }}"
@@ -51,7 +65,9 @@ spec:
   tls:
   - hosts:
       - "{{ .Values.service.serverName }}"
-    secretName: "{{ .Values.SSL.nginxTLSSecret }}"
+{{- if $tlsSecret }}
+    secretName: "{{ $tlsSecret }}"
+{{- end }}
 {{- end}}
   rules:
   - host: "{{ .Values.service.serverName }}"

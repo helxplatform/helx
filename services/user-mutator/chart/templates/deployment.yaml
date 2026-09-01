@@ -1,4 +1,16 @@
 {{- $secretNames := include "user-mutator.effectiveSecretNames" . | fromYaml }}
+{{/*
+Roll the Pod when the webhook TLS material changes. The server reads its
+certificate once at startup via http.ListenAndServeTLS, so a rotated Secret is
+otherwise ignored until something restarts the process, and because
+webhook.failurePolicy defaults to Ignore that stale cert fails every handshake
+silently rather than surfacing an error.
+*/}}
+{{- $tlsChecksum := "" }}
+{{- $persistedTls := lookup "v1" "Secret" .Release.Namespace (get $secretNames "cert") }}
+{{- if $persistedTls }}
+  {{- $tlsChecksum = default (dict) $persistedTls.data | toYaml | sha256sum }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,9 +26,14 @@ spec:
       {{- include "user-mutator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- if or .Values.podAnnotations $tlsChecksum }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $tlsChecksum }}
+        checksum/webhook-tls: {{ . }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "user-mutator.selectorLabels" . | nindent 8 }}

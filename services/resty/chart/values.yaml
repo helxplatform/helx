@@ -39,10 +39,13 @@ DEV_PHASE:
   # -- Set the DEV_PHASE.dev True, if Appstore/Tycho running locally. Else, set it to False
   dev: False
 
-# Uncomment these SSL lines and create secret to use TLS/SSL
+# The TLS Secret has a separate certificate lifecycle and remains caller-managed;
+# this chart does not create it. Uncomment the SSL block after creating the Secret.
+# Note: an SSL block whose Secret name is empty renders an Ingress without a
+# secretName, which asks the ingress controller for its default certificate.
 # kubectl create secret tls resty-tls-secret --key resty.key --cert resty.crt
 # SSL:
-#   restyTLSSecret: nginx-tls-secret
+#   nginxTLSSecret: resty-tls-secret
 
 ingress:
   # -- Create an Ingress resource or not. New installations of helx should set this to true to avoid needing to request a static IP.
@@ -52,7 +55,8 @@ ingress:
   annotations: {}
     # kubernetes.io/ingress.class: : ""
   tls:
-    # -- Values inserted into the TLS block come from SSL.nginxTLSSecret and service.serverName for backward compatibility
+    # -- Values inserted into the TLS block come from SSL.nginxTLSSecret and service.serverName for backward compatibility.
+    # SSL.nginxTLSSecret is required when this is enabled together with ingress.create; the chart fails to render otherwise.
     enabled: true
   admin:
     # -- Create an additional Ingress to restrict access to /admin routes
@@ -67,13 +71,45 @@ varStorage:
   storageSize: 2Gi
   storageClass:
 
-# -- Creates a basicAuth scheme preventing un-authenticated access to the whole site.
 basicAuth:
-  enabled: False
-  # -- Username , make sure to override.
-  username: defaultUser
-  # -- Password, make sure to override.
-  password: defaultPassword
+  # -- Enables basic authentication for the site using the Secret selected below.
+  enabled: false
+  # -- Username the htpasswd entry is derived from. Only used in chart-managed
+  # mode, and only when `secret.values.auth` is unset. There is no default, so a
+  # deployment that enabled basic auth without choosing credentials now fails to
+  # render instead of shipping a publicly known one.
+  username: ""
+  # -- Password the htpasswd entry is derived from. Must be set together with
+  # `basicAuth.username`. bcrypt salts are random, so the derived entry is
+  # rewritten on every render; set `secret.values.auth` to pin it.
+  password: ""
+
+secret:
+  # -- Name of a caller-managed Secret containing a precomputed htpasswd entry
+  # under the key `auth`. When set, the chart does not manage the Secret.
+  existingSecret: ""
+
+  # -- Key/value pairs used for the chart-managed basic-auth Secret. Provide a
+  # precomputed htpasswd entry under the required key `auth`. Takes precedence
+  # over persisted cluster data, and is mutually exclusive with
+  # `basicAuth.username`/`basicAuth.password`.
+  values: {}
+
+  # -- Configure an ExternalSecret to populate a Secret containing the
+  # precomputed htpasswd key `auth`. Mutually exclusive with existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to <release>-nginx-htpasswd.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  migration:
+    # -- No differently named legacy Secret exists; the managed name is preserved.
+    enabled: false
 
 
 restartrApi: false

@@ -63,7 +63,7 @@ Resolve the basic-auth Secret selected by managed, existingSecret, or ESO mode.
 {{- define "resty.basicAuthSecretName" -}}
 {{- include "helx-common.secret.name.v1" (dict
   "mode" .Values.secret.mode
-  "label" "secret"
+  "errorValuePath" "secret"
   "defaultName" (include "resty.basicAuthManagedSecretName" .)
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret

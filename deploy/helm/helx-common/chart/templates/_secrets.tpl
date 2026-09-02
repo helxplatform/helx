@@ -1,12 +1,12 @@
 {{/*
-Resolve the Secret consumed by a workload.
+Find the name of the Secret the workload should use.
 
 Arguments:
-  mode: Required. Validated and resolved by secret.mode.v1.
-  defaultName: Name of the chart-managed Secret and default ESO target.
-  existingSecret: Optional caller-managed Secret name.
-  externalSecret: Optional ESO settings; targetName overrides the ESO target.
-  label: Optional values path used in messages.
+  mode: Required. Checked by secret.mode.v1.
+  defaultName: Name of the Secret created by the chart and the default ESO target.
+  existingSecret: Optional name of a Secret managed outside the chart.
+  externalSecret: Optional ESO settings. targetName changes the ESO target name.
+  errorValuePath: Optional values path shown in error messages.
 */}}
 {{- define "helx-common.secret.name.v1" -}}
 {{- $defaultName := required "helx-common: secret defaultName is required" .defaultName -}}
@@ -15,7 +15,7 @@ Arguments:
   "mode" .mode
   "existingSecret" .existingSecret
   "externalSecret" $externalSecret
-  "label" .label
+  "errorValuePath" .errorValuePath
 ) -}}
 {{- if eq $mode "existingSecret" -}}
   {{- .existingSecret -}}
@@ -27,74 +27,74 @@ Arguments:
 {{- end -}}
 
 {{/*
-Validate one Secret contract's ownership declaration and return the mode.
+Check the Secret ownership settings and return the selected mode.
 
 Arguments:
   mode: Required. One of "values", "existingSecret", "externalSecret".
-  existingSecret: Optional caller-managed Secret name.
+  existingSecret: Optional name of a Secret managed outside the chart.
   externalSecret: Optional ESO settings.
-  label: Optional values path used in messages; defaults to "secret".
+  errorValuePath: Optional values path shown in error messages; defaults to "secret".
 
-The mode is declared, never inferred. Inferring it from whichever fields
-happened to be set meant a field could contradict the intent silently, and made
-"chart-managed" the state that remained when nothing else matched rather than a
-choice anyone made. Asking outright costs one value and removes the ambiguity.
+The caller must set the mode explicitly. This helper does not guess ownership
+from the other fields, so a partially filled-in configuration cannot select a
+mode by accident.
 
-Fields belonging to another mode are rejected instead of ignored, on the same
-principle as the payload check in resources.v1: configuration that cannot take
-effect is a mistake worth reporting, not something to drop quietly.
+Settings for a different mode are errors. Rejecting them makes sure that no
+setting is silently ignored.
 
-Call this before deriving a payload from configuration outside the caller's own
-secret block, and gate that derivation on the result. Pass the caller's own
-secret.values block through unconditionally even so: that block is the user's
-declaration, and hiding it behind the guard would defeat the check resources.v1
-performs. Gate the derived keys, never the declared ones.
+Some charts build additional Secret values from other parts of their
+configuration, such as a bundled database's settings. Only build those values
+when this helper returns "values", because the other modes do not use them.
+
+Always pass the user's secret.values block to resources.v1, even in the
+external modes. It reports an error when values and an external owner are both
+set, which exposes a conflicting configuration instead of hiding it.
 */}}
 {{- define "helx-common.secret.mode.v1" -}}
-{{- $label := default "secret" .label -}}
+{{- $errorValuePath := default "secret" .errorValuePath -}}
 {{- $modes := list "values" "existingSecret" "externalSecret" -}}
 {{- $mode := default "" .mode -}}
 {{- $externalSecret := default (dict) .externalSecret -}}
 {{- if not $mode -}}
-  {{- fail (printf "helx-common: %s.mode is required; set it to one of: %s" $label (join ", " $modes)) -}}
+  {{- fail (printf "helx-common: %s.mode is required; set it to one of: %s" $errorValuePath (join ", " $modes)) -}}
 {{- end -}}
 {{- if not (has $mode $modes) -}}
-  {{- fail (printf "helx-common: %s.mode %q is not a mode; use one of: %s" $label $mode (join ", " $modes)) -}}
+  {{- fail (printf "helx-common: %s.mode %q is not a mode; use one of: %s" $errorValuePath $mode (join ", " $modes)) -}}
 {{- end -}}
 {{- if and (ne $mode "existingSecret") .existingSecret -}}
-  {{- fail (printf "helx-common: %s.existingSecret is set to %q but %s.mode is %q, so it would be ignored; set %s.mode to existingSecret or clear %s.existingSecret" $label .existingSecret $label $mode $label $label) -}}
+  {{- fail (printf "helx-common: %s.existingSecret is set to %q but %s.mode is %q, so it would be ignored; set %s.mode to existingSecret or clear %s.existingSecret" $errorValuePath .existingSecret $errorValuePath $mode $errorValuePath $errorValuePath) -}}
 {{- end -}}
 {{- if and (eq $mode "existingSecret") (not .existingSecret) -}}
-  {{- fail (printf "helx-common: %s.mode is existingSecret but %s.existingSecret is empty; name the Secret to use" $label $label) -}}
+  {{- fail (printf "helx-common: %s.mode is existingSecret but %s.existingSecret is empty; name the Secret to use" $errorValuePath $errorValuePath) -}}
 {{- end -}}
 {{/*
-mode decides, so externalSecret.enabled is no longer read. Reject it only when
-it claims a mode that was not declared, which is the one way it could still
-mislead.
+The mode controls ownership, not externalSecret.enabled. Treat enabled: true as
+an error unless the caller selected externalSecret mode, so it cannot conflict
+with the selected mode.
 */}}
 {{- if and (ne $mode "externalSecret") (default false (get $externalSecret "enabled")) -}}
-  {{- fail (printf "helx-common: %s.externalSecret.enabled is true but %s.mode is %q; set %s.mode to externalSecret or disable it" $label $label $mode $label) -}}
+  {{- fail (printf "helx-common: %s.externalSecret.enabled is true but %s.mode is %q; set %s.mode to externalSecret or disable it" $errorValuePath $errorValuePath $mode $errorValuePath) -}}
 {{- end -}}
 {{- $mode -}}
 {{- end -}}
 
 {{/*
-Build the payload for a chart-managed Secret.
+Build the data for a Secret managed by the chart.
 
 Arguments:
-  root: The calling chart's root context.
-  targetName: Name of the chart-managed Secret.
-  values: Plaintext fallback values rendered through stringData.
-  migration: Optional map containing legacyName, annotation, and keyRenames.
-  preserveKeys: Optional list restricting which keys persisted data protects.
+  root: Root context for the calling chart.
+  targetName: Name of the Secret managed by the chart.
+  values: Plaintext fallback values written to stringData.
+  migration: Optional settings for a legacy Secret: legacyName, annotation, and keyRenames.
+  preserveKeys: Optional list of saved keys to keep.
 
-Persisted target and legacy values are base64-encoded Kubernetes Secret data.
-Values are only used for keys absent from persisted data.
+Saved target and legacy values are base64-encoded Secret data. Values are used
+only when there is no saved value for that key.
 
-Omitting preserveKeys protects every persisted key, which is correct for a
-Secret holding only generated credentials. Supplying it protects exactly the
-listed keys and lets every other key in values track the chart values, which is
-what a Secret mixing credentials with plain configuration needs.
+Without preserveKeys, every saved key wins over values. This works well for a
+Secret that contains only generated credentials. With preserveKeys, only the
+listed saved keys win; the rest follow the values in the chart. Use this when a
+Secret contains both credentials and regular configuration.
 */}}
 {{- define "helx-common.secret.payload.v1" -}}
 {{- $root := required "helx-common: secret root context is required" .root -}}
@@ -104,7 +104,7 @@ what a Secret mixing credentials with plain configuration needs.
 {{- $migrationAnnotation := default "secrets.helxplatform.io/migrated-from" (get $migration "annotation") -}}
 {{- $keyRenames := default (dict) (get $migration "keyRenames") -}}
 
-{{/* Fresh installs are deterministic with respect to the cluster. */}}
+{{/* On a new install, do not read Secrets that may already exist in the cluster. */}}
 {{- $targetSecret := dict -}}
 {{- $legacySecret := dict -}}
 {{- if $root.Release.IsUpgrade -}}
@@ -114,7 +114,7 @@ what a Secret mixing credentials with plain configuration needs.
   {{- end -}}
 {{- end -}}
 
-{{/* Copy each source because key normalization mutates its map. */}}
+{{/* Copy the sources because normalizing key names changes each map. */}}
 {{- $targetData := deepCopy (default (dict) $targetSecret.data) -}}
 {{- $legacyData := deepCopy (default (dict) $legacySecret.data) -}}
 {{- $valuesData := dict -}}
@@ -122,7 +122,7 @@ what a Secret mixing credentials with plain configuration needs.
   {{- $_ := set $valuesData $key (toString $value) -}}
 {{- end -}}
 
-{{/* Normalize each source independently so merge precedence remains correct. */}}
+{{/* Rename keys in each source before merging so the intended priority is kept. */}}
 {{- range $source := list $targetData $legacyData $valuesData -}}
   {{- range $oldKey, $newKey := $keyRenames -}}
     {{- if hasKey $source $oldKey -}}
@@ -143,18 +143,18 @@ what a Secret mixing credentials with plain configuration needs.
 {{- $annotations := dict -}}
 {{- $data := dict -}}
 {{- if $wasMigrated -}}
-  {{/* The annotated target is canonical; legacy data only fills gaps. */}}
+  {{/* This target was migrated before, so its data wins and legacy data fills missing keys. */}}
   {{- $_ := set $annotations $migrationAnnotation (get $existingAnnotations $migrationAnnotation) -}}
   {{- $data = mergeOverwrite (dict) $legacyData $targetData -}}
 {{- else if $legacySecret -}}
-  {{/* First migration: normalized legacy data is canonical. */}}
+  {{/* On the first migration, legacy data wins over data already in the target. */}}
   {{- $_ := set $annotations $migrationAnnotation $legacyName -}}
   {{- $data = mergeOverwrite (dict) $targetData $legacyData -}}
 {{- else -}}
   {{- $data = $targetData -}}
 {{- end -}}
 
-{{/* Keys outside preserveKeys follow values instead of persisted data. */}}
+{{/* Keys not in preserveKeys use the current values instead of saved data. */}}
 {{- if hasKey . "preserveKeys" -}}
   {{- $preserveKeys := default (list) .preserveKeys -}}
   {{- range $key, $value := $valuesData -}}
@@ -180,33 +180,30 @@ stringData:
 {{- end -}}
 
 {{/*
-Render the resources for one three-mode Secret contract.
+Render the resources for a Secret with one of three ownership modes.
 
 Arguments:
-  root: Calling chart's root context.
-  mode: Required. Declared ownership; validated by secret.mode.v1.
-  label: Optional values path used in messages; defaults to "secret".
-  defaultName: Name used by chart-managed mode and as the default ESO target.
-  existingSecret: Optional caller-managed Secret name.
-  values: Plaintext values for the chart-managed Secret. Only valid in values
-    mode; supplying them in either external mode is an error rather than a
-    no-op, so derive them under a secret.mode.v1 guard when they come from
-    configuration outside the caller's secret block.
-  externalSecret: ESO settings (enabled, refreshInterval, secretStoreRef, remoteRef).
+  root: Root context for the calling chart.
+  mode: Required. The ownership mode, checked by secret.mode.v1.
+  errorValuePath: Optional values path shown in error messages; defaults to "secret".
+  defaultName: Name used for chart-managed mode and as the default ESO target.
+  existingSecret: Optional name of a Secret managed outside the chart.
+  values: Plaintext values for a chart-managed Secret. They are valid only in
+    values mode. Build values taken from elsewhere in the chart only after
+    secret.mode.v1 returns values.
+  externalSecret: ESO settings: enabled, refreshInterval, secretStoreRef, and remoteRef.
   externalSecretName: Optional ExternalSecret resource name; defaults to defaultName.
-  migration: Optional migration settings accepted by secret.payload.v1.
-  preserveKeys: Optional list passed through to secret.payload.v1.
-  requiredKeys: Optional list of non-empty keys required in the final managed payload.
-  type: Optional Kubernetes Secret type; defaults to Opaque.
+  migration: Optional migration settings for secret.payload.v1.
+  preserveKeys: Optional list for secret.payload.v1.
+  requiredKeys: Optional list of keys that must be non-empty in the final Secret data.
+  type: Optional Secret type; defaults to Opaque.
   retain: Optional boolean; defaults to true.
 
-The chart-managed Secret carries helm.sh/resource-policy: keep so that handing
-ownership to existingSecret or ESO under the same Secret name does not delete
-the live credentials when the resource leaves the rendered manifest. Helm reads
-that annotation from the live object, so the annotation must already have been
-applied by an earlier upgrade: upgrade to a chart carrying this helper first,
-then change ownership in a separate upgrade. Set retain to false only for a
-Secret whose contents are fully reproducible from values.
+By default, a chart-managed Secret gets helm.sh/resource-policy: keep. This
+prevents Helm from deleting it when ownership changes to existingSecret or ESO
+with the same name. Helm reads the annotation from the live Secret, so first
+upgrade to a chart that adds it. Change ownership in a later upgrade. Set
+retain to false only when the Secret can be recreated entirely from values.
 */}}
 {{- define "helx-common.secret.resources.v1" -}}
 {{- $root := required "helx-common: secret root context is required" .root -}}
@@ -223,17 +220,17 @@ Secret whose contents are fully reproducible from values.
   "mode" .mode
   "existingSecret" $existingSecret
   "externalSecret" $externalSecret
-  "label" .label
+  "errorValuePath" .errorValuePath
 ) -}}
 
 {{/*
-Refuse a payload that this mode would discard, rather than dropping it. A
-caller reaching here with values in an external mode either let a user set two
-owners at once, or derived a payload without gating on secret.mode.v1.
+Fail if values were passed for a mode that will not use them. This usually means
+the configuration names two Secret owners, or the chart built values without
+checking secret.mode.v1 first.
 */}}
 {{- if and (ne $mode "values") (default (dict) .values) -}}
-  {{- $label := default "secret" .label -}}
-  {{- fail (printf "helx-common: values were supplied for Secret %s but %s.mode is %q, so they would be silently discarded. Clear %s.values, or set %s.mode to values. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $label $mode $label $label) -}}
+  {{- $errorValuePath := default "secret" .errorValuePath -}}
+  {{- fail (printf "helx-common: values were supplied for Secret %s but %s.mode is %q, so they would be silently discarded. Clear %s.values, or set %s.mode to values. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $errorValuePath $mode $errorValuePath $errorValuePath) -}}
 {{- end -}}
 
 {{- if eq $mode "values" -}}
@@ -303,7 +300,7 @@ spec:
         key: {{ $remoteRef }}
 {{- end -}}
 
-{{/* Retain a distinct legacy Secret while a Helm migration is in progress. */}}
+{{/* Keep a separate legacy Secret while the Helm migration is underway. */}}
 {{- $migration := default (dict) .migration -}}
 {{- $legacyName := default "" (get $migration "legacyName") -}}
 {{- if and (eq $mode "values") $root.Release.IsUpgrade $legacyName (ne $legacyName $defaultName) -}}

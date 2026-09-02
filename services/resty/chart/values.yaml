@@ -85,6 +85,12 @@ basicAuth:
   password: ""
 
 secret:
+  # -- Which owner writes this Secret: `values` for the chart-managed Secret
+  # built from `secret.values`, `existingSecret` for one you create yourself, or
+  # `externalSecret` for External Secrets. Declared rather than inferred, so
+  # selecting a mode also means clearing the fields belonging to the others.
+  mode: values
+
   # -- Name of a caller-managed Secret containing a precomputed htpasswd entry
   # under the key `auth`. When set, the chart does not manage the Secret.
   existingSecret: ""

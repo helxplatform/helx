@@ -5,9 +5,9 @@
 replicaCount: 1
 
 image:
-  repository: bitnami/openresty
+  repository: helxplatform/openresty
   # -- Overrides the image tag whose default is the chart appVersion.
-  tag: 1.21
+  tag: "1.21"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

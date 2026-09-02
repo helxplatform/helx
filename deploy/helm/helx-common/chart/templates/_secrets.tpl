@@ -2,67 +2,80 @@
 Resolve the Secret consumed by a workload.
 
 Arguments:
+  mode: Required. Validated and resolved by secret.mode.v1.
   defaultName: Name of the chart-managed Secret and default ESO target.
   existingSecret: Optional caller-managed Secret name.
   externalSecret: Optional ESO settings; targetName overrides the ESO target.
+  label: Optional values path used in messages.
 */}}
 {{- define "helx-common.secret.name.v1" -}}
 {{- $defaultName := required "helx-common: secret defaultName is required" .defaultName -}}
 {{- $externalSecret := default (dict) .externalSecret -}}
-{{- $externalEnabled := default false (get $externalSecret "enabled") -}}
-{{- if .existingSecret -}}
+{{- $mode := include "helx-common.secret.mode.v1" (dict
+  "mode" .mode
+  "existingSecret" .existingSecret
+  "externalSecret" $externalSecret
+  "label" .label
+) -}}
+{{- if eq $mode "existingSecret" -}}
   {{- .existingSecret -}}
-{{- else if $externalEnabled -}}
+{{- else if eq $mode "externalSecret" -}}
   {{- default $defaultName (get $externalSecret "targetName") -}}
 {{- else -}}
   {{- $defaultName -}}
 {{- end -}}
 {{- end -}}
 
-{{/* Validate that at most one external ownership mode is selected. */}}
-{{- define "helx-common.secret.validate.v1" -}}
-{{- $externalSecret := default (dict) .externalSecret -}}
-{{- if and .existingSecret (default false (get $externalSecret "enabled")) -}}
-  {{- fail "helx-common: secret.existingSecret and secret.externalSecret.enabled are mutually exclusive" -}}
-{{- end -}}
-{{- end -}}
-
 {{/*
-Resolve which owner writes the Secret, returning one of "existingSecret",
-"externalSecret", or "values".
+Validate one Secret contract's ownership declaration and return the mode.
 
 Arguments:
+  mode: Required. One of "values", "existingSecret", "externalSecret".
   existingSecret: Optional caller-managed Secret name.
   externalSecret: Optional ESO settings.
+  label: Optional values path used in messages; defaults to "secret".
 
-Ownership is selected by the two external modes; values is what remains when
-neither is chosen, so it is the default rather than a peer selector. Fails when
-both external modes are set.
+The mode is declared, never inferred. Inferring it from whichever fields
+happened to be set meant a field could contradict the intent silently, and made
+"chart-managed" the state that remained when nothing else matched rather than a
+choice anyone made. Asking outright costs one value and removes the ambiguity.
+
+Fields belonging to another mode are rejected instead of ignored, on the same
+principle as the payload check in resources.v1: configuration that cannot take
+effect is a mistake worth reporting, not something to drop quietly.
 
 Call this before deriving a payload from configuration outside the caller's own
-secret block. resources.v1 refuses a non-empty values payload in the other two
-modes, so such a derivation has to be gated on this helper rather than done
-unconditionally and dropped by the library.
-
-Pass the caller's own secret.values block through unconditionally even so. That
-block is the user's declaration of ownership, and hiding it behind this guard
-would defeat the very check resources.v1 performs: values set alongside an
-external owner have to reach the library to be rejected. Gate the derived keys,
-never the declared ones.
-
-Mirrors secret.name.v1, which resolves the Secret name over the same three
-modes.
+secret block, and gate that derivation on the result. Pass the caller's own
+secret.values block through unconditionally even so: that block is the user's
+declaration, and hiding it behind the guard would defeat the check resources.v1
+performs. Gate the derived keys, never the declared ones.
 */}}
 {{- define "helx-common.secret.mode.v1" -}}
+{{- $label := default "secret" .label -}}
+{{- $modes := list "values" "existingSecret" "externalSecret" -}}
+{{- $mode := default "" .mode -}}
 {{- $externalSecret := default (dict) .externalSecret -}}
-{{- include "helx-common.secret.validate.v1" (dict "existingSecret" .existingSecret "externalSecret" $externalSecret) -}}
-{{- if .existingSecret -}}
-existingSecret
-{{- else if (default false (get $externalSecret "enabled")) -}}
-externalSecret
-{{- else -}}
-values
+{{- if not $mode -}}
+  {{- fail (printf "helx-common: %s.mode is required; set it to one of: %s" $label (join ", " $modes)) -}}
 {{- end -}}
+{{- if not (has $mode $modes) -}}
+  {{- fail (printf "helx-common: %s.mode %q is not a mode; use one of: %s" $label $mode (join ", " $modes)) -}}
+{{- end -}}
+{{- if and (ne $mode "existingSecret") .existingSecret -}}
+  {{- fail (printf "helx-common: %s.existingSecret is set to %q but %s.mode is %q, so it would be ignored; set %s.mode to existingSecret or clear %s.existingSecret" $label .existingSecret $label $mode $label $label) -}}
+{{- end -}}
+{{- if and (eq $mode "existingSecret") (not .existingSecret) -}}
+  {{- fail (printf "helx-common: %s.mode is existingSecret but %s.existingSecret is empty; name the Secret to use" $label $label) -}}
+{{- end -}}
+{{/*
+mode decides, so externalSecret.enabled is no longer read. Reject it only when
+it claims a mode that was not declared, which is the one way it could still
+mislead.
+*/}}
+{{- if and (ne $mode "externalSecret") (default false (get $externalSecret "enabled")) -}}
+  {{- fail (printf "helx-common: %s.externalSecret.enabled is true but %s.mode is %q; set %s.mode to externalSecret or disable it" $label $label $mode $label) -}}
+{{- end -}}
+{{- $mode -}}
 {{- end -}}
 
 {{/*
@@ -171,6 +184,8 @@ Render the resources for one three-mode Secret contract.
 
 Arguments:
   root: Calling chart's root context.
+  mode: Required. Declared ownership; validated by secret.mode.v1.
+  label: Optional values path used in messages; defaults to "secret".
   defaultName: Name used by chart-managed mode and as the default ESO target.
   existingSecret: Optional caller-managed Secret name.
   values: Plaintext values for the chart-managed Secret. Only valid in values
@@ -204,7 +219,12 @@ Secret whose contents are fully reproducible from values.
 {{- if hasKey . "retain" -}}
   {{- $retain = .retain -}}
 {{- end -}}
-{{- $mode := include "helx-common.secret.mode.v1" (dict "existingSecret" $existingSecret "externalSecret" $externalSecret) -}}
+{{- $mode := include "helx-common.secret.mode.v1" (dict
+  "mode" .mode
+  "existingSecret" $existingSecret
+  "externalSecret" $externalSecret
+  "label" .label
+) -}}
 
 {{/*
 Refuse a payload that this mode would discard, rather than dropping it. A
@@ -212,8 +232,8 @@ caller reaching here with values in an external mode either let a user set two
 owners at once, or derived a payload without gating on secret.mode.v1.
 */}}
 {{- if and (ne $mode "values") (default (dict) .values) -}}
-  {{- $owner := ternary (printf "existingSecret %q" $existingSecret) "secret.externalSecret" (eq $mode "existingSecret") -}}
-  {{- fail (printf "helx-common: values were supplied for Secret %s but %s owns it, so they would be silently discarded. Clear secret.values, or release the other owner. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $owner) -}}
+  {{- $label := default "secret" .label -}}
+  {{- fail (printf "helx-common: values were supplied for Secret %s but %s.mode is %q, so they would be silently discarded. Clear %s.values, or set %s.mode to values. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $label $mode $label $label) -}}
 {{- end -}}
 
 {{- if eq $mode "values" -}}

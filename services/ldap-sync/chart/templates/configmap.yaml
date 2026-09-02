@@ -11,6 +11,8 @@ data:
     {{- range .Values.config.hooks }}
       {{- if .url }}
       - {{ .url }}
+      {{- else }}
+      {{ fail "url is required for hook in config.hooks. Please provide a URL for the hook or remove the hook from the config." }}
       {{- end }}
     {{- end }}
     {{- else }}

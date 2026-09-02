@@ -297,15 +297,13 @@ atlas:
   # -- Disabling will turn off the creation of secrets/configmaps for Atlas
   enabled: false
   # The `atlas-env` Secret keeps that exact name because the launched Atlas app
-  # spec references it, so this contract has no `existingSecret` mode.
+  # spec references it, so no mode below takes a Secret name.
   secret:
-    # -- Render the chart-managed `atlas-env` Secret. Set to false to create and
-    # own that Secret outside the chart under the same name.
-    create: true
-
-    # -- Which owner writes this Secret: `values` for the chart-managed Secret,
-    # or `externalSecret` for External Secrets. There is no `existingSecret`
-    # mode, because the name is fixed by the launched app spec.
+    # -- Which owner writes this Secret: `values` for the chart-managed Secret
+    # built from the keys below, `existingSecret` for an `atlas-env` that
+    # already exists under someone else's ownership, or `externalSecret` for
+    # External Secrets. The chart writes a Secret only in `values` mode; the
+    # other two leave the existing `atlas-env` untouched.
     mode: values
     # -- Key/value pairs merged over the values derived from `apps`. Chart
     # values are authoritative for every key in this Secret.
@@ -329,15 +327,13 @@ pgadmin:
   # -- Disabling will turn off the creation of secrets/configmaps for PgAdmin
   enabled: true
   # The `pgadmin-env` Secret keeps that exact name because the launched pgAdmin
-  # app spec references it, so this contract has no `existingSecret` mode.
+  # app spec references it, so no mode below takes a Secret name.
   secret:
-    # -- Render the chart-managed `pgadmin-env` Secret. Set to false to create
-    # and own that Secret outside the chart under the same name.
-    create: true
-
-    # -- Which owner writes this Secret: `values` for the chart-managed Secret,
-    # or `externalSecret` for External Secrets. There is no `existingSecret`
-    # mode, because the name is fixed by the launched app spec.
+    # -- Which owner writes this Secret: `values` for the chart-managed Secret
+    # built from the keys below, `existingSecret` for a `pgadmin-env` that
+    # already exists under someone else's ownership, or `externalSecret` for
+    # External Secrets. The chart writes a Secret only in `values` mode; the
+    # other two leave the existing `pgadmin-env` untouched.
     mode: values
     # -- Key/value pairs for the chart-managed `pgadmin-env` Secret. Set
     # `PGADMIN_DEFAULT_PASSWORD` here to pin the password; otherwise it is

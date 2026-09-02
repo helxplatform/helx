@@ -37,6 +37,12 @@ nameOverride: ""
 fullnameOverride: ""
 
 secret:
+  # -- Which owner writes this Secret: `values` for the chart-managed Secret
+  # built from `secret.values`, `existingSecret` for one you create yourself, or
+  # `externalSecret` for External Secrets. Declared rather than inferred, so
+  # selecting a mode also means clearing the fields belonging to the others.
+  mode: values
+
   # -- Name of a Secret containing the appstore environment variables. When set,
   # the chart does not create or manage a Secret. For an existing legacy release,
   # leave this empty to let the chart migrate the old primary Secret automatically.
@@ -296,6 +302,11 @@ atlas:
     # -- Render the chart-managed `atlas-env` Secret. Set to false to create and
     # own that Secret outside the chart under the same name.
     create: true
+
+    # -- Which owner writes this Secret: `values` for the chart-managed Secret,
+    # or `externalSecret` for External Secrets. There is no `existingSecret`
+    # mode, because the name is fixed by the launched app spec.
+    mode: values
     # -- Key/value pairs merged over the values derived from `apps`. Chart
     # values are authoritative for every key in this Secret.
     values: {}
@@ -323,6 +334,11 @@ pgadmin:
     # -- Render the chart-managed `pgadmin-env` Secret. Set to false to create
     # and own that Secret outside the chart under the same name.
     create: true
+
+    # -- Which owner writes this Secret: `values` for the chart-managed Secret,
+    # or `externalSecret` for External Secrets. There is no `existingSecret`
+    # mode, because the name is fixed by the launched app spec.
+    mode: values
     # -- Key/value pairs for the chart-managed `pgadmin-env` Secret. Set
     # `PGADMIN_DEFAULT_PASSWORD` here to pin the password; otherwise it is
     # generated on first install and then preserved from the live Secret, which

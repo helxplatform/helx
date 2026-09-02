@@ -153,6 +153,8 @@ UNINSTALL_PVCS                  ?= appstore-postgresql-pvc \
 UNINSTALL_SECRETS               ?= $(RELEASE)-appstore-secrets \
                                    $(RELEASE)-appstore-sockets \
                                    $(RELEASE)-ldap-sync-secrets \
+                                   $(RELEASE)-user-mutator-ldap-password \
+                                   $(RELEASE)-user-mutator-tls \
                                    $(RELEASE)-postgresql \
                                    openldap-credentials \
                                    pgadmin-env

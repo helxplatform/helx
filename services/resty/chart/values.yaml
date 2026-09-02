@@ -5,7 +5,7 @@
 replicaCount: 1
 
 image:
-  repository: helxplatform/openresty
+  repository: containers.renci.org/helxplatform/openresty
   # -- Overrides the image tag whose default is the chart appVersion.
   tag: "1.21"
   pullPolicy: IfNotPresent

@@ -6,7 +6,7 @@ Arguments:
   defaultName: Name of the Secret created by the chart and the default ESO target.
   existingSecret: Optional name of a Secret managed outside the chart.
   externalSecret: Optional ESO settings. targetName changes the ESO target name.
-  errorValuePath: Optional values path shown in error messages.
+  secretValueBlockPath: Optional path to the Secret values block; shown in error messages.
 */}}
 {{- define "helx-common.secret.name.v1" -}}
 {{- $defaultName := required "helx-common: secret defaultName is required" .defaultName -}}
@@ -15,7 +15,7 @@ Arguments:
   "mode" .mode
   "existingSecret" .existingSecret
   "externalSecret" $externalSecret
-  "errorValuePath" .errorValuePath
+  "secretValueBlockPath" .secretValueBlockPath
 ) -}}
 {{- if eq $mode "existingSecret" -}}
   {{- .existingSecret -}}
@@ -33,7 +33,7 @@ Arguments:
   mode: Required. One of "values", "existingSecret", "externalSecret".
   existingSecret: Optional name of a Secret managed outside the chart.
   externalSecret: Optional ESO settings.
-  errorValuePath: Optional values path shown in error messages; defaults to "secret".
+  secretValueBlockPath: Optional path to the Secret values block; defaults to "secret".
 
 The caller must set the mode explicitly. This helper does not guess ownership
 from the other fields, so a partially filled-in configuration cannot select a
@@ -51,21 +51,21 @@ external modes. It reports an error when values and an external owner are both
 set, which exposes a conflicting configuration instead of hiding it.
 */}}
 {{- define "helx-common.secret.mode.v1" -}}
-{{- $errorValuePath := default "secret" .errorValuePath -}}
+{{- $secretValueBlockPath := default "secret" .secretValueBlockPath -}}
 {{- $modes := list "values" "existingSecret" "externalSecret" -}}
 {{- $mode := default "" .mode -}}
 {{- $externalSecret := default (dict) .externalSecret -}}
 {{- if not $mode -}}
-  {{- fail (printf "helx-common: %s.mode is required; set it to one of: %s" $errorValuePath (join ", " $modes)) -}}
+  {{- fail (printf "helx-common: %s.mode is required; set it to one of: %s" $secretValueBlockPath (join ", " $modes)) -}}
 {{- end -}}
 {{- if not (has $mode $modes) -}}
-  {{- fail (printf "helx-common: %s.mode %q is not a mode; use one of: %s" $errorValuePath $mode (join ", " $modes)) -}}
+  {{- fail (printf "helx-common: %s.mode %q is not a mode; use one of: %s" $secretValueBlockPath $mode (join ", " $modes)) -}}
 {{- end -}}
 {{- if and (ne $mode "existingSecret") .existingSecret -}}
-  {{- fail (printf "helx-common: %s.existingSecret is set to %q but %s.mode is %q, so it would be ignored; set %s.mode to existingSecret or clear %s.existingSecret" $errorValuePath .existingSecret $errorValuePath $mode $errorValuePath $errorValuePath) -}}
+  {{- fail (printf "helx-common: %s.existingSecret is set to %q but %s.mode is %q, so it would be ignored; set %s.mode to existingSecret or clear %s.existingSecret" $secretValueBlockPath .existingSecret $secretValueBlockPath $mode $secretValueBlockPath $secretValueBlockPath) -}}
 {{- end -}}
 {{- if and (eq $mode "existingSecret") (not .existingSecret) -}}
-  {{- fail (printf "helx-common: %s.mode is existingSecret but %s.existingSecret is empty; name the Secret to use" $errorValuePath $errorValuePath) -}}
+  {{- fail (printf "helx-common: %s.mode is existingSecret but %s.existingSecret is empty; name the Secret to use" $secretValueBlockPath $secretValueBlockPath) -}}
 {{- end -}}
 {{/*
 The mode controls ownership, not externalSecret.enabled. Treat enabled: true as
@@ -73,7 +73,7 @@ an error unless the caller selected externalSecret mode, so it cannot conflict
 with the selected mode.
 */}}
 {{- if and (ne $mode "externalSecret") (default false (get $externalSecret "enabled")) -}}
-  {{- fail (printf "helx-common: %s.externalSecret.enabled is true but %s.mode is %q; set %s.mode to externalSecret or disable it" $errorValuePath $errorValuePath $mode $errorValuePath) -}}
+  {{- fail (printf "helx-common: %s.externalSecret.enabled is true but %s.mode is %q; set %s.mode to externalSecret or disable it" $secretValueBlockPath $secretValueBlockPath $mode $secretValueBlockPath) -}}
 {{- end -}}
 {{- $mode -}}
 {{- end -}}
@@ -185,7 +185,7 @@ Render the resources for a Secret with one of three ownership modes.
 Arguments:
   root: Root context for the calling chart.
   mode: Required. The ownership mode, checked by secret.mode.v1.
-  errorValuePath: Optional values path shown in error messages; defaults to "secret".
+  secretValueBlockPath: Optional path to the Secret values block; defaults to "secret".
   defaultName: Default name of the Secret. Chart-managed mode creates it, and
     ESO uses it unless externalSecret.targetName overrides it.
   existingSecret: Optional name of a Secret managed outside the chart.
@@ -221,7 +221,7 @@ retain to false only when the Secret can be recreated entirely from values.
   "mode" .mode
   "existingSecret" $existingSecret
   "externalSecret" $externalSecret
-  "errorValuePath" .errorValuePath
+  "secretValueBlockPath" .secretValueBlockPath
 ) -}}
 {{/*
 Fail if values were passed for a mode that will not use them. This usually means
@@ -229,8 +229,8 @@ the configuration names two Secret owners, or the chart derived values from a
 values file without checking secret.mode.v1 first.
 */}}
 {{- if and (ne $mode "values") (default (dict) .values) -}}
-  {{- $errorValuePath := default "secret" .errorValuePath -}}
-  {{- fail (printf "helx-common: values were supplied for Secret %s but %s.mode is %q, so they would be silently discarded. Clear %s.values, or set %s.mode to values. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $errorValuePath $mode $errorValuePath $errorValuePath) -}}
+  {{- $secretValueBlockPath := default "secret" .secretValueBlockPath -}}
+  {{- fail (printf "helx-common: values were supplied for Secret %s but %s.mode is %q, so they would be silently discarded. Clear %s.values, or set %s.mode to values. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $secretValueBlockPath $mode $secretValueBlockPath $secretValueBlockPath) -}}
 {{- end -}}
 {{- if eq $mode "values" -}}
   {{- $payloadArgs := dict

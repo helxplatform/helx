@@ -186,11 +186,12 @@ Arguments:
   root: Root context for the calling chart.
   mode: Required. The ownership mode, checked by secret.mode.v1.
   errorValuePath: Optional values path shown in error messages; defaults to "secret".
-  defaultName: Name used for chart-managed mode and as the default ESO target.
+  defaultName: Default name of the Secret. Chart-managed mode creates it, and
+    ESO uses it unless externalSecret.targetName overrides it.
   existingSecret: Optional name of a Secret managed outside the chart.
   values: Plaintext values for a chart-managed Secret. They are valid only in
-    values mode. Build values taken from elsewhere in the chart only after
-    secret.mode.v1 returns values.
+    values mode. Pull values from elsewhere in the values file only after
+    you've called secret.mode.v1 to verify that values mode is enabled.
   externalSecret: ESO settings: enabled, refreshInterval, secretStoreRef, and remoteRef.
   externalSecretName: Optional ExternalSecret resource name; defaults to defaultName.
   migration: Optional migration settings for secret.payload.v1.
@@ -222,17 +223,15 @@ retain to false only when the Secret can be recreated entirely from values.
   "externalSecret" $externalSecret
   "errorValuePath" .errorValuePath
 ) -}}
-
 {{/*
 Fail if values were passed for a mode that will not use them. This usually means
-the configuration names two Secret owners, or the chart built values without
-checking secret.mode.v1 first.
+the configuration names two Secret owners, or the chart derived values from a
+values file without checking secret.mode.v1 first.
 */}}
 {{- if and (ne $mode "values") (default (dict) .values) -}}
   {{- $errorValuePath := default "secret" .errorValuePath -}}
   {{- fail (printf "helx-common: values were supplied for Secret %s but %s.mode is %q, so they would be silently discarded. Clear %s.values, or set %s.mode to values. A chart deriving values from configuration outside its secret block must gate that derivation on helx-common.secret.mode.v1." $defaultName $errorValuePath $mode $errorValuePath $errorValuePath) -}}
 {{- end -}}
-
 {{- if eq $mode "values" -}}
   {{- $payloadArgs := dict
     "root" $root

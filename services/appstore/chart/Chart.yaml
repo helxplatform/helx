@@ -12,7 +12,7 @@ description: A Helm chart for Kubernetes
 type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
-version: 5.1.7
+version: 5.1.8
 # This is the version number of the application being deployed. This version
 # number should be incremented each time you make changes to the application.
 # 4.4.1 is the released appstore image carrying the Ambassador-removal changes
@@ -20,7 +20,7 @@ version: 5.1.7
 appVersion: 4.4.2
 dependencies:
   - name: helx-common
-    version: "0.1.1"
+    version: "0.2.0"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: postgresql
     condition: postgresql.enabled

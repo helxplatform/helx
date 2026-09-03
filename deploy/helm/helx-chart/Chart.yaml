@@ -12,7 +12,7 @@ description: A Helm chart for deploying HeLx to Kubernetes.
 type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
-version: 4.6.4
+version: 4.6.5
 
 # This is the version number of the application being deployed. This version number should be
 # incremented each time you make changes to the application.
@@ -37,7 +37,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: helx-ldap
     condition: helx-ldap.enabled
-    version: "0.1.5"
+    version: "0.1.6"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ldap-sync
     condition: ldap-sync.enabled

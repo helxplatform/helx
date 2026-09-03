@@ -1,9 +1,10 @@
 # CI-only values for the standalone helx-ldap chart lint. Helm lint does not
-# contact a cluster, so these values exercise the chart's Secret selection
-# without putting synthetic credentials in rendered manifests.
-configuration:
-  # Overrides the Secret the configuration Job reads its credentials from.
-  # This exercises the override branch of helx-ldap.credentialsSecret; when it
-  # is empty the chart falls back to openldap.global.existingSecret, which the
-  # umbrella lint covers instead.
+# contact a cluster, so these values exercise the caller-managed credentials
+# Secret mode without putting synthetic credentials in rendered manifests.
+secret:
+  mode: existingSecret
   existingSecret: helx-ldap-lint-credentials
+openldap:
+  global:
+    # The upstream chart and the configuration Job consume the same Secret.
+    existingSecret: helx-ldap-lint-credentials

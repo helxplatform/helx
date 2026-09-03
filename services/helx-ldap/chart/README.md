@@ -1,6 +1,6 @@
 # helx-ldap
 
-![Version: 0.1.5](https://img.shields.io/badge/Version-0.1.5-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.6.9](https://img.shields.io/badge/AppVersion-2.6.9-informational?style=flat-square)
+![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.6.9](https://img.shields.io/badge/AppVersion-2.6.9-informational?style=flat-square)
 
 HeLx LDAP deployment and configuration
 
@@ -9,7 +9,7 @@ HeLx LDAP deployment and configuration
 | Repository | Name | Version |
 |------------|------|---------|
 | https://jp-gouin.github.io/helm-openldap/ | openldap(openldap-stack-ha) | 4.3.3 |
-| oci://ghcr.io/helxplatform/helm-charts | helx-common | 0.1.1 |
+| oci://ghcr.io/helxplatform/helm-charts | helx-common | 0.2.0 |
 
 ## Values
 
@@ -38,8 +38,8 @@ HeLx LDAP deployment and configuration
 | configuration.serviceName | string | `""` |  |
 | openldap.env.LDAP_ALLOW_ANON_BINDING | string | `"yes"` |  |
 | openldap.fullnameOverride | string | `"openldap"` |  |
-| openldap.global.existingSecret | string | `"openldap-credentials"` | Secret name consumed by the upstream OpenLDAP chart. This is target-name compatibility plumbing for the dependency, not a fourth ownership mode. It must match secret.existingSecret or secret.externalSecret.targetName when either is set. Chart-managed and default ESO modes create this name automatically when secret.existingSecret is empty. |
-| openldap.global.ldapDomain | string | `"example.org"` |  |
+| openldap.global.existingSecret | string | `"openldap-credentials"` | Secret name consumed by the upstream OpenLDAP chart. This is the fixed target name for each credentials ownership mode. In existingSecret mode it must match secret.existingSecret; in externalSecret mode it must match secret.externalSecret.targetName when that value is set. |
+| openldap.global.ldapDomain | string | `"openldap"` |  |
 | openldap.ltb-passwd.enabled | bool | `false` |  |
 | openldap.migration.enabled | bool | `false` | Enable the one-time existing HeLx LDAP PVC migration during a Helm upgrade. The migration hook stops and replaces the old StatefulSet controller; it does not copy or delete the PVC. |
 | openldap.migration.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the migration hook. |
@@ -59,12 +59,13 @@ HeLx LDAP deployment and configuration
 | openldap.resources.requests.cpu | string | `"500m"` |  |
 | openldap.resources.requests.memory | string | `"500M"` |  |
 | openldap.test.enabled | bool | `false` |  |
-| secret.existingSecret | string | `""` | Name of a caller-managed HeLx LDAP credentials Secret containing LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Most prior deployments will have an existing Secret named "openldap-credentials". Set this to that value for a seamless upgrade, and do not set the secret values in the values section below. |
-| secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the HeLx LDAP credentials Secret. This is mutually exclusive with secret.existingSecret. |
+| secret.existingSecret | string | `""` | Name of a caller-managed HeLx LDAP credentials Secret containing LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Set this only when `secret.mode` is `existingSecret`. |
+| secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the HeLx LDAP credentials Secret. Set `secret.mode` to `externalSecret` when using this configuration. |
 | secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to openldap.global.existingSecret. |
-| secret.migration.enabled | bool | `false` | Enable the one-time credentials Secret migration during a Helm upgrade. The target remains caller-managed through secret.existingSecret. |
+| secret.migration.enabled | bool | `false` | Enable the one-time credentials Secret migration during a Helm upgrade. It requires `secret.mode: existingSecret`, and the target remains caller-managed through secret.existingSecret. |
 | secret.migration.legacySecret | string | `""` | Name of the credentials Secret from the previous deployment. Verify it in the namespace before upgrading; this is not deleted automatically. |
-| secret.values | object | `{}` | Key/value pairs used to create the chart-managed HeLx LDAP credentials Secret when secret.existingSecret is empty and externalSecret is disabled. Required keys:   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator Argo CD users should provide stable encrypted values or select ESO mode. |
+| secret.mode | string | `"values"` | Which owner writes the credentials Secret: `values` for a chart-managed Secret built from `secret.values`, `existingSecret` for a caller-managed Secret, or `externalSecret` for External Secrets. |
+| secret.values | object | `{}` | Key/value pairs used to create the chart-managed HeLx LDAP credentials Secret. Set these only when `secret.mode` is `values`. Required keys:   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator Argo CD users should provide stable encrypted values or select ESO mode. |
 
 ## Existing release migration
 
@@ -85,6 +86,7 @@ helx-ldap:
     persistence:
       existingClaim: "data-legacy-statefulset-0"
   secret:
+    mode: existingSecret
     existingSecret: openldap-credentials
     migration:
       enabled: true

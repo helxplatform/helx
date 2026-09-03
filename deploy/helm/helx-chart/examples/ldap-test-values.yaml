@@ -37,6 +37,7 @@ ui:
 helx-ldap:
   enabled: true
   secret:
+    mode: existingSecret
     existingSecret: openldap-credentials
   openldap:
     global:

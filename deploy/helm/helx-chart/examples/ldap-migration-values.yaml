@@ -50,6 +50,7 @@ helx-ldap:
   secret:
     # The migration hook creates this target from legacySecret. Keep this
     # caller-managed Secret name for subsequent upgrades.
+    mode: existingSecret
     existingSecret: openldap-credentials
     migration:
       enabled: true

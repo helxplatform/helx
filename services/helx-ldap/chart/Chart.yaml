@@ -3,14 +3,14 @@ name: helx-ldap
 description: HeLx LDAP deployment and configuration
 
 type: application
-version: 0.1.5
+version: 0.1.6
 appVersion: "2.6.9"
 
 # OpenLDAP remains owned by the upstream chart. This chart owns only the
 # HeLx-specific configuration applied after OpenLDAP is ready.
 dependencies:
   - name: helx-common
-    version: "0.1.1"
+    version: "0.2.0"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: openldap-stack-ha
     alias: openldap

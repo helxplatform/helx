@@ -1,15 +1,18 @@
 # Default values for helx-ldap.
 
 secret:
+  # -- Which owner writes the credentials Secret: `values` for a chart-managed
+  # Secret built from `secret.values`, `existingSecret` for a caller-managed
+  # Secret, or `externalSecret` for External Secrets.
+  mode: values
+
   # -- Name of a caller-managed HeLx LDAP credentials Secret containing
-  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD.
-  # Most prior deployments will have an existing Secret named
-  # "openldap-credentials". Set this to that value for a seamless upgrade,
-  # and do not set the secret values in the values section below.
+  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Set this only when
+  # `secret.mode` is `existingSecret`.
   existingSecret: ""
 
   # -- Key/value pairs used to create the chart-managed HeLx LDAP credentials
-  # Secret when secret.existingSecret is empty and externalSecret is disabled.
+  # Secret. Set these only when `secret.mode` is `values`.
   # Required keys:
   #   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator
   #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
@@ -17,7 +20,7 @@ secret:
   values: {}
 
   # -- Configure an ExternalSecret to populate the HeLx LDAP credentials Secret.
-  # This is mutually exclusive with secret.existingSecret.
+  # Set `secret.mode` to `externalSecret` when using this configuration.
   externalSecret:
     enabled: false
     # -- Optional ESO target Secret name. Defaults to
@@ -31,7 +34,8 @@ secret:
 
   migration:
     # -- Enable the one-time credentials Secret migration during a Helm upgrade.
-    # The target remains caller-managed through secret.existingSecret.
+    # It requires `secret.mode: existingSecret`, and the target remains
+    # caller-managed through secret.existingSecret.
     enabled: false
     # -- Name of the credentials Secret from the previous deployment. Verify it
     # in the namespace before upgrading; this is not deleted automatically.
@@ -45,12 +49,11 @@ openldap:
   replicaCount: 1
 
   global:
-    ldapDomain: openldap
-    # -- Secret name consumed by the upstream OpenLDAP chart. This is target-name
-    # compatibility plumbing for the dependency, not a fourth ownership mode.
-    # It must match secret.existingSecret or secret.externalSecret.targetName
-    # when either is set. Chart-managed and default ESO modes create this name
-    # automatically when secret.existingSecret is empty.
+    ldapDomain: example.org
+    # -- Secret name consumed by the upstream OpenLDAP chart. This is the fixed
+    # target name for each credentials ownership mode. In existingSecret mode it
+    # must match secret.existingSecret; in externalSecret mode it must match
+    # secret.externalSecret.targetName when that value is set.
     existingSecret: openldap-credentials
 
   # The develop configuration intentionally permits anonymous HeLx LDAP binds. The

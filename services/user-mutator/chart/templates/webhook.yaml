@@ -1,13 +1,14 @@
 {{- include "user-mutator.validateTlsMode" . -}}
+{{- $generate := eq .Values.secret.mode "generate" -}}
 {{- $caBundle := "" -}}
 {{- $certs := dict -}}
-{{- if .Values.secret.generate.enabled -}}
+{{- if $generate -}}
   {{- $certs = include "user-mutator.webhookCertData" . | fromYaml -}}
   {{- $caBundle = get $certs "ca.crt" -}}
 {{- else -}}
   {{- $caBundle = default "" .Values.webhook.caBundle -}}
 {{- end -}}
-{{- if .Values.secret.generate.enabled }}
+{{- if $generate }}
 {{/*
 The chart-generated Secret and the MutatingWebhookConfiguration are rendered
 from this one file on purpose. Helm templates are pure functions with no
@@ -31,7 +32,7 @@ data:
 {{- end }}
 {{- if .Values.webhook.enabled }}
 {{- if not $caBundle }}
-  {{- fail "user-mutator: webhook.enabled requires a CA bundle; enable secret.generate.enabled, or set webhook.caBundle to the base64 CA that signed the serving certificate" -}}
+  {{- fail "user-mutator: webhook.enabled requires a CA bundle; set secret.mode to generate, or set webhook.caBundle to the base64 CA that signed the serving certificate" -}}
 {{- end }}
 {{- $namespaces := .Values.webhook.namespaces }}
 {{- if not $namespaces }}

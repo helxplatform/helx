@@ -111,7 +111,7 @@ deploy-webhook-server: key-cert-secret
 	# Chart consumers get those from the chart by default as of 2.0.0.
 	helm -n $(WEBHOOK_NAMESPACE) upgrade --install $(CHART_NAME) \
 	    --set "image.pullPolicy=IfNotPresent" --set "image.tag=$(VERSION)" \
-		--set "secret.generate.enabled=false" --set "webhook.enabled=false" \
+		--set "secret.mode=existingSecret" --set "webhook.enabled=false" \
 		--set "secret.existingSecret=$(SECRET)" $(HELM_INSTALL_ARG_1) $(HELM_INSTALL_ARG_2) \
 		./chart
 	@echo ""

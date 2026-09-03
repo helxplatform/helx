@@ -83,20 +83,25 @@ affinity: {}
 
 
 # Webhook TLS Secret contract. The chart generates the serving certificate by
-# default; set generate.enabled to false and pick another mode to opt out.
+# default. Set secret.mode to another ownership mode to use a caller-managed,
+# chart-managed, or ExternalSecret resource.
 secret:
-  # -- Name of a caller-managed TLS Secret. Point this at a Secret preserved
-  # from an earlier deployment to keep using it; the historical name was
-  # user-mutator-cert-tls. Mutually exclusive with secret.generate.enabled and
-  # secret.externalSecret.enabled, so selecting this mode means also setting
-  # secret.generate.enabled to false.
+  # -- Which owner writes the webhook TLS Secret: `generate` for a chart-
+  # generated certificate, `values` for a chart-managed Secret built from
+  # secret.values, `existingSecret` for a caller-managed Secret, or
+  # `externalSecret` for External Secrets.
+  mode: generate
+
+  # -- Name of a caller-managed TLS Secret. Set this only when secret.mode is
+  # existingSecret. The historical name was user-mutator-cert-tls.
   existingSecret: ""
 
-  # -- Plaintext values for the chart-managed TLS Secret. tls.crt and tls.key
-  # are required in managed mode; ca.crt is optional.
+  # -- Plaintext values for the chart-managed TLS Secret. Set these only when
+  # secret.mode is values. tls.crt and tls.key are required; ca.crt is optional.
   values: {}
 
-  # -- Configure an ExternalSecret to populate the webhook TLS Secret.
+  # -- Configure an ExternalSecret to populate the webhook TLS Secret. Set
+  # secret.mode to externalSecret when using this configuration.
   externalSecret:
     enabled: false
     # -- Optional ESO target Secret name. Defaults to <fullname>-tls.
@@ -107,31 +112,34 @@ secret:
       kind: SecretStore
     remoteRef: ""
 
-  # -- Fourth ownership mode: the chart generates a self-signed CA and serving
-  # certificate for the webhook. Mutually exclusive with existingSecret,
-  # values, and externalSecret. Requires secret.existingSecret: "". Generated
-  # material is persisted, so upgrades never rotate it out from under a
-  # MutatingWebhookConfiguration; rotate by deleting the Secret named
-  # <fullname>-tls and upgrading again.
+  # -- Generate a self-signed CA and serving certificate for the webhook when
+  # secret.mode is generate. Generated material is persisted, so upgrades never
+  # rotate it out from under a MutatingWebhookConfiguration; rotate by deleting
+  # the Secret named <fullname>-tls and upgrading again.
   generate:
-    enabled: true
     # -- Certificate lifetime. There is no automatic rotation, so this is long
     # by default.
     validityDays: 3650
 
 ldap:
   secret:
-    # -- Name of a caller-managed Secret containing the password key. Only
-    # rendered and mounted when config.features.ldap is enabled. Point this at
-    # a Secret preserved from an earlier deployment to keep using it; the
-    # historical name was user-mutator-ldap-password.
+    # -- Which owner writes the LDAP password Secret: `values` for a chart-
+    # managed Secret built from ldap.secret.values, `existingSecret` for a
+    # caller-managed Secret, or `externalSecret` for External Secrets.
+    mode: values
+
+    # -- Name of a caller-managed Secret containing the password key. Set this
+    # only when ldap.secret.mode is existingSecret. This Secret is rendered and
+    # mounted only when config.features.ldap is enabled; the historical name
+    # was user-mutator-ldap-password.
     existingSecret: ""
 
-    # -- Plaintext values for the chart-managed LDAP Secret. `password` is
-    # required in managed mode.
+    # -- Plaintext values for the chart-managed LDAP Secret. Set these only
+    # when ldap.secret.mode is values. `password` is required.
     values: {}
 
-    # -- Configure an ExternalSecret to populate the LDAP password Secret.
+    # -- Configure an ExternalSecret to populate the LDAP password Secret. Set
+    # ldap.secret.mode to externalSecret when using this configuration.
     externalSecret:
       enabled: false
       # -- Optional ESO target Secret name. Defaults to
@@ -151,8 +159,8 @@ ldap:
 #
 # To manage this object yourself, set enabled to false.
 webhook:
-  # -- Render the MutatingWebhookConfiguration. Requires a CA bundle, from
-  # either secret.generate.enabled or webhook.caBundle.
+  # -- Render the MutatingWebhookConfiguration. Requires a CA bundle from
+  # either secret.mode: generate or webhook.caBundle.
   enabled: true
 
   # -- Name of the configuration. Defaults to <fullname>-webhook-<namespace>.
@@ -168,7 +176,7 @@ webhook:
   namespaces: []
 
   # -- Base64 CA bundle that signed the serving certificate. Only used when
-  # secret.generate.enabled is false.
+  # secret.mode is not generate.
   caBundle: ""
 
   # -- Optional additional namespaceSelector matchLabels. Set this to
@@ -225,6 +233,7 @@ config:
 
   # config.secrets was removed in 2.0.0 and intentionally has no entry here.
   # Its absence lets the chart detect a caller-supplied map and fail, rather
-  # than ignoring a custom Secret name. Do not add it back. Move its cert entry
-  # to secret.existingSecret, its ldap-password entry to
-  # ldap.secret.existingSecret, and anything else to config.additionalSecrets.
+  # than ignoring a custom Secret name. Do not add it back. Use secret.mode:
+  # existingSecret with secret.existingSecret for its cert entry, and
+  # ldap.secret.mode: existingSecret with ldap.secret.existingSecret for its
+  # ldap-password entry; move anything else to config.additionalSecrets.

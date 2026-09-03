@@ -72,11 +72,18 @@ Name of the chart-managed webhook TLS Secret.
 Name of the webhook TLS Secret consumed by the Deployment.
 */}}
 {{- define "user-mutator.tlsSecretName" -}}
+{{- include "user-mutator.validateTlsMode" . -}}
+{{- if eq .Values.secret.mode "generate" -}}
+{{- include "user-mutator.tlsManagedSecretName" . -}}
+{{- else -}}
 {{- include "helx-common.secret.name.v1" (dict
+  "mode" .Values.secret.mode
+  "secretValueBlockPath" "secret"
   "defaultName" (include "user-mutator.tlsManagedSecretName" .)
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret
 ) -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -91,6 +98,8 @@ Name of the LDAP password Secret consumed by the Deployment.
 */}}
 {{- define "user-mutator.ldapSecretName" -}}
 {{- include "helx-common.secret.name.v1" (dict
+  "mode" .Values.ldap.secret.mode
+  "secretValueBlockPath" "ldap.secret"
   "defaultName" (include "user-mutator.ldapManagedSecretName" .)
   "existingSecret" .Values.ldap.secret.existingSecret
   "externalSecret" .Values.ldap.secret.externalSecret
@@ -105,12 +114,13 @@ caller-managed entries cannot silently replace them.
 config.secrets was removed in chart 2.0.0. It is deliberately absent from
 values.yaml, so hasKey detects a caller-supplied map and fails rather than
 ignoring it: silently dropping a custom Secret name would leave the webhook
-serving a certificate the caller never chose. Point secret.existingSecret and
-ldap.secret.existingSecret at those Secrets instead.
+serving a certificate the caller never chose. Select existingSecret mode and
+point secret.existingSecret or ldap.secret.existingSecret at those Secrets
+instead.
 */}}
 {{- define "user-mutator.effectiveSecretNames" -}}
 {{- if hasKey .Values.config "secrets" -}}
-  {{- fail "user-mutator: config.secrets was removed in chart 2.0.0; move its cert entry to secret.existingSecret, its ldap-password entry to ldap.secret.existingSecret, and any other entry to config.additionalSecrets" -}}
+  {{- fail "user-mutator: config.secrets is unsupported; use secret.mode: existingSecret with secret.existingSecret for its cert entry, ldap.secret.mode: existingSecret with ldap.secret.existingSecret for its ldap-password entry, and config.additionalSecrets for other entries" -}}
 {{- end -}}
 {{- $additionalSecrets := default (dict) .Values.config.additionalSecrets -}}
 {{- range $reservedKey := list "cert" "ldap-password" -}}
@@ -138,21 +148,32 @@ from colliding. Set webhook.name to adopt an existing configuration.
 {{- end -}}
 
 {{/*
-Validate that exactly one webhook TLS ownership mode is selected. generate is a
-fourth mode alongside the three helx-common contracts, so it has to be checked
-here rather than by the library.
+Validate the webhook TLS ownership mode. generate is chart-specific, while the
+other modes use the shared helx-common contract.
 */}}
 {{- define "user-mutator.validateTlsMode" -}}
-{{- if .Values.secret.generate.enabled -}}
+{{- $mode := default "" .Values.secret.mode -}}
+{{- $modes := list "generate" "values" "existingSecret" "externalSecret" -}}
+{{- if not (has $mode $modes) -}}
+  {{- fail (printf "user-mutator: secret.mode %q is not a mode; use one of: %s" $mode (join ", " $modes)) -}}
+{{- end -}}
+{{- if eq $mode "generate" -}}
   {{- if .Values.secret.existingSecret -}}
-    {{- fail "user-mutator: secret.generate.enabled and secret.existingSecret are mutually exclusive; set secret.existingSecret to \"\" to let the chart generate the webhook certificate" -}}
+    {{- fail "user-mutator: secret.mode generate cannot be used with secret.existingSecret" -}}
   {{- end -}}
   {{- if .Values.secret.externalSecret.enabled -}}
-    {{- fail "user-mutator: secret.generate.enabled and secret.externalSecret.enabled are mutually exclusive" -}}
+    {{- fail "user-mutator: secret.mode generate cannot be used with secret.externalSecret.enabled" -}}
   {{- end -}}
   {{- if .Values.secret.values -}}
-    {{- fail "user-mutator: secret.generate.enabled ignores secret.values; clear one of them" -}}
+    {{- fail "user-mutator: secret.mode generate cannot be used with secret.values" -}}
   {{- end -}}
+{{- else -}}
+  {{- $ordinaryMode := include "helx-common.secret.mode.v1" (dict
+    "mode" $mode
+    "existingSecret" .Values.secret.existingSecret
+    "externalSecret" .Values.secret.externalSecret
+    "secretValueBlockPath" "secret"
+  ) -}}
 {{- end -}}
 {{- end -}}
 

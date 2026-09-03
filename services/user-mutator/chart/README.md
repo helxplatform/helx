@@ -1,23 +1,37 @@
 # user-mutator Helm chart
 
-Chart `2.0.0` uses the `helx-common` `0.1.1` library for its webhook TLS and optional LDAP password Secret contracts.
+Chart `2.0.1` uses the `helx-common` `0.2.0` library for its webhook TLS and optional LDAP password Secret contracts.
 
 ## Secret modes
 
-Each known contract supports exactly one of these ownership modes:
+Each known contract selects exactly one ownership mode. Webhook TLS uses
+`secret.mode` and supports `generate`, `existingSecret`, `values`, and
+`externalSecret`. LDAP credentials use `ldap.secret.mode` and support
+`existingSecret`, `values`, and `externalSecret`.
 
-0. **Chart-generated** (webhook TLS only, and the default): the chart generates the CA and serving certificate. See below.
-1. **Existing Secret**: set `existingSecret` to the Secret's name. The chart references it but does not manage it.
-2. **Chart-managed Secret**: set `existingSecret: ""` and supply plaintext entries under `values`. Persisted target data is retained on upgrades. Historical Secrets are caller-owned and are not adopted automatically.
-3. **External Secrets Operator**: set `existingSecret: ""`, enable `externalSecret.enabled`, and configure `remoteRef` plus `secretStoreRef`. `existingSecret` and ExternalSecret mode are mutually exclusive.
+0. **Chart-generated** (webhook TLS only, and the default): set
+   `secret.mode: generate` and let the chart generate the CA and serving
+   certificate. See below.
+1. **Existing Secret**: set the relevant `mode` to `existingSecret` and name
+   the Secret in `existingSecret`. The chart references it but does not manage
+   it.
+2. **Chart-managed Secret**: set the relevant `mode` to `values` and supply
+   plaintext entries under `values`. Persisted target data is retained on
+   upgrades.
+3. **External Secrets Operator**: set the relevant `mode` to `externalSecret`
+   and configure `remoteRef` plus `secretStoreRef`.
 
 ### Webhook TLS
 
-The top-level `secret` contract defaults to `generate`, described below. Managed, ESO, and generated modes target `<fullname>-tls` with type `kubernetes.io/tls`. Keys `tls.crt` and `tls.key` are required; `ca.crt` is optional. The historical Secret name was `user-mutator-cert-tls`; set `secret.existingSecret` to keep referencing it.
+The top-level `secret` contract defaults to `generate`. All modes target
+`<fullname>-tls` with type `kubernetes.io/tls`. In `values` mode, `tls.crt` and
+`tls.key` are required and `ca.crt` is optional. The historical Secret name was
+`user-mutator-cert-tls`; use `secret.mode: existingSecret` to keep referencing
+it.
 
 ```yaml
 secret:
-  existingSecret: ""
+  mode: values
   values:
     tls.crt: replace-me
     tls.key: replace-me
@@ -26,7 +40,12 @@ secret:
 
 ### LDAP password
 
-The `ldap.secret` contract is rendered and mounted only when `config.features.ldap` is enabled. Managed and default ESO modes target `<fullname>-ldap-password` and require the `password` key. Enabling LDAP without selecting a mode fails to render, since there is then no source for the password. To keep a Secret preserved from an earlier deployment, name it in `existingSecret`; the historical name was `user-mutator-ldap-password`.
+The `ldap.secret` contract is rendered and mounted only when
+`config.features.ldap` is enabled. All modes target `<fullname>-ldap-password`.
+In `values` mode, the Secret requires the `password` key. To keep a Secret
+preserved from an earlier deployment, set `ldap.secret.mode: existingSecret` and
+name it in `ldap.secret.existingSecret`; the historical name was
+`user-mutator-ldap-password`.
 
 ```yaml
 config:
@@ -39,9 +58,7 @@ config:
       group_base_dn: ou=groups,dc=example,dc=org
 ldap:
   secret:
-    # either name a Secret you already have...
-    existingSecret: user-mutator-ldap-password
-    # ...or let the chart build one
+    mode: values
     values:
       password: replace-me
 ```
@@ -54,17 +71,19 @@ To manage the certificate and the configuration yourself instead, opt out explic
 
 ```yaml
 secret:
-  generate:
-    enabled: false
+  mode: existingSecret
 webhook:
   enabled: false
 ```
 
-Turning `secret.generate.enabled` off leaves the three ordinary ownership modes, so name the Secret you want in `secret.existingSecret`, supply `secret.values`, or enable `secret.externalSecret`. There is no implicit fallback to a historical name.
+To use a non-generated TLS Secret, set `secret.mode` to `existingSecret`,
+`values`, or `externalSecret`. Configure the corresponding Secret settings for
+the selected mode.
 
 ### Certificate lifecycle
 
-`secret.generate` is a fourth ownership mode alongside `existingSecret`, `values`, and `externalSecret`, is mutually exclusive with all three, and is the default. The chart generates a self-signed CA and a serving certificate whose SANs cover `<fullname>`, `<fullname>.<namespace>`, `<fullname>.<namespace>.svc`, and `<fullname>.<namespace>.svc.cluster.local`.
+`secret.mode: generate` is the default webhook TLS ownership mode and is
+mutually exclusive with `existingSecret`, `values`, and `externalSecret`. The chart generates a self-signed CA and a serving certificate whose SANs cover `<fullname>`, `<fullname>.<namespace>`, `<fullname>.<namespace>.svc`, and `<fullname>.<namespace>.svc.cluster.local`.
 
 Generated material is looked up and reused on every render, so upgrades never rotate the certificate out from under a webhook configuration that already carries the matching CA bundle. The Secret also carries `helm.sh/resource-policy: keep`, so it survives an uninstall and is picked back up by a reinstall. To rotate deliberately, delete the Secret named `<fullname>-tls` and upgrade.
 
@@ -74,7 +93,10 @@ The Secret and the configuration are rendered from a single template file. Helm 
 
 `lookup` returns nothing during `helm template`, `helm lint`, and client-side dry runs, so rendering the chart offline twice produces two different certificates. That output is only ever inspected, never applied.
 
-To render the configuration against a certificate the chart does not manage, leave `secret.generate.enabled` false and set `webhook.caBundle` to the base64 CA that signed it. Rendering fails if `webhook.enabled` is set with no CA bundle available from either source.
+To render the configuration against a certificate the chart does not manage,
+select a non-generated `secret.mode` and set `webhook.caBundle` to the base64
+CA that signed it. Rendering fails if `webhook.enabled` is set with no CA bundle
+available from either source.
 
 ### Namespace selection
 
@@ -118,8 +140,8 @@ config:
 
 | Old entry | Replacement |
 | --- | --- |
-| `config.secrets.cert` | `secret.existingSecret` |
-| `config.secrets.ldap-password` | `ldap.secret.existingSecret` |
+| `config.secrets.cert` | `secret.mode: existingSecret` with `secret.existingSecret` |
+| `config.secrets.ldap-password` | `ldap.secret.mode: existingSecret` with `ldap.secret.existingSecret` |
 | anything else | `config.additionalSecrets` |
 
 `config.secrets` is intentionally absent from `values.yaml`; that absence is what lets the chart tell a caller-supplied map from a chart default, so re-adding it would break the check.

@@ -1,0 +1,6 @@
+# CI-only values for the standalone ldap-sync chart lint. Helm lint does not
+# contact a cluster, so these values exercise the caller-managed LDAP
+# credentials Secret mode without putting synthetic passwords in manifests.
+secret:
+  mode: existingSecret
+  existingSecret: ldap-sync-lint-credentials

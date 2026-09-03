@@ -79,20 +79,25 @@ affinity: {}
 
 loglevel: "info"
 
-# LDAP bind credential Secret contract. Select exactly one ownership mode:
-# existingSecret, secret.values, or secret.externalSecret.enabled.
+# LDAP bind credential Secret contract.
 secret:
+  # -- Which owner writes the LDAP credential Secret: `values` for a
+  # chart-managed Secret built from `secret.values`, `existingSecret` for a
+  # caller-managed Secret, or `externalSecret` for External Secrets.
+  mode: values
+
   # -- Name of a caller-managed Secret containing SOURCE_BIND_PASSWORD and
-  # TARGET_BIND_PASSWORD. When set, the chart does not create or manage it.
+  # TARGET_BIND_PASSWORD. Set this only when `secret.mode` is `existingSecret`.
   existingSecret: ""
 
   # -- Key/value pairs used to create the chart-managed LDAP credential Secret.
-  # Required keys are SOURCE_BIND_PASSWORD and TARGET_BIND_PASSWORD.
-  # Values are mounted as files and are never rendered into the ConfigMap.
+  # Set these only when `secret.mode` is `values`. Required keys are
+  # SOURCE_BIND_PASSWORD and TARGET_BIND_PASSWORD. Values are mounted as files
+  # and are never rendered into the ConfigMap.
   values: {}
 
   # -- Configure an ExternalSecret to populate the LDAP credential Secret.
-  # This is mutually exclusive with secret.existingSecret.
+  # Set `secret.mode` to `externalSecret` when using this configuration.
   externalSecret:
     enabled: false
     # -- Optional ESO target Secret name. Defaults to <fullname>-secrets.
@@ -109,8 +114,8 @@ secret:
     enabled: false
 
 # Reconcile the initial search through the ldap-sync API after the Service is ready.
-# Bind credentials should be supplied through secret.existingSecret,
-# secret.values, or External Secrets rather than committed to this file.
+# Select the LDAP credential Secret owner with secret.mode. Do not commit bind
+# credentials to this file.
 searchBootstrap:
   enabled: true
   # -- The LDAP search ID to use for the bootstrap search. e.g. get-groups
@@ -159,14 +164,16 @@ config:
   source:
     url: ""
     bindDN: ""
-    # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
+    # -- Deprecated compatibility input used only when secret.mode is values.
+    # Use secret.values.SOURCE_BIND_PASSWORD instead.
     bindPassword: ""
     baseDN: ""
   # -- Configuration for the LDAP target server
   target:
     url: "ldap://openldap/"
     bindDN: "cn=admin,dc=example,dc=org"
-    # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
+    # -- Deprecated compatibility input used only when secret.mode is values.
+    # Use secret.values.TARGET_BIND_PASSWORD instead.
     bindPassword: ""
     baseDN: "dc=example,dc=org"
   plugins:

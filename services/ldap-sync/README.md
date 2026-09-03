@@ -123,6 +123,7 @@ member users.
    ```bash
    helm upgrade --install ldap-sync ./chart \
      --set config.source.url="ldap://source:389" \
+     --set secret.mode=values \
      --set secret.values.SOURCE_BIND_PASSWORD="source-password" \
      --set config.target.url="ldap://target:389" \
      --set secret.values.TARGET_BIND_PASSWORD="target-password" \
@@ -150,8 +151,8 @@ searches manually.
 
 The default chart values also configure the UNC source, the example OpenLDAP
 target, the `unc-group-x` hook, and the `azurefile` PVC storage class. The
-bind credentials should be supplied through `secret.existingSecret`,
-`secret.values`, or External Secrets rather than committed to `values.yaml`.
+select the LDAP credential Secret owner with `secret.mode` rather than
+committing bind credentials to `values.yaml`.
 
 ### LDAP Credential Secret Modes
 
@@ -164,14 +165,14 @@ contain these keys:
 
 Choose one mode:
 
-1. **Existing Secret**: set `secret.existingSecret` to a Secret managed by the
-   caller. The chart does not create or modify that Secret.
-2. **Chart values**: leave `secret.existingSecret` empty and set both keys under
+1. **Existing Secret**: set `secret.mode: existingSecret` and name the
+   caller-managed Secret in `secret.existingSecret`. The chart does not create
+   or modify that Secret.
+2. **Chart values**: set `secret.mode: values` and provide both keys under
    `secret.values`. The chart creates `<release>-secrets` and mounts the values
    as files.
-3. **External Secrets Operator**: leave `secret.existingSecret` empty, set
-   `secret.externalSecret.enabled: true`, provide `remoteRef` and
-   `secretStoreRef`, and let ESO create the target Secret.
+3. **External Secrets Operator**: set `secret.mode: externalSecret`, provide
+   `remoteRef` and `secretStoreRef`, and let ESO create the target Secret.
 
 The generated application config references the mounted files at
 `/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD` and
@@ -701,8 +702,9 @@ config:
     baseDN: "dc=example,dc=org"
   hooks: []
 
-# Select exactly one LDAP credential ownership mode.
+# Select the LDAP credential Secret owner.
 secret:
+  mode: values
   existingSecret: ""
   values:
     SOURCE_BIND_PASSWORD: "source-password"

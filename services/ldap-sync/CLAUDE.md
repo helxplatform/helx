@@ -200,6 +200,7 @@ helm dependency update
 # Install or upgrade
 helm upgrade --install ldap-sync . \
   --set config.source.url="ldap://source:389" \
+  --set secret.mode=values \
   --set secret.values.SOURCE_BIND_PASSWORD="source-password" \
   --set config.target.url="ldap://target:389" \
   --set secret.values.TARGET_BIND_PASSWORD="target-password" \
@@ -209,9 +210,9 @@ helm upgrade --install ldap-sync . \
 **LDAP credential modes**: The chart requires `SOURCE_BIND_PASSWORD` and
 `TARGET_BIND_PASSWORD` in the Secret selected by one of these modes:
 
-- `secret.existingSecret` for a caller-managed Secret
-- `secret.values` for a chart-managed Secret
-- `secret.externalSecret` for an External Secrets Operator-managed Secret
+- `secret.mode: existingSecret` with `secret.existingSecret` for a caller-managed Secret
+- `secret.mode: values` with `secret.values` for a chart-managed Secret
+- `secret.mode: externalSecret` with `secret.externalSecret` for an External Secrets Operator-managed Secret
 
 The application reads the selected LDAP Secret from
 `/etc/ldap-sync/ldap-secrets/`. The PostgreSQL password is a separate

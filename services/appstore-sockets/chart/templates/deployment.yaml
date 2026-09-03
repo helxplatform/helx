@@ -40,7 +40,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: PUBLISHER_SECRET
-                  name: {{ include "appstore-sockets.fullname" . }}
+                  name: {{ include "appstore-sockets.secretName" . }}
             - name: APPSTORE_HOST
               valueFrom:
                 configMapKeyRef:
@@ -60,7 +60,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   key: PUBLISHER_SECRET
-                  name: {{ include "appstore-sockets.fullname" . }}
+                  name: {{ include "appstore-sockets.secretName" . }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

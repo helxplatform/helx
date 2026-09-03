@@ -14,6 +14,38 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
+secret:
+  # -- Which owner writes this Secret: `values` for the chart-managed Secret
+  # built from `secret.values`, `existingSecret` for one you create yourself, or
+  # `externalSecret` for External Secrets. Declared rather than inferred, so
+  # selecting a mode also means clearing the fields belonging to the others.
+  mode: values
+
+  # -- Name of a Secret containing PUBLISHER_SECRET. When set, the chart does
+  # not create or manage a Secret.
+  existingSecret: ""
+
+  # -- Configure an ExternalSecret to populate the appstore-sockets Secret.
+  # This is mutually exclusive with secret.existingSecret.
+  externalSecret:
+    enabled: false
+    # -- Optional ESO target Secret name. Defaults to the chart fullname.
+    targetName: ""
+    refreshInterval: 1h
+    secretStoreRef:
+      name: vault
+      kind: SecretStore
+    remoteRef: ""
+
+  # -- Key/value pairs used to create the chart-managed Secret. Required key:
+  #   PUBLISHER_SECRET: shared secret used by the server and monitoring client.
+  # Argo CD users should provide a stable value here or select an external mode.
+  values: {}
+
+  migration:
+    # -- Appstore-sockets has no differently named legacy Secret to migrate.
+    enabled: false
+
 requirePublishSecret: true
 # If running outside helx-chart, you will need to override this value.
 appstoreServiceNameOverride: ""

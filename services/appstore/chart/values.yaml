@@ -90,7 +90,7 @@ secret:
   #   PG_DB_HOST: derived from the release name and PostgreSQL service name
   #   PG_DB_PORT: derived from db.port, normally "5432"
   #   POSTGRES_ENABLED: "true" when postgresql.enabled is true, otherwise "false"
-  # 
+  #
   #   --------
   #
   # Required for a normal appstore deployment:
@@ -296,17 +296,22 @@ irodsUnbranded:
 atlas:
   # -- Disabling will turn off the creation of secrets/configmaps for Atlas
   enabled: false
-  # The `atlas-env` Secret keeps that exact name because the launched Atlas app
-  # spec references it, so no mode below takes a Secret name.
+  # The launched Atlas app spec requires the Secret to be named `atlas-env`.
   secret:
-    # -- Which owner writes this Secret: `values` for the chart-managed Secret
-    # built from the keys below, `existingSecret` for an `atlas-env` that
-    # already exists under someone else's ownership, or `externalSecret` for
-    # External Secrets. The chart writes a Secret only in `values` mode; the
-    # other two leave the existing `atlas-env` untouched.
+    # -- Selects who manages `atlas-env`: `values` lets the chart create it
+    # from the keys below, `existingSecret` uses an externally managed Secret,
+    # and `externalSecret` delegates it to External Secrets.
     mode: values
-    # -- Key/value pairs merged over the values derived from `apps`. Chart
-    # values are authoritative for every key in this Secret.
+    # -- Key/value pairs for `atlas-env`. Provide Atlas and Flyway database
+    # connection settings here; each key becomes an environment variable in
+    # the launched Atlas application.
+    # Required values for `atlas-env`:
+    #  DATASOURCE_URL: -- Atlas database URL
+    #  DATASOURCE_USERNAME: -- Atlas database username
+    #  DATASOURCE_PASSWORD: -- Atlas database password
+    #  FLYWAY_DATASOURCE_URL: -- Flyway database URL
+    #  FLYWAY_DATASOURCE_USERNAME: -- Flyway database username
+    #  FLYWAY_DATASOURCE_PASSWORD: -- Flyway database password
     values: {}
     # -- Configure an ExternalSecret that populates `atlas-env`. Mutually
     # exclusive with the chart-managed keys above.
@@ -326,20 +331,25 @@ octave:
 pgadmin:
   # -- Disabling will turn off the creation of secrets/configmaps for PgAdmin
   enabled: true
-  # The `pgadmin-env` Secret keeps that exact name because the launched pgAdmin
-  # app spec references it, so no mode below takes a Secret name.
+  # The launched pgAdmin app spec requires the Secret to be named `pgadmin-env`.
   secret:
-    # -- Which owner writes this Secret: `values` for the chart-managed Secret
-    # built from the keys below, `existingSecret` for a `pgadmin-env` that
-    # already exists under someone else's ownership, or `externalSecret` for
-    # External Secrets. The chart writes a Secret only in `values` mode; the
-    # other two leave the existing `pgadmin-env` untouched.
+    # -- Selects who manages `pgadmin-env`: `values` lets the chart create it
+    # from the keys below, `existingSecret` uses an already created Secret,
+    # and `externalSecret` delegates it to External Secrets.
     mode: values
-    # -- Key/value pairs for the chart-managed `pgadmin-env` Secret. Set
-    # `PGADMIN_DEFAULT_PASSWORD` here to pin the password; otherwise it is
-    # generated on first install and then preserved from the live Secret, which
-    # only a cluster-aware Helm upgrade can read. Client-side renderers such as
-    # Argo CD must set it explicitly or use `externalSecret`.
+    # -- Key/value pairs for `pgadmin-env`; each key becomes an environment
+    # variable in the launched pgAdmin application.
+    # Required values for `pgadmin-env`:
+    #  PGADMIN_DEFAULT_EMAIL: -- pgAdmin user email
+    #  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients
+    #  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container
+    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port
+    # Optional values for `pgadmin-env`:
+    #  PGADMIN_CONFIG_SERVER_MODE: -- defaults to "False"
+    #  PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: -- defaults to "False"
+    #  PGADMIN_DEFAULT_PASSWORD: -- generated on install and preserved during
+    #    cluster-aware upgrades; set explicitly for client-side renderers such
+    #    as Argo CD, or use `externalSecret`.
     values: {}
     # -- Configure an ExternalSecret that populates `pgadmin-env`. Mutually
     # exclusive with the chart-managed keys above.
@@ -356,26 +366,12 @@ webtop:
 
 apps:
   DICOMGH_GOOGLE_CLIENT_ID: ""
-  DATASOURCE_CONNECTION_URL: ""
-  DATASOURCE_PASSWORD: ""
-  FLYWAY_DATASOURCE_CONNECTION_URL: ""
-  FLYWAY_DATASOURCE_PASSWORD: ""
-  DATASOURCE_USERNAME: "ohdsi"
-  FLYWAY_DATASOURCE_USERNAME: "ohdsi"
   # -- PUID variable in webtop specifies the UID to switch the user to after
   # initialization.
   WEBTOP_PUID: "1000"
   # -- PGID variable in webtop specifies the GID to switch the user to after
   # initialization.
   WEBTOP_PGID: "1000"
-  # -- Specify email for pgAdmin user.
-  PGADMIN_EMAIL: "user@domain.com"
-  # -- Specify the database hostname used for pgAdmin's clients to connect to.
-  # If specified this replaces 'mimic-postgresql' in the pgadmin4.db
-  # configuration file.
-  HELX_DB_HOSTNAME: ""
-  PGADMIN_DISABLE_POSTFIX: "true"
-  PGADMIN_LISTEN_PORT: "80"
 
 replicaCount: 1
 

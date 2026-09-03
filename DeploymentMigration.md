@@ -34,7 +34,7 @@ does not own, so either set `secret.externalSecret.targetName` to a new name, or
 delete the retained Secret after the backend is populated and verified.
 
 The appstore `atlas-env` Secret is deliberately exempt from retention because
-every key in it is derived from chart values.
+all of its keys come from `appstore.atlas.secret.values`.
 
 ## Appstore
 
@@ -136,23 +136,27 @@ Django restart required by that rotation.
 
 `pgadmin-env` is a separate, fixed-name Secret; it is not the appstore primary
 Secret and must not be configured as `appstore.secret.existingSecret`. When
-`appstore.pgadmin.enabled` is true, the current `pgadmin-secrets.yaml` renders
-it through the shared Secret helper with `pgadmin-env` as its exact target name.
-The name is fixed because the launched pgAdmin app spec references it, so this
-Secret has no `existingSecret` mode. To own it outside the chart, create it
-under the same name and set `appstore.pgadmin.secret.create: false`.
+`appstore.pgadmin.enabled` is true, `pgadmin-secrets.yaml` renders it through
+the shared Secret helper with `pgadmin-env` as its exact target name. The
+launched pgAdmin app spec requires that name.
 
-On an upgrade, the helper looks up the existing `pgadmin-env` Secret and
-preserves `PGADMIN_DEFAULT_PASSWORD` from it, so the old pgAdmin password is not
+Set `appstore.pgadmin.secret.mode` to select the owner:
+
+- `values` creates `pgadmin-env` from `appstore.pgadmin.secret.values`.
+- `existingSecret` uses an externally managed Secret already named
+  `pgadmin-env`.
+- `externalSecret` creates an ExternalSecret that populates `pgadmin-env`.
+
+In `values` mode, the helper looks up an existing `pgadmin-env` Secret during an
+upgrade and preserves `PGADMIN_DEFAULT_PASSWORD`, so the old password is not
 replaced with a new random value. Keep `pgadmin-env` in the namespace and verify
-that `PGADMIN_DEFAULT_PASSWORD` exists before upgrading. Do not delete or rename
-it as part of the appstore primary Secret migration.
-
-The password is the only preserved key. The remaining entries
-(`PGADMIN_DEFAULT_EMAIL`, `HELX_DB_HOSTNAME`, `PGADMIN_LISTEN_PORT`, and the
-`PGADMIN_CONFIG_*` flags) are plain configuration and continue to track
-`appstore.apps.*` on every upgrade. Changing `apps.PGADMIN_EMAIL` or
-`apps.HELX_DB_HOSTNAME` after the migration therefore takes effect normally.
+that `PGADMIN_DEFAULT_PASSWORD` exists before upgrading. The password is the
+only preserved key; all other pgAdmin environment settings, including
+`PGADMIN_DEFAULT_EMAIL`, `HELX_DB_HOSTNAME`, and `PGADMIN_LISTEN_PORT`, come
+from `appstore.pgadmin.secret.values` on every upgrade. The optional
+`PGADMIN_CONFIG_SERVER_MODE` and `PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED`
+settings default to `"False"` in chart-managed mode and can be overridden in
+the same values block.
 
 This behavior is independent of `appstore.secret.migration.enabled`; the
 `pgadmin-env` lookup is handled by its own template. The generated password is
@@ -162,9 +166,9 @@ client-side renderer, set
 the Secret through `appstore.pgadmin.secret.externalSecret`.
 
 `atlas-env` follows the same fixed-name pattern through
-`appstore.atlas.secret`, with one difference: every one of its keys is derived
-from `appstore.apps.*`, so none is preserved from the live Secret and chart
-values stay authoritative.
+`appstore.atlas.secret`. In `values` mode, its complete contents come from
+`appstore.atlas.secret.values`; no keys are preserved from the live Secret, so
+those values remain authoritative.
 
 The remaining auxiliary Secrets are not part of the appstore primary Secret
 migration:

@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 5.1.9](https://img.shields.io/badge/Version-5.1.9-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.4.2](https://img.shields.io/badge/AppVersion-4.4.2-informational?style=flat-square)
+![Version: 6.0.0](https://img.shields.io/badge/Version-6.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 4.4.2](https://img.shields.io/badge/AppVersion-4.4.2-informational?style=flat-square)
 
 ## CI/CD
 
@@ -18,24 +18,14 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | SET_BUILD_ENV_FROM_FILE | bool | `false` | Set environment variables from a file. |
 | affinity | object | `{}` |  |
 | ambassador.flag | bool | `true` | register appstore with ambassador flag: <True or False> |
-| apps.DATASOURCE_CONNECTION_URL | string | `""` |  |
-| apps.DATASOURCE_PASSWORD | string | `""` |  |
-| apps.DATASOURCE_USERNAME | string | `"ohdsi"` |  |
 | apps.DICOMGH_GOOGLE_CLIENT_ID | string | `""` |  |
-| apps.FLYWAY_DATASOURCE_CONNECTION_URL | string | `""` |  |
-| apps.FLYWAY_DATASOURCE_PASSWORD | string | `""` |  |
-| apps.FLYWAY_DATASOURCE_USERNAME | string | `"ohdsi"` |  |
-| apps.HELX_DB_HOSTNAME | string | `""` | Specify the database hostname used for pgAdmin's clients to connect to. If specified this replaces 'mimic-postgresql' in the pgadmin4.db configuration file. |
-| apps.PGADMIN_DISABLE_POSTFIX | string | `"true"` |  |
-| apps.PGADMIN_EMAIL | string | `"user@domain.com"` | Specify email for pgAdmin user. |
-| apps.PGADMIN_LISTEN_PORT | string | `"80"` |  |
 | apps.WEBTOP_PGID | string | `"1000"` | PGID variable in webtop specifies the GID to switch the user to after initialization. |
 | apps.WEBTOP_PUID | string | `"1000"` | PUID variable in webtop specifies the UID to switch the user to after initialization. |
 | appstoreEntrypointArgs | string | `"make start"` | Allow for a custom entrypoint command via the values file. |
 | atlas.enabled | bool | `false` | Disabling will turn off the creation of secrets/configmaps for Atlas |
 | atlas.secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"}}` | Configure an ExternalSecret that populates `atlas-env`. Mutually exclusive with the chart-managed keys above. |
-| atlas.secret.mode | string | `"values"` | Which owner writes this Secret: `values` for the chart-managed Secret built from the keys below, `existingSecret` for an `atlas-env` that already exists under someone else's ownership, or `externalSecret` for External Secrets. The chart writes a Secret only in `values` mode; the other two leave the existing `atlas-env` untouched. |
-| atlas.secret.values | object | `{}` | Key/value pairs merged over the values derived from `apps`. Chart values are authoritative for every key in this Secret. |
+| atlas.secret.mode | string | `"values"` | Selects who manages `atlas-env`: `values` lets the chart create it from the keys below, `existingSecret` uses an externally managed Secret, and `externalSecret` delegates it to External Secrets. |
+| atlas.secret.values | object | `{}` | Key/value pairs for `atlas-env`. Provide Atlas and Flyway database connection settings here; each key becomes an environment variable in the launched Atlas application. Required values for `atlas-env`:  DATASOURCE_URL: -- Atlas database URL  DATASOURCE_USERNAME: -- Atlas database username  DATASOURCE_PASSWORD: -- Atlas database password  FLYWAY_DATASOURCE_URL: -- Flyway database URL  FLYWAY_DATASOURCE_USERNAME: -- Flyway database username  FLYWAY_DATASOURCE_PASSWORD: -- Flyway database password |
 | db | object | `{"name":"appstore","port":5432}` | appstore database settings |
 | debug | string | `""` |  |
 | django.ALLOW_DJANGO_LOGIN | string | `""` | show Django log in fields (true | false) |
@@ -85,8 +75,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | octave.enabled | bool | `false` | Disabling will turn off the creation of secrets/configmaps for Octave |
 | pgadmin.enabled | bool | `true` | Disabling will turn off the creation of secrets/configmaps for PgAdmin |
 | pgadmin.secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"}}` | Configure an ExternalSecret that populates `pgadmin-env`. Mutually exclusive with the chart-managed keys above. |
-| pgadmin.secret.mode | string | `"values"` | Which owner writes this Secret: `values` for the chart-managed Secret built from the keys below, `existingSecret` for a `pgadmin-env` that already exists under someone else's ownership, or `externalSecret` for External Secrets. The chart writes a Secret only in `values` mode; the other two leave the existing `pgadmin-env` untouched. |
-| pgadmin.secret.values | object | `{}` | Key/value pairs for the chart-managed `pgadmin-env` Secret. Set `PGADMIN_DEFAULT_PASSWORD` here to pin the password; otherwise it is generated on first install and then preserved from the live Secret, which only a cluster-aware Helm upgrade can read. Client-side renderers such as Argo CD must set it explicitly or use `externalSecret`. |
+| pgadmin.secret.mode | string | `"values"` | Selects who manages `pgadmin-env`: `values` lets the chart create it from the keys below, `existingSecret` uses an already created Secret, and `externalSecret` delegates it to External Secrets. |
+| pgadmin.secret.values | object | `{}` | Key/value pairs for `pgadmin-env`; each key becomes an environment variable in the launched pgAdmin application. Required values for `pgadmin-env`:  PGADMIN_DEFAULT_EMAIL: -- pgAdmin user email  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container  PGADMIN_LISTEN_PORT: -- pgAdmin listen port Optional values for `pgadmin-env`:  PGADMIN_CONFIG_SERVER_MODE: -- defaults to "False"  PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: -- defaults to "False"  PGADMIN_DEFAULT_PASSWORD: -- generated on install and preserved during    cluster-aware upgrades; set explicitly for client-side renderers such    as Argo CD, or use `externalSecret`. |
 | podAnnotations | object | `{}` |  |
 | podSecurityContext | object | `{}` |  |
 | postgresql | object | `{"audit":{"logConnections":true,"logHostname":true},"enabled":true,"global":{"postgresql":{"auth":{"database":"appstore-oauth","username":"renci"}}},"networkPolicyEnabled":true,"persistence":{"existingClaim":"appstore-postgresql-pvc","storageClass":null},"primary":{"labels":{"np-label":"appstore-db"},"podLabels":{"np-label":"appstore-db"}},"volumePermissions":{"enabled":true}}` | postgresql settings |

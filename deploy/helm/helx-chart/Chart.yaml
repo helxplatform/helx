@@ -37,7 +37,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: helx-ldap
     condition: helx-ldap.enabled
-    version: "0.1.6"
+    version: "0.2.0"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ldap-sync
     condition: ldap-sync.enabled

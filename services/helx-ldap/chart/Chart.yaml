@@ -3,7 +3,7 @@ name: helx-ldap
 description: HeLx LDAP deployment and configuration
 
 type: application
-version: 0.1.6
+version: 0.2.0
 appVersion: "2.6.9"
 
 # OpenLDAP remains owned by the upstream chart. This chart owns only the

@@ -15,6 +15,12 @@ nameOverride: ""
 fullnameOverride: ""
 
 secret:
+  # -- Which owner writes this Secret: `values` for the chart-managed Secret
+  # built from `secret.values`, `existingSecret` for one you create yourself, or
+  # `externalSecret` for External Secrets. Declared rather than inferred, so
+  # selecting a mode also means clearing the fields belonging to the others.
+  mode: values
+
   # -- Name of a Secret containing PUBLISHER_SECRET. When set, the chart does
   # not create or manage a Secret.
   existingSecret: ""

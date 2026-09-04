@@ -792,6 +792,15 @@ def validate_dependency_versions(root: Path) -> None:
     Without this the version comparison in helm-build-chart.sh silently decides
     whether a chart is vendored from the tree or pulled from the registry, so a
     bumped service chart can be dropped from the umbrella with no warning.
+
+    Library charts are exempt. They ship templates rather than resources, so a
+    consumer pins the API it was written against and adopts a new one when it
+    is ready, the way any other dependency is treated. Requiring a match would
+    mean every consumer had to move in the same commit as the library, which
+    turns an edit to shared helpers into a tree-wide change. The pin still has
+    to resolve: it selects the in-tree copy when the versions agree and a
+    published release otherwise, so a version that is neither fails loudly at
+    pull time rather than silently resolving to the wrong templates.
     """
     charts = in_tree_charts(root)
     errors: list[str] = []
@@ -807,6 +816,8 @@ def validate_dependency_versions(root: Path) -> None:
             if local is None:
                 continue
             version, local_dir = local
+            if read_yaml(chart_file(local_dir)).get("type") == "library":
+                continue
             if dependency.version != version:
                 errors.append(
                     f"{relative_path(root, path)} pins {dependency.name!r} "

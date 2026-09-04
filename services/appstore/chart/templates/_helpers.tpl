@@ -75,6 +75,8 @@ Name of the Secret consumed by the appstore Deployment.
 */}}
 {{- define "appstore.secretName" -}}
 {{- include "helx-common.secret.name.v1" (dict
+  "mode" .Values.secret.mode
+  "secretValueBlockPath" "secret"
   "defaultName" (include "appstore.managedSecretName" .)
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret

@@ -74,6 +74,8 @@ Name of the Secret consumed by both appstore-sockets containers.
 */}}
 {{- define "appstore-sockets.secretName" -}}
 {{- include "helx-common.secret.name.v1" (dict
+  "mode" .Values.secret.mode
+  "secretValueBlockPath" "secret"
   "defaultName" (include "appstore-sockets.fullname" .)
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret

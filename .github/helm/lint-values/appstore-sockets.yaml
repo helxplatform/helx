@@ -1,0 +1,6 @@
+# CI-only values for the standalone appstore-sockets chart lint. Helm lint does
+# not contact a cluster, so these values exercise the caller-managed publisher
+# Secret mode without putting a synthetic secret in rendered manifests.
+secret:
+  mode: existingSecret
+  existingSecret: appstore-sockets-lint-publisher

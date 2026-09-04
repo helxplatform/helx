@@ -10,6 +10,9 @@ appstore:
 
 appstore-sockets:
   enabled: true
+  secret:
+    mode: existingSecret
+    existingSecret: appstore-sockets-lint-publisher
 
 helx-ldap:
   enabled: true

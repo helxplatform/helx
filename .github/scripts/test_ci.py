@@ -58,11 +58,13 @@ class TempTreeTest(unittest.TestCase):
         version: str = "1.0.0",
         app_version: str | None = None,
         dependencies: str = "",
+        chart_type: str | None = None,
     ) -> Path:
         app = f'appVersion: "{app_version}"\n' if app_version is not None else ""
+        kind = f"type: {chart_type}\n" if chart_type is not None else ""
         return self.write(
             f"{directory}/Chart.yaml",
-            f"apiVersion: v2\nname: {name}\nversion: {version}\n{app}{dependencies}",
+            f"apiVersion: v2\nname: {name}\nversion: {version}\n{kind}{app}{dependencies}",
         )
 
 
@@ -582,6 +584,33 @@ class DependencyVersionInvariantTests(TempTreeTest):
     def test_file_dependencies_are_left_to_validate_chart(self) -> None:
         self.build("1.2.3", "1.2.4", repository="file://../../../services/api/chart")
         ci.validate_dependency_versions(self.root)
+
+    def test_library_charts_may_be_pinned_to_another_version(self) -> None:
+        """A library ships templates, so a consumer adopts a new one when ready."""
+        self.write_chart(
+            "deploy/helm/helx-common/chart",
+            name="helx-common",
+            version="0.2.0",
+            chart_type="library",
+        )
+        self.write_chart(
+            "deploy/helm/helx-chart",
+            name="helx",
+            version="4.6.0",
+            dependencies=(
+                "dependencies:\n"
+                "  - name: helx-common\n"
+                "    version: 0.1.0\n"
+                f"    repository: {self.REGISTRY}\n"
+            ),
+        )
+        ci.validate_dependency_versions(self.root)
+
+    def test_application_charts_are_still_required_to_match(self) -> None:
+        """The exemption is for libraries only; a service chart must agree."""
+        self.build("1.2.3", "1.2.4")
+        with self.assertRaisesRegex(ci.CIError, r"pins 'api' '1.2.3'.*is '1.2.4'"):
+            ci.validate_dependency_versions(self.root)
 
     def test_dependency_absent_from_the_tree_is_ignored(self) -> None:
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")

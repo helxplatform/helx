@@ -1,0 +1,198 @@
+{{- if .Values.searchBootstrap.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ldap-sync.searchBootstrapName" . }}
+  labels:
+    {{- include "ldap-sync.labels" . | nindent 4 }}
+    app.kubernetes.io/component: search-bootstrap
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    # Run after the HeLx LDAP configuration hook when this chart is installed
+    # as part of the umbrella chart.
+    helm.sh/hook-weight: "20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.searchBootstrap.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.searchBootstrap.job.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ .Values.searchBootstrap.job.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "ldap-sync.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: search-bootstrap
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: {{ include "ldap-sync.searchBootstrapName" . }}
+      restartPolicy: Never
+      securityContext:
+        {{- toYaml .Values.searchBootstrap.job.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: wait-for-rollout
+          image: "{{ .Values.searchBootstrap.job.rolloutImage.repository }}:{{ .Values.searchBootstrap.job.rolloutImage.tag }}"
+          imagePullPolicy: {{ .Values.searchBootstrap.job.rolloutImage.pullPolicy }}
+          command:
+            - /bin/kubectl
+          args:
+            - rollout
+            - status
+            - --namespace
+            - {{ .Release.Namespace | quote }}
+            - {{ printf "deployment/%s" (include "ldap-sync.fullname" .) | quote }}
+            - {{ printf "--timeout=%ds" (int .Values.searchBootstrap.job.waitTimeoutSeconds) | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      containers:
+        - name: search-bootstrap
+          image: "{{ .Values.searchBootstrap.image.repository }}:{{ .Values.searchBootstrap.image.tag }}"
+          imagePullPolicy: {{ .Values.searchBootstrap.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.searchBootstrap.job.securityContext | nindent 12 }}
+          env:
+            - name: API_URL
+              value: "http://{{ include "ldap-sync.fullname" . }}:{{ .Values.service.port }}"
+            - name: SEARCH_ID
+              value: {{ .Values.searchBootstrap.id | quote }}
+            - name: SEARCH_FILTER
+              value: {{ .Values.searchBootstrap.filter | quote }}
+            - name: SEARCH_REFRESH
+              value: {{ .Values.searchBootstrap.refresh | quote }}
+            - name: SEARCH_BASE_DN
+              value: {{ .Values.searchBootstrap.baseDN | quote }}
+            - name: SEARCH_ONE_SHOT
+              value: {{ .Values.searchBootstrap.oneShot | quote }}
+            - name: WAIT_TIMEOUT_SECONDS
+              value: {{ .Values.searchBootstrap.job.waitTimeoutSeconds | quote }}
+            - name: RETRY_INTERVAL_SECONDS
+              value: {{ .Values.searchBootstrap.job.retryIntervalSeconds | quote }}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |
+              set -eu
+
+              http_status() {
+                curl \
+                  --connect-timeout 5 \
+                  --max-time 15 \
+                  --silent \
+                  --output /dev/null \
+                  --write-out '%{http_code}' \
+                  "$@" 2>/dev/null || true
+              }
+
+              wait_for_api() {
+                deadline=$(( $(date +%s) + WAIT_TIMEOUT_SECONDS ))
+                while :; do
+                  status="$(http_status "${API_URL}/readyz")"
+                  if [ "$status" = "200" ]; then
+                    return 0
+                  fi
+                  if [ "$(date +%s)" -ge "$deadline" ]; then
+                    echo "ldap-sync did not become ready within ${WAIT_TIMEOUT_SECONDS} seconds (last HTTP status: ${status:-none})" >&2
+                    return 1
+                  fi
+                  sleep "$RETRY_INTERVAL_SECONDS"
+                done
+              }
+
+              reconcile_search() {
+                existing_status="$(http_status --get \
+                  --data-urlencode "id=${SEARCH_ID}" \
+                  "${API_URL}/search")"
+
+                case "$existing_status" in
+                  200)
+                    method=PUT
+                    endpoint="${API_URL}/search/${SEARCH_ID}"
+                    ;;
+                  404)
+                    method=POST
+                    endpoint="${API_URL}/search"
+                    ;;
+                  *)
+                    echo "Unable to inspect search ${SEARCH_ID} (HTTP status: ${existing_status:-none})" >&2
+                    return 1
+                    ;;
+                esac
+
+                mutation_status="$(http_status \
+                  --request "$method" \
+                  --header 'Content-Type: application/x-www-form-urlencoded' \
+                  --data-urlencode "id=${SEARCH_ID}" \
+                  --data-urlencode "filter=${SEARCH_FILTER}" \
+                  --data-urlencode "refresh=${SEARCH_REFRESH}" \
+                  --data-urlencode "baseDN=${SEARCH_BASE_DN}" \
+                  --data-urlencode "oneShot=${SEARCH_ONE_SHOT}" \
+                  "$endpoint")"
+
+                # Another bootstrap Job may have created the search after the
+                # GET. Turn that race into the idempotent update operation.
+                if [ "$mutation_status" = "400" ] && [ "$method" = "POST" ]; then
+                  mutation_status="$(http_status \
+                    --request PUT \
+                    --header 'Content-Type: application/x-www-form-urlencoded' \
+                    --data-urlencode "filter=${SEARCH_FILTER}" \
+                    --data-urlencode "refresh=${SEARCH_REFRESH}" \
+                    --data-urlencode "baseDN=${SEARCH_BASE_DN}" \
+                    --data-urlencode "oneShot=${SEARCH_ONE_SHOT}" \
+                    "${API_URL}/search/${SEARCH_ID}")"
+                fi
+
+                if [ "$mutation_status" != "200" ]; then
+                  echo "Unable to reconcile search ${SEARCH_ID} (HTTP status: ${mutation_status:-none})" >&2
+                  return 1
+                fi
+
+                verified_status="$(http_status --get \
+                  --data-urlencode "id=${SEARCH_ID}" \
+                  "${API_URL}/search")"
+                if [ "$verified_status" != "200" ]; then
+                  echo "Search ${SEARCH_ID} was not available after reconciliation (HTTP status: ${verified_status:-none})" >&2
+                  return 1
+                fi
+                echo "Search ${SEARCH_ID} reconciled successfully"
+              }
+
+              reconcile_until_stable() {
+                deadline=$(( $(date +%s) + WAIT_TIMEOUT_SECONDS ))
+                while :; do
+                  if reconcile_search; then
+                    # A rolling upgrade can briefly route the Service to the
+                    # old pod after the mutation succeeds. Require the search
+                    # to remain visible after another Service request before
+                    # declaring the hook successful.
+                    sleep "$RETRY_INTERVAL_SECONDS"
+                    verified_status="$(http_status --get \
+                      --data-urlencode "id=${SEARCH_ID}" \
+                      "${API_URL}/search")"
+                    if [ "$verified_status" = "200" ]; then
+                      echo "Search ${SEARCH_ID} remained available after reconciliation"
+                      return 0
+                    fi
+                    echo "Search ${SEARCH_ID} disappeared after reconciliation (HTTP status: ${verified_status:-none}); retrying" >&2
+                  else
+                    echo "Search ${SEARCH_ID} reconciliation attempt failed; retrying" >&2
+                  fi
+
+                  if [ "$(date +%s)" -ge "$deadline" ]; then
+                    echo "Search ${SEARCH_ID} was not stable within ${WAIT_TIMEOUT_SECONDS} seconds" >&2
+                    return 1
+                  fi
+                  sleep "$RETRY_INTERVAL_SECONDS"
+                done
+              }
+
+              wait_for_api
+              reconcile_until_stable
+{{- end }}

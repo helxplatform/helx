@@ -56,7 +56,8 @@ make install-hooks    # run the pre-push checks automatically (optional)
 | `make ci-validate-everything` | Validate every chart, lock, `.helmignore`, image definition, and Dockerfile |
 | `make ci-check-versions` | Run the version gate the way CI will |
 | `make ci-tests` | Run the CI suite's own unit tests |
-| `make sync-locks` | Regenerate every `Chart.lock` from its `Chart.yaml` |
+| `make pull-develop` | Merge `origin/develop`, regenerate generated lock conflicts, and commit the merge; requires no tracked local changes |
+| `make sync-locks` | Regenerate every `Chart.lock` from its `Chart.yaml`; resolves and stages lock-only merge conflicts |
 | `make sync-helx-lock` | Same, umbrella chart only |
 | `make check-locks` | Verify every lock without writing |
 | `make ci-build-chart SERVICE=<name>` | Vendor dependencies, lint, and package one service chart |
@@ -112,8 +113,13 @@ not published yet. A bumped service chart is not in GHCR until the merge to
 Semantic ranges such as `^1.0.0` are rejected. A range can never equal a
 resolved lock entry, so `validate-config` fails. Use exact versions!
 
-`sync-locks` writes only the lock. If you need `charts/` populated to render or
-install a chart locally, use `helm-build-chart.sh` above, which vendors them.
+`sync-locks` writes only the lock. If it finds an unresolved `Chart.lock` merge
+conflict, it recreates that lock from the merged `Chart.yaml` and stages only the
+resolved lock; ordinary regenerated locks remain unstaged. `make pull-develop`
+uses this behavior after merging `origin/develop`, but stops rather than commits
+when conflicts outside generated locks need manual resolution. If you need
+`charts/` populated to render or install a chart locally, use
+`helm-build-chart.sh` above, which vendors them.
 
 If validation reports that `Chart.yaml` and `Chart.lock` "dependency
 name/version/repository tuples differ", this prints exactly what is being

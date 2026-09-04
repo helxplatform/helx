@@ -134,6 +134,7 @@ CLUSTER_NAME                    ?=
         pull-resty \
         pull-pod-reaper \
         pull-remotes pull-subtree \
+        pull-develop \
         sync-locks \
         sync-helx-lock \
         check-locks \
@@ -159,6 +160,10 @@ help:
 	@echo '  make setup          Add all remotes and missing service subtrees'
 	@echo '  make add-remotes    Add or verify all subtree remotes'
 	@echo '  make add-subtrees   Add all missing service subtrees'
+	@echo
+	@echo 'Branch updates:'
+	@echo '  make pull-develop   Merge origin/develop, regenerate generated lock conflicts, and commit the merge'
+	@echo '                      Requires no tracked local changes; stops for non-lock conflicts.'
 	@echo
 	@echo 'Subtree updates:'
 	@echo '  make pull-remotes                  Pull all configured service subtrees'
@@ -221,8 +226,8 @@ help:
 	@echo '  FORCE=1                Let the chart mirrors overwrite uncommitted work'
 	@echo
 	@echo 'Chart.lock maintenance:'
-	@echo '  make sync-locks                    Regenerate every chart lock that has dependencies'
-	@echo '  make sync-helx-lock                Regenerate only $(UMBRELLA_CHART)'
+	@echo '  make sync-locks                    Regenerate every chart lock that has dependencies; resolves lock conflicts'
+	@echo '  make sync-helx-lock                Regenerate only $(UMBRELLA_CHART); resolves its lock conflict'
 	@echo '  make check-locks                   Verify every lock without writing'
 	@echo '  Python setup is automatic; run make ci-pip-install to do it explicitly'
 	@echo
@@ -632,16 +637,75 @@ install-hooks:
 	@echo "core.hooksPath = $(HOOKS_PATH)"
 	@echo "Undo with: git config --unset core.hooksPath"
 
+# pull-develop: Merge origin/develop into the current branch and commit the merge.
+# A clean tracked worktree prevents this target from accidentally committing
+# unfinished work. Untracked files are left alone.
+pull-develop:
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "Refusing to pull: commit or stash tracked local changes first."; \
+		exit 1; \
+	fi
+	$(call require-pyyaml)
+	@pull_status=0; \
+	git pull --no-rebase --no-commit origin develop || pull_status=$$?; \
+	if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then \
+		if test "$$pull_status" -ne 0; then \
+			echo "Could not pull origin/develop; no merge is in progress."; \
+			exit "$$pull_status"; \
+		fi; \
+		echo "origin/develop was fast-forwarded or already up to date; no merge commit is needed."; \
+		exit 0; \
+	fi; \
+	non_lock_conflicts=(); \
+	while IFS= read -r -d '' unmerged_path; do \
+		case "$$unmerged_path" in \
+			*/Chart.lock|Chart.lock) ;; \
+			*) non_lock_conflicts+=("$$unmerged_path");; \
+		esac; \
+	done < <(git diff --name-only -z --diff-filter=U); \
+	if test -n "$$non_lock_conflicts"; then \
+		echo "There are merge conflicts outside generated Chart.lock files. Resolve them, then run make sync-locks before committing:"; \
+		printf '%s\n' "$${non_lock_conflicts[@]}"; \
+		exit 1; \
+	fi; \
+	if ! $(PYTHON) $(CI_SCRIPT) sync-lock --all; then exit 1; fi; \
+	changed_locks=(); \
+	while IFS= read -r -d '' changed_lock; do \
+		changed_locks+=("$$changed_lock"); \
+	done < <(git diff --name-only -z -- ':(glob)**/Chart.lock'); \
+	if test -n "$$changed_locks"; then git add -- "$${changed_locks[@]}"; fi; \
+	conflicts="$$(git diff --name-only --diff-filter=U)"; \
+	if test -n "$$conflicts"; then \
+		echo "There are still merge conflicts. Please resolve them before committing the merge:"; \
+		printf '%s\n' "$$conflicts"; \
+		exit 1; \
+	fi; \
+	GIT_EDITOR=true git commit --no-edit
+
+# Recreate generated locks, then stage only locks that were unmerged before
+# regeneration. Ordinary stale locks remain unstaged, as before.
+define sync-lock-and-resolve
+	@conflicted_locks=(); \
+	while IFS= read -r -d '' lock; do \
+		case "$$lock" in $(2)) conflicted_locks+=("$$lock");; esac; \
+	done < <(git diff --name-only -z --diff-filter=U); \
+	if ! $(PYTHON) $(CI_SCRIPT) sync-lock $(1); then exit 1; fi; \
+	if test -n "$$conflicted_locks"; then \
+		git add -- "$${conflicted_locks[@]}"; \
+		echo "Resolved and staged conflicted Chart.lock file(s)"; \
+	fi
+endef
+
 # sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
 # Charts without dependencies are skipped rather than treated as an error.
 sync-locks:
 	$(call require-pyyaml)
-	@$(PYTHON) $(CI_SCRIPT) sync-lock --all
+	$(call sync-lock-and-resolve,--all,*/Chart.lock)
 
 # sync-helx-lock: Regenerate only the umbrella chart's Chart.lock
 sync-helx-lock:
 	$(call require-pyyaml)
-	@$(PYTHON) $(CI_SCRIPT) sync-lock "$(UMBRELLA_CHART)"
+	$(call sync-lock-and-resolve,"$(UMBRELLA_CHART)",$(UMBRELLA_CHART)/Chart.lock)
 
 # check-locks: Verify every lock matches its Chart.yaml without writing anything
 check-locks:

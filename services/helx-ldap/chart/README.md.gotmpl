@@ -1,0 +1,56 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.requirementsSection" . }}
+
+{{ template "chart.valuesSection" . }}
+
+## Existing release migration
+
+The upstream chart creates a StatefulSet named `openldap` and, with the default
+settings, a PVC named `data-openldap-0`. A fresh upgrade that changes the
+StatefulSet from its `volumeClaimTemplates` to an explicit PVC can fail because
+that StatefulSet field is immutable. Use the migration values only after
+verifying the live object names and backing up the HeLx LDAP data:
+
+```yaml
+helx-ldap:
+  openldap:
+    migration:
+      enabled: true
+      legacyPvc: "data-legacy-statefulset-0"
+      # Set this only when label discovery is ambiguous or unavailable.
+      legacyStatefulSet: ""
+    persistence:
+      existingClaim: "data-legacy-statefulset-0"
+  secret:
+    mode: existingSecret
+    existingSecret: openldap-credentials
+    migration:
+      enabled: true
+      legacySecret: "legacy-credentials-secret"
+```
+
+`legacyPvc` and `persistence.existingClaim` must be the same existing claim.
+The Secret migration is optional when the old credentials Secret is already
+`openldap-credentials`; otherwise the pre-upgrade hook copies the old Secret's
+keys into that target. It requires a live `helm upgrade`, preserves the target
+as caller-managed, and does not delete the old Secret.
+
+The pre-upgrade migration hook performs the handoff automatically: it scales the
+prior HeLx LDAP StatefulSet to zero, waits for its pods to terminate, and deletes
+only the old StatefulSet controller with orphan propagation. The PVC and backing
+volume are retained, so no manual scale-down or StatefulSet deletion is required.
+Do not run two StatefulSets against an RWO claim. After the upgrade, disable both
+migration flags but keep `openldap.persistence.existingClaim` set permanently.
+
+Verify the result with `kubectl`: the StatefulSet should mount the adopted claim
+through `spec.template.spec.volumes[].persistentVolumeClaim.claimName`, and its
+PVC UID should be unchanged. The migration hooks use `lookup`, so client-side
+`helm template` and Argo CD rendering cannot validate or perform the Secret
+copy.
+
+{{ template "helm-docs.versionFooter" . }}

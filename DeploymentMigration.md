@@ -36,6 +36,58 @@ delete the retained Secret after the backend is populated and verified.
 The appstore `atlas-env` Secret is deliberately exempt from retention because
 every key in it is derived from chart values.
 
+## User Mutator
+
+### Chart 2.0.0 renders the webhook itself
+
+Through chart `1.6.3` the serving certificate, the `MutatingWebhookConfiguration`, and the namespace label all had to be created outside Helm, by the `make` targets in `services/user-mutator`. Chart `2.0.0` renders the certificate and the webhook configuration by default and selects namespaces by the automatic `kubernetes.io/metadata.name` label, so none of those steps are needed.
+
+The supported migration is to uninstall the old deployment and install the new chart. Two things are worth preserving first.
+
+### 1. Decide whether to keep the existing Secrets
+
+Neither Secret contract carries a historical default. `secret.existingSecret` and `ldap.secret.existingSecret` both default to `""`, and the chart generates the webhook certificate unless told otherwise. To keep Secrets that already exist in the namespace, name them:
+
+```yaml
+user-mutator:
+  secret:
+    generate:
+      enabled: false
+    existingSecret: user-mutator-cert-tls
+  ldap:
+    secret:
+      existingSecret: user-mutator-ldap-password
+```
+
+Keeping the old TLS Secret also means keeping the `MutatingWebhookConfiguration` that carries the matching CA bundle, so set `webhook.enabled: false` alongside it and leave that object in place.
+
+Letting the chart generate instead is the simpler path: it produces a certificate whose SANs cover the Service it renders and a webhook configuration carrying the matching CA bundle, and the old TLS Secret can be deleted with the old release.
+
+### 2. Delete the old MutatingWebhookConfiguration
+
+The chart creates its own, so the one built by `make mutate-config` has to go. Back it up first: selectors added out of band are not reproducible from chart values, and anything custom belongs in `webhook.extraMatchExpressions` afterwards.
+
+```sh
+kubectl get mutatingwebhookconfiguration "$NAME" -o yaml > "$NAME.backup.yaml"
+kubectl delete mutatingwebhookconfiguration "$NAME"
+```
+
+Deleting it needs the same cluster-level permission on `admissionregistration.k8s.io` that installing the chart with `webhook.enabled` needs, so this adds no new access requirement.
+
+Leaving it in place is the thing to avoid. These objects are cluster-scoped and the old one almost certainly has a different name from the chart's, so nothing collides and nothing errors: both configurations match the namespace and both are invoked on every Deployment create and update. The old one's `caBundle` no longer matches the certificate the pod now serves, so its call fails TLS, and `failurePolicy: Ignore` means the API server swallows that failure. Mutation keeps working through the new object while every admission pays for a dead webhook call.
+
+### config.secrets was removed
+
+`config.secrets` fails to render on `2.0.0` rather than being ignored, since silently dropping a custom Secret name would leave the webhook serving a certificate nobody chose. Move `cert` to `secret.existingSecret`, `ldap-password` to `ldap.secret.existingSecret`, and anything else to `config.additionalSecrets`.
+
+### Service naming under the umbrella
+
+A subchart's fullname is release-qualified, so a `helx` release yields `helx-user-mutator` where the standalone chart yielded `user-mutator`. That matters only when keeping a TLS Secret whose certificate SANs were issued for the old Service name: pin it with `user-mutator.fullnameOverride: user-mutator`. Letting the chart generate the certificate makes the difference irrelevant, since it issues SANs for whatever Service it renders.
+
+### The make targets still work
+
+`services/user-mutator` keeps `ca-key-cert`, `key-cert-secret`, `mutate-config`, `enable-mutate-in-namespace`, and `deploy-all`. `make deploy-webhook-server` passes `secret.generate.enabled=false` and `webhook.enabled=false`, so that flow is unchanged and continues to own the certificate and the webhook configuration.
+
 ## Appstore
 
 This procedure covers upgrading an existing appstore Helm release to the current
@@ -598,7 +650,7 @@ For the chart-specific defaults and migration values, see
 [`services/helx-ldap/README.md`](services/helx-ldap/README.md) and
 [`deploy/helm/helx-chart/examples/ldap-migration-values.yaml`](deploy/helm/helx-chart/examples/ldap-migration-values.yaml).
 
-## LDAP sync
+## LDAP Sync
 
 `ldap-sync` is a separate service with its own PostgreSQL dependency, and it is
 not covered by the HeLx LDAP procedure above. Renaming its PostgreSQL release

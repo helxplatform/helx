@@ -15,18 +15,18 @@ nameOverride: ""
 fullnameOverride: ""
 
 secret:
-  # -- Which owner writes this Secret: `values` for the chart-managed Secret
-  # built from `secret.values`, `existingSecret` for one you create yourself, or
-  # `externalSecret` for External Secrets. Declared rather than inferred, so
-  # selecting a mode also means clearing the fields belonging to the others.
+  # -- Which owner writes this Secret: `values` for the chart-managed Secret,
+  # `existingSecret` for one you create yourself, or `externalSecret` for
+  # External Secrets. Declared rather than inferred, so selecting a mode also
+  # means clearing the fields belonging to the others.
   mode: values
 
-  # -- Name of a Secret containing PUBLISHER_SECRET. When set, the chart does
-  # not create or manage a Secret.
+  # -- Name of a Secret containing PUBLISHER_SECRET. Set this only when
+  # secret.mode is existingSecret; the chart does not create or manage it.
   existingSecret: ""
 
   # -- Configure an ExternalSecret to populate the appstore-sockets Secret.
-  # This is mutually exclusive with secret.existingSecret.
+  # Set secret.mode to externalSecret when using this configuration.
   externalSecret:
     enabled: false
     # -- Optional ESO target Secret name. Defaults to the chart fullname.
@@ -37,9 +37,10 @@ secret:
       kind: SecretStore
     remoteRef: ""
 
-  # -- Key/value pairs used to create the chart-managed Secret. Required key:
-  #   PUBLISHER_SECRET: shared secret used by the server and monitoring client.
-  # Argo CD users should provide a stable value here or select an external mode.
+  # -- Key/value pairs used to create the chart-managed Secret. Set these only
+  # when secret.mode is values. PUBLISHER_SECRET is generated automatically when
+  # omitted and preserved during cluster-aware Helm upgrades. Argo CD users should
+  # provide a stable PUBLISHER_SECRET here or select an external mode.
   values: {}
 
   migration:

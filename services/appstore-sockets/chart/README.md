@@ -1,6 +1,6 @@
 # appstore-sockets
 
-![Version: 2.1.2](https://img.shields.io/badge/Version-2.1.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.1.2](https://img.shields.io/badge/AppVersion-1.1.2-informational?style=flat-square)
+![Version: 2.1.3](https://img.shields.io/badge/Version-2.1.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 1.1.2](https://img.shields.io/badge/AppVersion-1.1.2-informational?style=flat-square)
 
 A Helm chart for Kubernetes
 
@@ -8,7 +8,7 @@ A Helm chart for Kubernetes
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://ghcr.io/helxplatform/helm-charts | helx-common | 0.1.1 |
+| oci://ghcr.io/helxplatform/helm-charts | helx-common | 0.2.0 |
 
 ## Values
 
@@ -32,11 +32,12 @@ A Helm chart for Kubernetes
 | podSecurityContext | object | `{}` |  |
 | requirePublishSecret | bool | `true` |  |
 | resources | object | `{}` |  |
-| secret.existingSecret | string | `""` | Name of a Secret containing PUBLISHER_SECRET. When set, the chart does not create or manage a Secret. |
-| secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the appstore-sockets Secret. This is mutually exclusive with secret.existingSecret. |
+| secret.existingSecret | string | `""` | Name of a Secret containing PUBLISHER_SECRET. Set this only when secret.mode is existingSecret; the chart does not create or manage it. |
+| secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the appstore-sockets Secret. Set secret.mode to externalSecret when using this configuration. |
 | secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to the chart fullname. |
 | secret.migration.enabled | bool | `false` | Appstore-sockets has no differently named legacy Secret to migrate. |
-| secret.values | object | `{}` | Key/value pairs used to create the chart-managed Secret. Required key:   PUBLISHER_SECRET: shared secret used by the server and monitoring client. Argo CD users should provide a stable value here or select an external mode. |
+| secret.mode | string | `"values"` | Which owner writes this Secret: `values` for the chart-managed Secret, `existingSecret` for one you create yourself, or `externalSecret` for External Secrets. Declared rather than inferred, so selecting a mode also means clearing the fields belonging to the others. |
+| secret.values | object | `{}` | Key/value pairs used to create the chart-managed Secret. Set these only when secret.mode is values. PUBLISHER_SECRET is generated automatically when omitted and preserved during cluster-aware Helm upgrades. Argo CD users should provide a stable PUBLISHER_SECRET here or select an external mode. |
 | securityContext | object | `{}` |  |
 | service.name | string | `"http"` |  |
 | service.port | int | `80` |  |

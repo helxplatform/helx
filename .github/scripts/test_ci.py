@@ -1303,8 +1303,8 @@ class ServicesAllTests(unittest.TestCase):
         self.assertNotIn("all", components)
 
 
-class CiHelpLayoutTests(unittest.TestCase):
-    """The Makefile is the source of truth for the rendered CI help order."""
+class HelpLayoutTests(unittest.TestCase):
+    """The Makefile is the source of truth for rendered help-topic order."""
 
     SECTIONS = (
         (
@@ -1333,7 +1333,7 @@ class CiHelpLayoutTests(unittest.TestCase):
             ),
         ),
         (
-            '##@ ci Deploying a local build (see README.md "DevEx")',
+            '##@ local-dev Deploying a local build (see README.md "DevEx")',
             (
                 "build-helx-images",
                 "load-helx-images",
@@ -1342,7 +1342,7 @@ class CiHelpLayoutTests(unittest.TestCase):
                 "helm-deploy",
             ),
         ),
-        ("##@ ci Tearing down a release", ("uninstall-release",)),
+        ("##@ local-dev Tearing down a release", ("uninstall-release",)),
     )
 
     def test_sections_are_single_ordered_blocks(self) -> None:
@@ -1353,7 +1353,7 @@ class CiHelpLayoutTests(unittest.TestCase):
 
         starts = []
         for marker, targets in self.SECTIONS:
-            self.assertEqual(text.count(marker), 1, f"reopened CI help section: {marker}")
+            self.assertEqual(text.count(marker), 1, f"reopened help section: {marker}")
             start = text.index(marker)
             starts.append(start)
             next_start = text.find("\n##@", start + 1)
@@ -1363,6 +1363,10 @@ class CiHelpLayoutTests(unittest.TestCase):
             self.assertEqual(found, list(targets), marker)
 
         self.assertEqual(starts, sorted(starts))
+        self.assertRegex(
+            text,
+            r"(?m)^help-local-dev:\n\t@awk -f \$\(HELP_AWK\) -v topic=local-dev \$\(THIS_MAKEFILE\)$",
+        )
 
 
 class RegistryUrlTests(unittest.TestCase):

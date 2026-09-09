@@ -178,7 +178,7 @@ CLUSTER_NAME                    ?=
 # to only the listed targets' prerequisites.
 .NOTPARALLEL:
 
-.PHONY: help help-subtrees help-ci help-locks help-all-vars \
+.PHONY: help help-subtrees help-ci help-local-dev help-locks help-all-vars \
         setup add-remotes add-subtrees \
         add-subtree-appstore \
         add-subtree-appstore-chart \
@@ -235,7 +235,8 @@ help:
 	@echo
 	@echo 'More help:'
 	@echo '  make help-subtrees    Pulling service subtrees, mirroring vendored charts'
-	@echo '  make help-ci          Checks, chart and image builds, and local deploys'
+	@echo '  make help-ci          Checks and chart/image builds that mirror CI'
+	@echo '  make help-local-dev   Building, deploying, and tearing down local builds'
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
 	@echo '  make help-all-vars    Every variable those targets accept'
 
@@ -245,9 +246,15 @@ help-subtrees:
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
-#help-ci: Show the CI-shaped checks, builds, and local deploy flow
+#help-ci: Show the CI-shaped checks and build targets
 help-ci:
 	@awk -f $(HELP_AWK) -v topic=ci $(THIS_MAKEFILE)
+	@echo
+	@echo 'Every variable these accept: make help-all-vars'
+
+#help-local-dev: Show the local image build, deployment, and teardown flow
+help-local-dev:
+	@awk -f $(HELP_AWK) -v topic=local-dev $(THIS_MAKEFILE)
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
@@ -470,6 +477,19 @@ pull-user-mutator: add-remotes
 	$(call check-incoming,user-mutator,$(USER_MUTATOR_BRANCH))
 	git subtree pull --squash --prefix="$(USER_MUTATOR_PREFIX)" user-mutator "$(USER_MUTATOR_BRANCH)"
 
+# pull-remotes: Pull every configured service subtree in sequence
+pull-remotes: pull-appstore \
+	pull-appstore-chart \
+	pull-appstore-prepuller \
+	pull-appstore-sockets \
+	pull-appstore-sockets-chart \
+	pull-helx-ldap \
+	pull-ldap-sync \
+	pull-ui \
+	pull-ui-chart \
+	pull-user-mutator \
+	pull-helx-chart
+
 # mirror-chart: Replace one local chart with a subdirectory of the fetched tree.
 # git subtree cannot map a remote subdirectory to a local prefix, so the chart is
 # copied by content. Staging is populated and validated before anything local is
@@ -679,6 +699,7 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
+##>
 ##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ ci Building and inspecting one service
@@ -712,7 +733,7 @@ docker-build:
 	fi
 	@docker build --platform "$(IMAGE_PLATFORM)" -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
 
-##@ ci Deploying a local build (see README.md "DevEx")
+##@ local-dev Deploying a local build (see README.md "DevEx")
 ##> Set these in your shell; every target below reads them:
 ##>   export SERVICES="a b"              Services you rebuilt; only these get pinned (required)
 ##>                                      or SERVICES=all for every service that builds an image
@@ -909,7 +930,7 @@ helm-deploy:
 ##> Exporting TAG is what keeps all four agreeing; left unset it is recomputed from
 ##> HEAD each command. Unset SERVICES to leave every image on its released tag.
 
-##@ ci Tearing down a release
+##@ local-dev Tearing down a release
 # uninstall-release RELEASE=<name>: Uninstall RELEASE, then delete the
 # storage and credentials helm leaves behind -- UNINSTALL_PVCS and
 # UNINSTALL_SECRETS name them, and only the ones that exist are touched.
@@ -1006,17 +1027,3 @@ uninstall-release:
 ##> A claim can sit in Terminating until the pods using it are gone; kubectl waits
 ##> it out. Anything the charts did not create is left alone, PersistentVolumes
 ##> included -- a Retain volume outlives its claim and is yours to delete.
-
-##@ subtrees Subtree updates
-# pull-remotes: Pull every configured service subtree in sequence
-pull-remotes: pull-appstore \
-	pull-appstore-chart \
-	pull-appstore-prepuller \
-	pull-appstore-sockets \
-	pull-appstore-sockets-chart \
-	pull-helx-ldap \
-	pull-ldap-sync \
-	pull-ui \
-	pull-ui-chart \
-	pull-user-mutator \
-	pull-helx-chart

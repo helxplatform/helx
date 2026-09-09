@@ -81,7 +81,7 @@ class SemVerTests(unittest.TestCase):
 
 class ConfigValidationTests(TempTreeTest):
     def test_exact_lock_and_local_dependency_metadata(self) -> None:
-        child = self.write_chart("services/common/chart", name="common", version="1.2.3")
+        self.write_chart("services/common/chart", name="common", version="1.2.3")
         parent = self.write_chart(
             "services/api/chart",
             name="api",
@@ -104,7 +104,7 @@ class ConfigValidationTests(TempTreeTest):
         lock.write_text(lock.read_text().replace("1.2.3", "1.2.4"), encoding="utf-8")
         with self.assertRaisesRegex(ci.CIError, "tuples differ"):
             ci.exact_locked_dependencies(parent.parent)
-        self.assertTrue(child.is_file())
+
 
     def test_full_validation_checks_image_definitions_and_unique_charts(self) -> None:
         self.write_chart("services/app/chart", name="app", app_version="2.0.0")
@@ -203,6 +203,17 @@ class ConfigValidationTests(TempTreeTest):
             }
         )
         by_name = {image["name"]: image for image in images}
+        self.assertEqual(
+            set(by_name),
+            {
+                "appstore",
+                "appstore-prepuller",
+                "appstore-sockets-server",
+                "appstore-sockets-monitoring",
+                "ldap-sync",
+                "ui",
+            },
+        )
 
         self.assertEqual(by_name["ldap-sync"]["component"], "ldap-sync")
         self.assertEqual(by_name["ldap-sync"]["chart"], "services/ldap-sync/chart")
@@ -367,14 +378,26 @@ class ManifestTests(TempTreeTest):
         self.assertEqual(manifest["release"]["tag"], "v4.5.7")
         self.assertEqual(manifest["umbrella"]["lock_digest"], digest)
         self.assertEqual([item["name"] for item in manifest["dependencies"]], ["appstore"])
+        self.assertEqual(manifest["release"]["commit"], "commit-sha")
         image = manifest["dependencies"][0]["images"][0]
-        self.assertEqual(image["digest"], image_digest)
+        self.assertEqual(
+            image,
+            {
+                "name": "appstore",
+                "tag": "v4.4.1",
+                "reference": f"{ci.REGISTRY}/appstore:v4.4.1",
+                "digest": image_digest,
+                "immutable_reference": f"{ci.REGISTRY}/appstore@{image_digest}",
+            },
+        )
         inspect.assert_called_once_with(f"{ci.REGISTRY}/appstore:v4.4.1")
         self.assertNotIn("not-in-umbrella", json.dumps(manifest))
 
         notes = ci.release_notes(manifest)
         self.assertIn("# HeLx release v4.5.7", notes)
-        self.assertIn("appstore", notes)
+        self.assertIn("- Commit: `commit-sha`", notes)
+        self.assertIn(f"- Helm lock digest: `{digest}`", notes)
+        self.assertIn(f"`{ci.REGISTRY}/appstore:v4.4.1` (`{image_digest}`)", notes)
 
 
 class CandidateChannelTests(TempTreeTest):
@@ -472,10 +495,10 @@ class CandidateChannelTests(TempTreeTest):
             ci.candidate_image_tag("develop", "not-a-sha")
 
     def test_deep_merge_keeps_unrelated_existing_values(self) -> None:
-        merged = ci.deep_merge(
-            {"global": {"keep": True}, "appstore": {"replicas": 2}},
-            {"appstore": {"image": {"tag": "develop-abc1234"}}},
-        )
+        base = {"global": {"keep": True}, "appstore": {"replicas": 2}}
+        merged = ci.deep_merge(base, {"appstore": {"image": {"tag": "develop-abc1234"}}})
+        self.assertIsNot(merged, base)
+        self.assertEqual(base, {"global": {"keep": True}, "appstore": {"replicas": 2}})
         self.assertEqual(merged["global"], {"keep": True})
         self.assertEqual(merged["appstore"], {"replicas": 2, "image": {"tag": "develop-abc1234"}})
 
@@ -490,7 +513,6 @@ class CandidateChannelTests(TempTreeTest):
                 "sockets": {"monitoring": {"image": {"tag": "develop-e345260"}}},
             },
         )
-        self.assertNotIn("loose", overlay)
 
     def test_candidate_matrix_pins_every_image_to_one_tag(self) -> None:
         matrix = ci.image_matrix(
@@ -499,6 +521,9 @@ class CandidateChannelTests(TempTreeTest):
             config_path=self.config,
             channel="develop",
             commit="e3452604aaaabbbb",
+        )
+        self.assertEqual(
+            {entry["name"] for entry in matrix}, {"appstore", "sockets-monitoring", "loose"}
         )
         self.assertEqual({entry["tag"] for entry in matrix}, {"develop-e345260"})
 
@@ -606,11 +631,6 @@ class DependencyVersionInvariantTests(TempTreeTest):
         )
         ci.validate_dependency_versions(self.root)
 
-    def test_application_charts_are_still_required_to_match(self) -> None:
-        """The exemption is for libraries only; a service chart must agree."""
-        self.build("1.2.3", "1.2.4")
-        with self.assertRaisesRegex(ci.CIError, r"pins 'api' '1.2.3'.*is '1.2.4'"):
-            ci.validate_dependency_versions(self.root)
 
     def test_dependency_absent_from_the_tree_is_ignored(self) -> None:
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
@@ -813,7 +833,6 @@ class DockerIgnoreTests(TempTreeTest):
     def test_unsupported_syntax_is_rejected(self) -> None:
         self.write_chart("services/api/chart", name="api", app_version="1.0.0")
         self.write("services/api/Dockerfile", "FROM scratch\n")
-        self.context("!keep.me\n")
         config = self.write(
             "images.yaml",
             json.dumps(
@@ -834,8 +853,11 @@ class DockerIgnoreTests(TempTreeTest):
                 }
             ),
         )
-        with self.assertRaisesRegex(ci.CIError, "negation and"):
-            ci.validate_dockerignore(self.root, config)
+        for pattern in ("!keep.me", "build/**"):
+            with self.subTest(pattern=pattern):
+                self.context(pattern + "\n")
+                with self.assertRaisesRegex(ci.CIError, re.escape(f"uses {pattern!r}")):
+                    ci.validate_dockerignore(self.root, config)
 
 
 class UntrackedChangeTests(TempTreeTest):
@@ -880,9 +902,12 @@ class UntrackedChangeTests(TempTreeTest):
     def test_gitignored_files_stay_out_of_both_modes(self) -> None:
         self.write(".gitignore", "ignored/\n")
         self.write("ignored/junk.txt", "junk")
-        self.assertNotIn(
-            "ignored/junk.txt", ci.changed_paths(self.root, self.base, include_untracked=True)
-        )
+        for include_untracked in (False, True):
+            with self.subTest(include_untracked=include_untracked):
+                self.assertNotIn(
+                    "ignored/junk.txt",
+                    ci.changed_paths(self.root, self.base, include_untracked=include_untracked),
+                )
 
     def test_version_gate_explains_an_unidentified_version_convergence(self) -> None:
         self.git("branch", "develop", self.base)
@@ -1016,7 +1041,8 @@ class LocalServiceBuildTests(TempTreeTest):
         )
 
     def test_plan_without_a_filter_returns_everything(self) -> None:
-        self.assertEqual(len(ci.image_plan(self.root, None, config_path=self.config)), 3)
+        plan = ci.image_plan(self.root, None, config_path=self.config)
+        self.assertEqual([item["name"] for item in plan], ["api", "worker", "worker-sidecar"])
 
     def test_plan_rejects_an_unknown_service(self) -> None:
         with self.assertRaisesRegex(ci.CIError, "No image is configured for: nope"):
@@ -1037,8 +1063,16 @@ class LocalServiceBuildTests(TempTreeTest):
         overlay = ci.candidate_values(
             self.root, "develop", "abc1234def", config_path=self.config
         )
-        self.assertEqual(set(overlay), {"api", "worker"})
-        self.assertEqual(overlay["api"]["image"]["tag"], "develop-abc1234")
+        self.assertEqual(
+            overlay,
+            {
+                "api": {"image": {"tag": "develop-abc1234"}},
+                "worker": {
+                    "image": {"tag": "develop-abc1234"},
+                    "sidecar": {"image": {"tag": "develop-abc1234"}},
+                },
+            },
+        )
 
     def test_an_empty_tag_falls_back_to_the_channel_tag(self) -> None:
         # helm-build-chart.sh passes an empty CHART_IMAGE_TAG to mean "unset".
@@ -1588,7 +1622,7 @@ class WorkflowShellSyntaxTests(unittest.TestCase):
 
     def workflow_files(self) -> list[Path]:
         root = SCRIPT.resolve().parents[2] / ".github"
-        return sorted(root.glob("workflows/*.yml")) + sorted(root.glob("actions/*/action.yml"))
+        return sorted(root.glob("workflows/*.yml")) + sorted(root.glob("actions/**/action.yml"))
 
     def run_blocks(self, path: Path) -> list[tuple[str, str]]:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))

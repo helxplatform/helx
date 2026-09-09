@@ -42,8 +42,9 @@ user-mutator:
   # has to be labelled by hand and no out-of-band tooling has to run.
   #
   # To keep a certificate and webhook configuration managed outside the chart,
-  # set user-mutator.secret.generate.enabled and user-mutator.webhook.enabled
-  # to false and point user-mutator.secret.existingSecret at the Secret name.
+  # set user-mutator.webhook.enabled to false, set user-mutator.secret.mode to
+  # existingSecret, and point user-mutator.secret.existingSecret at the Secret
+  # name.
 
 global:
   # tycho_api_service_name: helx-tycho-api

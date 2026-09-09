@@ -25,6 +25,6 @@ dependencies:
   version: 1.6.1
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.0.0
-digest: sha256:e9470fb1d5ebae72ef5e96f9637c3e7b3efd96c095709a1f25b54704d1a0b3ef
-generated: '2026-09-09T16:04:24.082259+00:00'
+  version: 2.0.1
+digest: sha256:4cbcf52746fb9a76810c92353133a0ccb9a899be134f7023af56bba5edb8dfdc
+generated: '2026-09-04T14:56:57.493249+00:00'

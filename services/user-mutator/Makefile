@@ -104,9 +104,15 @@ clean:
 	rm -f webhook-server/$(BINARY_NAME)
 
 deploy-webhook-server: key-cert-secret
+	helm dependency build ./chart
+	# This target keeps the out-of-band workflow: key-cert-secret creates the
+	# serving certificate and mutate-config creates the
+	# MutatingWebhookConfiguration, so both chart-native modes are turned off.
+	# Chart consumers get those from the chart by default as of 2.0.0.
 	helm -n $(WEBHOOK_NAMESPACE) upgrade --install $(CHART_NAME) \
 	    --set "image.pullPolicy=IfNotPresent" --set "image.tag=$(VERSION)" \
-		--set "config.secrets.cert=$(SECRET)" $(HELM_INSTALL_ARG_1) $(HELM_INSTALL_ARG_2) \
+		--set "secret.mode=existingSecret" --set "webhook.enabled=false" \
+		--set "secret.existingSecret=$(SECRET)" $(HELM_INSTALL_ARG_1) $(HELM_INSTALL_ARG_2) \
 		./chart
 	@echo ""
 	@echo "To view and follow the logs of the mutator use the following command."

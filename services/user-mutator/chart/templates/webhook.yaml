@@ -40,11 +40,7 @@ data:
 {{- end }}
 {{- if .Values.webhook.enabled }}
 {{- if not $caBundle }}
-<<<<<<< HEAD
-  {{- fail (include "user-mutator.missingCaBundleMessage" .) -}}
-=======
   {{- fail "user-mutator: webhook.enabled requires a CA bundle; set secret.mode to generate, or set webhook.caBundle to the base64 CA that signed the serving certificate" -}}
->>>>>>> 14192a0615819a490a1caaeb0e2fd45e6c871793
 {{- end }}
 {{- $namespaces := .Values.webhook.namespaces }}
 {{- if not $namespaces }}

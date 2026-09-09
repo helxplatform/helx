@@ -27,6 +27,7 @@ helx-ldap:
     persistence:
       existingClaim: "data-legacy-statefulset-0"
   secret:
+    mode: existingSecret
     existingSecret: openldap-credentials
     migration:
       enabled: true

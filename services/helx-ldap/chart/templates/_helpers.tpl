@@ -69,10 +69,12 @@ three-mode selector is validated against it in secrets.yaml.
 {{- end -}}
 
 {{/*
-The Secret selected by the wrapper's existing, managed, or ESO mode.
+The Secret selected by the configured ownership mode.
 */}}
 {{- define "helx-ldap.credentialsSecret" -}}
 {{- include "helx-common.secret.name.v1" (dict
+  "mode" .Values.secret.mode
+  "secretValueBlockPath" "secret"
   "defaultName" (include "helx-ldap.credentialsSecretTargetName" .)
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret

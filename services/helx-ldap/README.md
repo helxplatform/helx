@@ -34,20 +34,22 @@ export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
 bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
 
-The script exercises the backward-compatible existing-Secret mode: it creates
-or updates `openldap-credentials`, prepares the Helm dependencies, installs only
-the `helx-ldap` service, and waits for the HeLx LDAP StatefulSet and
-configuration hook. The same configuration Job runs on upgrades.
+The script uses a caller-managed credentials Secret: it creates or updates
+`openldap-credentials`, prepares the Helm dependencies, installs only the
+`helx-ldap` service, and waits for the HeLx LDAP StatefulSet and configuration
+hook. The same configuration Job runs on upgrades.
 
 The selected Secret must contain these keys:
 
 - `LDAP_ADMIN_PASSWORD`
 - `LDAP_CONFIG_ADMIN_PASSWORD`
 
-The chart also supports chart-managed `secret.values` and an ESO-managed target
-through `secret.externalSecret`. ESO backed by Vault is recommended for GitOps;
-do not commit plaintext credentials. See `chart/README.md` for all three modes
-and the upstream chart's Secret-name constraint.
+Choose the credentials Secret owner with `secret.mode`: `values` creates a
+chart-managed Secret from `secret.values`, `existingSecret` uses a Secret you
+manage, and `externalSecret` creates an ExternalSecret resource. ESO backed by
+Vault is recommended for GitOps; do not commit plaintext credentials. See
+`chart/README.md` for the complete configuration and the upstream chart's
+Secret-name constraint.
 
 ## Migrating an existing release
 
@@ -74,6 +76,7 @@ helx-ldap:
     persistence:
       existingClaim: "data-legacy-statefulset-0"
   secret:
+    mode: existingSecret
     existingSecret: openldap-credentials
     migration:
       enabled: true

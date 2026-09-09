@@ -178,7 +178,7 @@ CLUSTER_NAME                    ?=
 # to only the listed targets' prerequisites.
 .NOTPARALLEL:
 
-.PHONY: help help-subtrees help-ci help-local-dev help-locks help-all-vars \
+.PHONY: help help-subtrees help-ci help-build help-local-dev help-locks help-all-vars \
         setup add-remotes add-subtrees \
         add-subtree-appstore \
         add-subtree-appstore-chart \
@@ -235,7 +235,8 @@ help:
 	@echo
 	@echo 'More help:'
 	@echo '  make help-subtrees    Pulling service subtrees, mirroring vendored charts'
-	@echo '  make help-ci          Checks and chart/image builds that mirror CI'
+	@echo '  make help-ci          Checks and lock maintenance that mirror CI'
+	@echo '  make help-build       Building and inspecting service charts and images'
 	@echo '  make help-local-dev   Building, deploying, and tearing down local builds'
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
 	@echo '  make help-all-vars    Every variable those targets accept'
@@ -246,9 +247,15 @@ help-subtrees:
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
-#help-ci: Show the CI-shaped checks and build targets
+#help-ci: Show the CI-shaped checks and lock-maintenance targets
 help-ci:
 	@awk -f $(HELP_AWK) -v topic=ci $(THIS_MAKEFILE)
+	@echo
+	@echo 'Every variable these accept: make help-all-vars'
+
+#help-build: Show service chart and image build/inspection targets
+help-build:
+	@awk -f $(HELP_AWK) -v topic=build $(THIS_MAKEFILE)
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
@@ -269,7 +276,7 @@ help-all-vars:
 	@echo 'Environment variables:'
 	@echo '  PYTHON=<path>          Interpreter to use (default $(VENV_PYTHON); skips venv setup)'
 	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
-	@echo '  SERVICE=<name>         Required by the per-service targets (make help-ci)'
+	@echo '  SERVICE=<name>         Required by the per-service targets (make help-build)'
 	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
 	@echo '  SERVICES=all           Every service that builds an image, without listing them'
 	@echo '  TAG=<tag>              Image tag to build, push, and pin (default test-<short-sha>)'
@@ -702,7 +709,7 @@ check-locks:
 ##>
 ##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
-##@ ci Building and inspecting one service
+##@ build Building and inspecting one service
 # build-chart: Vendor dependencies, lint, and package one service chart
 build-chart: $(PYTHON_READY)
 	$(call require-service)

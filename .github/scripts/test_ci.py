@@ -1346,7 +1346,7 @@ class HelpLayoutTests(unittest.TestCase):
             ),
         ),
         (
-            "##@ ci Building and inspecting one service",
+            "##@ build Building and inspecting one service",
             (
                 "build-chart",
                 "locked-deps",
@@ -1386,10 +1386,12 @@ class HelpLayoutTests(unittest.TestCase):
             self.assertEqual(found, list(targets), marker)
 
         self.assertEqual(starts, sorted(starts))
-        self.assertRegex(
-            text,
-            r"(?m)^help-local-dev:\n\t@awk -f \$\(HELP_AWK\) -v topic=local-dev \$\(THIS_MAKEFILE\)$",
-        )
+        for target, topic in (("help-build", "build"), ("help-local-dev", "local-dev")):
+            with self.subTest(target=target):
+                self.assertRegex(
+                    text,
+                    rf"(?m)^{target}:\n\t@awk -f \$\(HELP_AWK\) -v topic={topic} \$\(THIS_MAKEFILE\)$",
+                )
 
 
 class RegistryUrlTests(unittest.TestCase):

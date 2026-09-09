@@ -57,7 +57,7 @@ function add_row(title, label, description, padded,   i) {
     # which is what lets one line up its own columns.
     literal = substr($0, 4)
     if (substr(literal, 1, 1) == " ") literal = substr(literal, 2)
-    if (current != "") add_row(current, "", "  " literal, 0)
+    if (current != "") add_row(current, "", literal, 0)
     documented = 0
     armed = 1
     next
@@ -77,8 +77,9 @@ function add_row(title, label, description, padded,   i) {
         if (index(doc[0], name) == 1 && index(doc[0], ": ") > 0) {
             usage = substr(doc[0], 1, index(doc[0], ": ") - 1)
             if (usage == name || index(usage, name " ") == 1) {
-                add_row(current, "  make " usage, substr(doc[0], index(doc[0], ": ") + 2), 1)
-                for (i = 1; i < documented; i++) add_row(current, "", doc[i], 1)
+                description = substr(doc[0], index(doc[0], ": ") + 2)
+                for (i = 1; i < documented; i++) description = description " " doc[i]
+                add_row(current, "  make " usage, description, 1)
             }
         }
     }
@@ -86,18 +87,62 @@ function add_row(title, label, description, padded,   i) {
     documented = 0
 }
 
+function compact_label(label, short_label) {
+    short_label = label
+    sub(/^  make /, "", short_label)
+    sub(/ .*/, "", short_label)
+    return "  make " short_label
+}
+
+function print_wrapped(first_prefix, continuation_prefix, text, \
+                       words, count, i, line, prefix, word) {
+    count = split(trim(text), words, /[ \t]+/)
+    prefix = first_prefix
+    line = prefix
+    for (i = 1; i <= count; i++) {
+        word = words[i]
+        if (length(line) > length(prefix) && length(line) + 1 + length(word) > 80) {
+            print line
+            prefix = continuation_prefix
+            line = prefix word
+        } else if (length(line) == length(prefix)) {
+            line = prefix word
+        } else {
+            line = line " " word
+        }
+    }
+    if (length(line) > length(prefix)) print line
+}
+
 END {
-    # One column width across everything being printed, so sections line up
-    # with each other rather than each finding its own margin.
+    # Use one description column for every target in the rendered topic. This
+    # keeps target descriptions and their continuation lines easy to scan.
     for (s = 1; s <= sections; s++) {
         title = order[s]
         if (topic != "" && topic != topic_of[title]) continue
         for (i = 1; i <= rows[title]; i++)
-            if (row_padded[title, i] && length(row_label[title, i]) + 2 > width)
-                width = length(row_label[title, i]) + 2
+            if (row_padded[title, i] && row_label[title, i] != "" &&
+                length(row_label[title, i]) + 2 > full_width)
+                full_width = length(row_label[title, i]) + 2
+    }
+    # A required-argument usage can leave too little room to show its own
+    # description on an 80-column terminal. Show that usage alone, but align
+    # its description with every other target in the topic.
+    compact_usage = full_width > 55
+    for (s = 1; s <= sections; s++) {
+        title = order[s]
+        if (topic != "" && topic != topic_of[title]) continue
+        for (i = 1; i <= rows[title]; i++) {
+            label = row_label[title, i]
+            if (row_padded[title, i] && label != "") {
+                if (compact_usage) label = compact_label(label)
+                if (length(label) + 2 > width) width = length(label) + 2
+            }
+        }
     }
     # A computed format string rather than %-*s, which BWK awk does not accept.
     format = "%-" width "s"
+    padding = sprintf(format, "")
 
     for (s = 1; s <= sections; s++) {
         title = order[s]
@@ -105,10 +150,18 @@ END {
         if (printed++) print ""
         print title ":"
         for (i = 1; i <= rows[title]; i++) {
-            if (row_padded[title, i])
-                print sprintf(format, row_label[title, i]) row_text[title, i]
-            else
-                print row_text[title, i]
+            label = row_label[title, i]
+            if (!row_padded[title, i])
+                print_wrapped("  ", "  ", row_text[title, i])
+            else if (label == "")
+                print_wrapped(padding, padding, row_text[title, i])
+            else if (compact_usage && label != compact_label(label)) {
+                print label
+                print_wrapped(padding, padding, row_text[title, i])
+            } else {
+                if (compact_usage) label = compact_label(label)
+                print_wrapped(sprintf(format, label), padding, row_text[title, i])
+            }
         }
     }
 }

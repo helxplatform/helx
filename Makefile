@@ -43,8 +43,8 @@ USER_MUTATOR_BRANCH             ?= develop
 HELX_CHART_URL                  ?= https://github.com/helxplatform/helx-chart.git
 HELX_CHART_BRANCH               ?= master
 # Destination for each mirrored chart. `ambassador` also lives upstream and can
-# be mirrored by adding a prefix, a pull-ambassador target, and a pull-helx-chart
-# prerequisite.
+# be mirrored by adding a prefix, a pull-ambassador target, and a
+# pull-helx-chart prerequisite.
 RESTY_CHART_PREFIX              ?= services/resty/chart
 POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
 
@@ -65,7 +65,8 @@ BUILD_CHART                     ?= .github/scripts/helm-build-chart.sh
 UMBRELLA_CHART                  ?= deploy/helm/helx-chart
 COMMON_CHART                    ?= deploy/helm/helx-common/chart
 
-# Defaults for the developer-facing targets, all overridable on the command line.
+# Defaults for the developer-facing targets. All are overridable on the command
+# line.
 BASE                            ?= develop
 CHECK_VERSIONS_FLAGS            ?= --include-untracked --umbrella-above-release
 CHANNEL                         ?= develop
@@ -274,50 +275,91 @@ help-locks:
 #help-all-vars: Show every variable the targets accept
 help-all-vars:
 	@echo 'Environment variables:'
-	@echo '  PYTHON=<path>          Interpreter to use (default $(VENV_PYTHON); skips venv setup)'
-	@echo '  VENV=<dir>             Virtualenv location (default .venv)'
-	@echo '  SERVICE=<name>         Required by the per-service targets (make help-build)'
-	@echo '  SERVICES="a b"         Services you rebuilt locally; only these get pinned'
-	@echo '  SERVICES=all           Every service that builds an image, without listing them'
-	@echo '  TAG=<tag>              Image tag to build, push, and pin (default test-<short-sha>)'
-	@echo '  IMAGE_REGISTRY=<url>   Build, push, and pin against this registry instead'
-	@echo '                         of Harbor, e.g. myregistry.azurecr.io/helx'
-	@echo '  IMAGE_PLATFORM=<arch>  Architecture to build for (default linux/amd64, as CI'
-	@echo '                         publishes); linux/arm64 for a local cluster on Apple Silicon'
-	@echo '  CLUSTER_TOOL=<tool>    kind, minikube, k3d, or auto (default auto)'
-	@echo '  CLUSTER_NAME=<name>    Cluster to load into, when your tool needs it'
-	@echo '  RELEASE=<name>         Release helm-deploy installs or upgrades (default helx);'
-	@echo '                         uninstall-release requires it to be named explicitly'
-	@echo '  NAMESPACE=<ns>         Namespace to deploy into or uninstall from (default: the'
-	@echo '                         kubectl context'"'"'s; required when the context selects none)'
-	@echo '  VALUES="a.yaml b.yaml" Extra values files for helm-deploy, applied last'
-	@echo '  LOCAL_VALUES_FILE=<f>  Untracked list of values files, one path per line'
-	@echo '                         (default deploy/local-dev/local-values-files.env)'
-	@echo '  UNINSTALL_PVCS="a b"   Claims uninstall-release deletes once the release is'
-	@echo '                         gone (default: the postgres, openldap, and shared storage'
-	@echo '                         claims helm uninstall keeps)'
-	@echo '  UNINSTALL_SECRETS="a"  Secrets it deletes as well (default: the chart-managed'
-	@echo '                         ones annotated helm.sh/resource-policy: keep)'
-	@echo '  ASSUME_YES=1           Skip the confirmation prompt a missing file triggers, and'
-	@echo '                         the one uninstall-release always asks'
-	@echo '  HELM_FLAGS=<flags>     Extra helm arguments, e.g. --dry-run --debug'
-	@echo '  CHART_DIST=<dir>       Where packaged charts land (default dist/charts)'
-	@echo '  BASE=<ref>             Base revision for ci-check-versions (default develop)'
-	@echo '  CHECK_VERSIONS_FLAGS=  Defaults to --include-untracked --umbrella-above-release,'
-	@echo '                         matching CI for a pull request into develop. Set empty for'
-	@echo '                         the strict default-branch rules.'
-	@echo '  CHANNEL=<name>         Candidate channel name (default develop)'
-	@echo '  CHART_CHANNEL=<name>   Build the umbrella as a candidate for this channel'
-	@echo '  CHART_CHANNEL_COMMIT=  Commit whose images the candidate pins (default HEAD)'
-	@echo '  FORCE=1                Let the chart mirrors overwrite uncommitted work'
+	@echo '  PYTHON=<path>           Interpreter to use.'
+	@echo '                           Default: $(VENV_PYTHON); skips venv setup.'
+	@echo '  VENV=<dir>              Virtualenv location. Default: .venv.'
+	@echo '  BOOTSTRAP_PYTHON=<path>  Python used to create the virtualenv.'
+	@echo '                           Default: python3.'
+	@echo '  SERVICE=<name>           Required by per-service targets (make help-build).'
+	@echo '  SERVICES="a b"          Services rebuilt locally; only these get pinned.'
+	@echo '  SERVICES=all             Every service that builds an image.'
+	@echo '  TAG=<tag>                Image tag to build, push, and pin.'
+	@echo '                           Default: test-<short-sha>.'
+	@echo '  IMAGE_REGISTRY=<url>     Registry to build, push, and pin against.'
+	@echo '                           Default: Harbor.'
+	@echo '  IMAGE_PLATFORM=<arch>    Architecture to build for. Default: linux/amd64.'
+	@echo '  CLUSTER_TOOL=<tool>      kind, minikube, k3d, or auto. Default: auto.'
+	@echo '  CLUSTER_NAME=<name>      Cluster to load into when the tool needs it.'
+	@echo '  RELEASE=<name>           Release helm-deploy installs or upgrades.'
+	@echo '                           Default: helx; required by uninstall-release.'
+	@echo '  NAMESPACE=<ns>           Namespace to deploy into or uninstall from.'
+	@echo '                           Default: current kubectl context namespace.'
+	@echo '  VALUES="a.yaml b.yaml"  Extra helm-deploy values files, applied last.'
+	@echo '  LOCAL_VALUES_FILE=<f>    Untracked list of values files, one path per line.'
+	@echo '  UNINSTALL_PVCS="a b"     Claims uninstall-release deletes after uninstall.'
+	@echo '  UNINSTALL_SECRETS="a"    Secrets uninstall-release also deletes.'
+	@echo '  ASSUME_YES=1             Skip confirmation prompts.'
+	@echo '  HELM_FLAGS=<flags>       Extra helm arguments, e.g. --dry-run --debug.'
+	@echo '  CHART_DIST=<dir>         Where packaged charts land. Default: dist/charts.'
+	@echo '  BASE=<ref>               Base revision for ci-check-versions.'
+	@echo '                           Default: develop.'
+	@echo '  CHECK_VERSIONS_FLAGS=    Extra flags for ci-check-versions.'
+	@echo '  CHANNEL=<name>           Candidate channel name. Default: develop.'
+	@echo '  CHART_CHANNEL=<name>     Build the umbrella as a candidate for this channel.'
+	@echo '  CHART_CHANNEL_COMMIT=    Commit whose images the candidate pins.'
+	@echo '                           Default: HEAD.'
+	@echo '  HOOKS_PATH=<path>        Git hooks directory. Default: .githooks.'
+	@echo '  FORCE=1                  Let chart mirrors overwrite uncommitted work.'
+	@echo
+	@echo 'Subtree configuration (defaults are at the top of this Makefile):'
+	@echo '  MAX_SUBTREE_BLOB_BYTES=<bytes>  Maximum incoming subtree file size.'
+	@echo '  REMOTE=<name>            Required by pull-subtree.'
+	@echo '  PREFIX=<path>            Required by pull-subtree.'
+	@echo '  BRANCH=<branch>          Required by pull-subtree.'
+	@echo '  APPSTORE_URL=<url>       appstore remote URL.'
+	@echo '  APPSTORE_PREFIX=<path>   appstore local subtree path.'
+	@echo '  APPSTORE_BRANCH=<branch> appstore branch to add or pull.'
+	@echo '  APPSTORE_CHART_URL=<url>       appstore-chart remote URL.'
+	@echo '  APPSTORE_CHART_PREFIX=<path>   appstore-chart local subtree path.'
+	@echo '  APPSTORE_CHART_BRANCH=<branch> appstore-chart branch to add or pull.'
+	@echo '  APPSTORE_PREPULLER_URL=<url>       appstore-prepuller remote URL.'
+	@echo '  APPSTORE_PREPULLER_PREFIX=<path>   appstore-prepuller local subtree path.'
+	@echo '  APPSTORE_PREPULLER_BRANCH=<branch> appstore-prepuller branch to add or pull.'
+	@echo '  APPSTORE_SOCKETS_URL=<url>       appstore-sockets remote URL.'
+	@echo '  APPSTORE_SOCKETS_PREFIX=<path>   appstore-sockets local subtree path.'
+	@echo '  APPSTORE_SOCKETS_BRANCH=<branch> appstore-sockets branch to add or pull.'
+	@echo '  APPSTORE_SOCKETS_CHART_URL=<url>       appstore-sockets-chart remote URL.'
+	@echo '  APPSTORE_SOCKETS_CHART_PREFIX=<path>   appstore-sockets-chart subtree path.'
+	@echo '  APPSTORE_SOCKETS_CHART_BRANCH=<branch> appstore-sockets-chart branch.'
+	@echo '  HELX_LDAP_URL=<url>       helx-ldap remote URL.'
+	@echo '  HELX_LDAP_PREFIX=<path>   helx-ldap local subtree path.'
+	@echo '  HELX_LDAP_BRANCH=<branch> helx-ldap branch to add or pull.'
+	@echo '  LDAP_SYNC_URL=<url>       ldap-sync remote URL.'
+	@echo '  LDAP_SYNC_PREFIX=<path>   ldap-sync local subtree path.'
+	@echo '  LDAP_SYNC_BRANCH=<branch> ldap-sync branch to add or pull.'
+	@echo '  UI_URL=<url>              UI remote URL.'
+	@echo '  UI_PREFIX=<path>          UI local subtree path.'
+	@echo '  UI_BRANCH=<branch>        UI branch to add or pull.'
+	@echo '  UI_CHART_URL=<url>        UI chart remote URL.'
+	@echo '  UI_CHART_PREFIX=<path>    UI chart local subtree path.'
+	@echo '  UI_CHART_BRANCH=<branch>  UI chart branch to add or pull.'
+	@echo '  USER_MUTATOR_URL=<url>       user-mutator remote URL.'
+	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
+	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
+	@echo '  HELX_CHART_URL=<url>         helx-chart remote URL.'
+	@echo '  HELX_CHART_BRANCH=<branch>   helx-chart branch to add or pull.'
+	@echo '  RESTY_CHART_PREFIX=<path>     Local resty chart path.'
+	@echo '  POD_REAPER_CHART_PREFIX=<path> Local pod-reaper chart path.'
 	@echo
 	@echo 'Target groups: make help'
 
 ##@ setup Repository setup
-# setup: Add all remotes and missing service subtrees, plus install git hooks
+# setup: Add all remotes and missing service subtrees, plus install git hooks.
+# [HOOKS_PATH, *_URL, *_PREFIX, *_BRANCH]
 setup: add-subtrees install-hooks
 
-# ensure-remote: Add a remote, or verify that an existing one has the expected URL.
+# ensure-remote: Add a remote, or verify that an existing one has the expected
+# URL.
 define ensure-remote
 	@if git remote get-url "$(1)" >/dev/null 2>&1; then \
 		if test "$$(git remote get-url "$(1)")" != "$(2)"; then \
@@ -333,7 +375,8 @@ define ensure-remote
 	fi
 endef
 
-# check-incoming: refuse to pull a subtree whose incoming tree has oversized files.
+# check-incoming: Refuse to pull a subtree whose incoming tree has oversized
+# files.
 # $(1)=remote  $(2)=branch
 define check-incoming
 	@git fetch -q "$(1)" "$(2)"; \
@@ -346,7 +389,7 @@ define check-incoming
 	fi
 endef
 
-# add-remotes: Add or verify all remotes needed by the service subtrees
+# add-remotes: Add or verify all remotes needed by the service subtrees. [*_URL]
 add-remotes:
 	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
 	$(call ensure-remote,appstore,$(APPSTORE_URL))
@@ -370,7 +413,7 @@ define add-subtree
 	fi
 endef
 
-# add-subtrees: Add all missing service subtrees
+# add-subtrees: Add all missing service subtrees. [*_URL, *_PREFIX, *_BRANCH]
 add-subtrees: add-remotes \
 	add-subtree-appstore \
 	add-subtree-appstore-chart \
@@ -384,48 +427,62 @@ add-subtrees: add-remotes \
 	add-subtree-user-mutator
 
 ##@ subtrees Adding a single subtree
-# add-subtree-appstore: Add the appstore subtree
+# add-subtree-appstore: Add the appstore subtree.
+# [APPSTORE_URL, APPSTORE_PREFIX, APPSTORE_BRANCH]
 add-subtree-appstore: add-remotes
 	$(call add-subtree,$(APPSTORE_PREFIX),appstore,$(APPSTORE_BRANCH))
 
 # add-subtree-appstore-chart: Add the appstore Helm chart subtree.
+# [APPSTORE_CHART_URL, APPSTORE_CHART_PREFIX, APPSTORE_CHART_BRANCH]
 add-subtree-appstore-chart: add-remotes
 	$(call add-subtree,$(APPSTORE_CHART_PREFIX),appstore-chart,$(APPSTORE_CHART_BRANCH))
 
-# add-subtree-appstore-prepuller: Add the appstore-prepuller subtree
+# add-subtree-appstore-prepuller: Add the appstore-prepuller subtree.
+# [APPSTORE_PREPULLER_URL, APPSTORE_PREPULLER_PREFIX,
+#  APPSTORE_PREPULLER_BRANCH]
 add-subtree-appstore-prepuller: add-remotes
 	$(call add-subtree,$(APPSTORE_PREPULLER_PREFIX),appstore-prepuller,$(APPSTORE_PREPULLER_BRANCH))
 
-# add-subtree-appstore-sockets: Add the appstore-sockets subtree
+# add-subtree-appstore-sockets: Add the appstore-sockets subtree.
+# [APPSTORE_SOCKETS_URL, APPSTORE_SOCKETS_PREFIX,
+#  APPSTORE_SOCKETS_BRANCH]
 add-subtree-appstore-sockets: add-remotes
 	$(call add-subtree,$(APPSTORE_SOCKETS_PREFIX),appstore-sockets,$(APPSTORE_SOCKETS_BRANCH))
 
-# add-subtree-appstore-sockets-chart: Add the appstore-sockets Helm chart subtree
+# add-subtree-appstore-sockets-chart: Add the appstore-sockets Helm chart
+# subtree.
+# [APPSTORE_SOCKETS_CHART_URL, APPSTORE_SOCKETS_CHART_PREFIX,
+#  APPSTORE_SOCKETS_CHART_BRANCH]
 add-subtree-appstore-sockets-chart: add-remotes
 	$(call add-subtree,$(APPSTORE_SOCKETS_CHART_PREFIX),appstore-sockets-chart,$(APPSTORE_SOCKETS_CHART_BRANCH))
 
-# add-subtree-helx-ldap: Add the helx-ldap subtree
+# add-subtree-helx-ldap: Add the helx-ldap subtree.
+# [HELX_LDAP_URL, HELX_LDAP_PREFIX, HELX_LDAP_BRANCH]
 add-subtree-helx-ldap: add-remotes
 	$(call add-subtree,$(HELX_LDAP_PREFIX),helx-ldap,$(HELX_LDAP_BRANCH))
 
-# add-subtree-ldap-sync: Add the ldap-sync subtree
+# add-subtree-ldap-sync: Add the ldap-sync subtree.
+# [LDAP_SYNC_URL, LDAP_SYNC_PREFIX, LDAP_SYNC_BRANCH]
 add-subtree-ldap-sync: add-remotes
 	$(call add-subtree,$(LDAP_SYNC_PREFIX),ldap-sync,$(LDAP_SYNC_BRANCH))
 
-# add-subtree-ui: Add the UI subtree
+# add-subtree-ui: Add the UI subtree. [UI_URL, UI_PREFIX, UI_BRANCH]
 add-subtree-ui: add-remotes
 	$(call add-subtree,$(UI_PREFIX),ui,$(UI_BRANCH))
 
-# add-subtree-ui-chart: Add the UI Helm chart subtree
+# add-subtree-ui-chart: Add the UI Helm chart subtree.
+# [UI_CHART_URL, UI_CHART_PREFIX, UI_CHART_BRANCH]
 add-subtree-ui-chart: add-remotes
 	$(call add-subtree,$(UI_CHART_PREFIX),ui-chart,$(UI_CHART_BRANCH))
 
-# add-subtree-user-mutator: Add the user-mutator subtree
+# add-subtree-user-mutator: Add the user-mutator subtree.
+# [USER_MUTATOR_URL, USER_MUTATOR_PREFIX, USER_MUTATOR_BRANCH]
 add-subtree-user-mutator: add-remotes
 	$(call add-subtree,$(USER_MUTATOR_PREFIX),user-mutator,$(USER_MUTATOR_BRANCH))
 
 ##@ subtrees Subtree updates
-# pull-subtree: Pull one subtree using REMOTE, PREFIX, and BRANCH variables.
+# pull-subtree REMOTE=<remote> PREFIX=<path> BRANCH=<branch>: Pull one
+# configured subtree. [MAX_SUBTREE_BLOB_BYTES]
 pull-subtree: add-remotes
 	@if test -z "$(REMOTE)" || test -z "$(PREFIX)" || test -z "$(BRANCH)"; then \
 		echo "Usage: make pull-subtree REMOTE=<remote> PREFIX=<path> BRANCH=<branch>"; \
@@ -434,57 +491,73 @@ pull-subtree: add-remotes
 	$(call check-incoming,$(REMOTE),$(BRANCH))
 	git subtree pull --prefix="$(PREFIX)" "$(REMOTE)" "$(BRANCH)"
 
-# pull-appstore: Pull the latest configured appstore branch into its subtree
+# pull-appstore: Pull the latest configured appstore branch into its subtree.
+# [APPSTORE_URL, APPSTORE_PREFIX, APPSTORE_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-appstore: add-remotes
 	$(call check-incoming,appstore,$(APPSTORE_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_PREFIX)" appstore "$(APPSTORE_BRANCH)"
 
-# pull-appstore-chart: Pull the latest configured appstore chart branch
+# pull-appstore-chart: Pull the latest configured appstore chart branch.
+# [APPSTORE_CHART_URL, APPSTORE_CHART_PREFIX, APPSTORE_CHART_BRANCH,
+#  MAX_SUBTREE_BLOB_BYTES]
 pull-appstore-chart: add-remotes
 	$(call check-incoming,appstore-chart,$(APPSTORE_CHART_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_CHART_PREFIX)" appstore-chart "$(APPSTORE_CHART_BRANCH)"
 
-# pull-appstore-prepuller: Pull the latest configured appstore-prepuller branch
+# pull-appstore-prepuller: Pull the latest configured appstore-prepuller
+# branch. [APPSTORE_PREPULLER_URL, APPSTORE_PREPULLER_PREFIX,
+#  APPSTORE_PREPULLER_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-appstore-prepuller: add-remotes
 	$(call check-incoming,appstore-prepuller,$(APPSTORE_PREPULLER_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_PREPULLER_PREFIX)" appstore-prepuller "$(APPSTORE_PREPULLER_BRANCH)"
 
-# pull-appstore-sockets: Pull the latest configured appstore-sockets branch
+# pull-appstore-sockets: Pull the latest configured appstore-sockets branch.
+# [APPSTORE_SOCKETS_URL, APPSTORE_SOCKETS_PREFIX,
+#  APPSTORE_SOCKETS_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-appstore-sockets: add-remotes
 	$(call check-incoming,appstore-sockets,$(APPSTORE_SOCKETS_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_SOCKETS_PREFIX)" appstore-sockets "$(APPSTORE_SOCKETS_BRANCH)"
 
-# pull-appstore-sockets-chart: Pull the latest configured appstore-sockets chart branch
+# pull-appstore-sockets-chart: Pull the latest configured appstore-sockets
+# chart branch. [APPSTORE_SOCKETS_CHART_URL, APPSTORE_SOCKETS_CHART_PREFIX,
+#  APPSTORE_SOCKETS_CHART_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-appstore-sockets-chart: add-remotes
 	$(call check-incoming,appstore-sockets-chart,$(APPSTORE_SOCKETS_CHART_BRANCH))
 	git subtree pull --prefix="$(APPSTORE_SOCKETS_CHART_PREFIX)" appstore-sockets-chart "$(APPSTORE_SOCKETS_CHART_BRANCH)"
 
-# pull-helx-ldap: Pull the latest configured helx-ldap branch into its subtree
+# pull-helx-ldap: Pull the latest configured helx-ldap branch into its subtree.
+# [HELX_LDAP_URL, HELX_LDAP_PREFIX, HELX_LDAP_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-helx-ldap: add-remotes
 	$(call check-incoming,helx-ldap,$(HELX_LDAP_BRANCH))
 	git subtree pull --prefix="$(HELX_LDAP_PREFIX)" helx-ldap "$(HELX_LDAP_BRANCH)"
 
-# pull-ldap-sync: Pull the latest configured ldap-sync branch
+# pull-ldap-sync: Pull the latest configured ldap-sync branch.
+# [LDAP_SYNC_URL, LDAP_SYNC_PREFIX, LDAP_SYNC_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-ldap-sync: add-remotes
 	$(call check-incoming,ldap-sync,$(LDAP_SYNC_BRANCH))
 	git subtree pull --prefix="$(LDAP_SYNC_PREFIX)" ldap-sync "$(LDAP_SYNC_BRANCH)"
 
-# pull-ui: Pull the latest configured UI branch into its subtree
+# pull-ui: Pull the latest configured UI branch into its subtree.
+# [UI_URL, UI_PREFIX, UI_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-ui: add-remotes
 	$(call check-incoming,ui,$(UI_BRANCH))
 	git subtree pull --prefix="$(UI_PREFIX)" ui "$(UI_BRANCH)"
 
-# pull-ui-chart: Pull the latest configured UI chart branch
+# pull-ui-chart: Pull the latest configured UI chart branch.
+# [UI_CHART_URL, UI_CHART_PREFIX, UI_CHART_BRANCH, MAX_SUBTREE_BLOB_BYTES]
 pull-ui-chart: add-remotes
 	$(call check-incoming,ui-chart,$(UI_CHART_BRANCH))
 	git subtree pull --prefix="$(UI_CHART_PREFIX)" ui-chart "$(UI_CHART_BRANCH)"
 
-# pull-user-mutator: Pull the latest configured user-mutator branch
+# pull-user-mutator: Pull the latest configured user-mutator branch.
+# [USER_MUTATOR_URL, USER_MUTATOR_PREFIX, USER_MUTATOR_BRANCH,
+#  MAX_SUBTREE_BLOB_BYTES]
 pull-user-mutator: add-remotes
 	$(call check-incoming,user-mutator,$(USER_MUTATOR_BRANCH))
 	git subtree pull --squash --prefix="$(USER_MUTATOR_PREFIX)" user-mutator "$(USER_MUTATOR_BRANCH)"
 
-# pull-remotes: Pull every configured service subtree in sequence
+# pull-remotes: Pull every configured service subtree in sequence.
+# [*_URL, *_PREFIX, *_BRANCH, MAX_SUBTREE_BLOB_BYTES, FORCE]
 pull-remotes: pull-appstore \
 	pull-appstore-chart \
 	pull-appstore-prepuller \
@@ -498,9 +571,9 @@ pull-remotes: pull-appstore \
 	pull-helx-chart
 
 # mirror-chart: Replace one local chart with a subdirectory of the fetched tree.
-# git subtree cannot map a remote subdirectory to a local prefix, so the chart is
-# copied by content. Staging is populated and validated before anything local is
-# removed, so a bad chart name leaves the working tree untouched.
+# git subtree cannot map a remote subdirectory to a local prefix, so the chart
+# is copied by content. Staging is populated and validated before anything local
+# is removed, so a bad chart name leaves the working tree untouched.
 # $(1)=upstream charts/<name>  $(2)=local destination
 define mirror-chart
 	@set -euo pipefail; \
@@ -527,19 +600,25 @@ define mirror-chart
 endef
 
 ##@ subtrees Vendored charts (mirrored by content, not git subtree)
-# pull-resty: Mirror the resty chart out of helxplatform/helx-chart.
-# Refuses to clobber uncommitted work; override with FORCE=1. To undo a pull:
-#   git checkout HEAD -- <prefix> && git clean -fd <prefix>
+# pull-resty: Mirror the resty chart out of helxplatform/helx-chart. Refuses
+# to clobber uncommitted work; override with FORCE=1. To undo a pull:
+# git checkout HEAD -- <prefix> && git clean -fd <prefix>
+# [HELX_CHART_URL, HELX_CHART_BRANCH, RESTY_CHART_PREFIX,
+#  MAX_SUBTREE_BLOB_BYTES, FORCE]
 pull-resty: add-remotes
 	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
 	$(call mirror-chart,resty,$(RESTY_CHART_PREFIX))
 
 # pull-pod-reaper: Mirror the pod-reaper chart out of helxplatform/helx-chart.
+# [HELX_CHART_URL, HELX_CHART_BRANCH, POD_REAPER_CHART_PREFIX,
+#  MAX_SUBTREE_BLOB_BYTES, FORCE]
 pull-pod-reaper: add-remotes
 	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
 	$(call mirror-chart,pod-reaper,$(POD_REAPER_CHART_PREFIX))
 
-# pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart
+# pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart.
+# [HELX_CHART_URL, HELX_CHART_BRANCH, RESTY_CHART_PREFIX,
+#  POD_REAPER_CHART_PREFIX, MAX_SUBTREE_BLOB_BYTES, FORCE]
 pull-helx-chart: pull-resty pull-pod-reaper
 ##> Local edits to these charts are overwritten; FORCE=1 skips the dirty check.
 
@@ -601,40 +680,44 @@ define require-services
 endef
 
 ##@ ci Developer checks (see README.md "DevEx")
-# ci-pip-install: Create the virtualenv and install the CI requirements into it
+# ci-pip-install: Create the virtualenv and install the CI requirements into it.
+# [VENV, BOOTSTRAP_PYTHON]
 ci-pip-install: $(VENV_STAMP)
 	@echo "Ready: $(VENV_PYTHON)"
 	@echo "make targets and .github/scripts/*.sh use it automatically."
 	@echo "To get it in your own shell (optional): source $(VENV)/bin/activate"
 
-# ci-validate-everything: Validate every chart, lock, .helmignore, and image definition
+# ci-validate-everything: Validate every chart, lock, .helmignore, and image
+# definition. [PYTHON, VENV]
 ci-validate-everything: $(PYTHON_READY)
 	@$(PYTHON) $(CI_SCRIPT) validate-config
 
-# ci-check-versions: Require version bumps for anything whose artifact changed
+# ci-check-versions: Require version bumps for anything whose artifact changed.
+# [BASE, CHECK_VERSIONS_FLAGS, PYTHON, VENV]
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
 	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
 
-# ci-tests: Run the unit tests for the CI helpers
+# ci-tests: Run the unit tests for the CI helpers. [PYTHON, VENV]
 ci-tests: $(PYTHON_READY)
 	@$(PYTHON) -m unittest discover -s .github/scripts -p 'test_*.py'
 
-# pre-push: Every check CI will run that can run locally
+# pre-push: Every check CI will run that can run locally.
+# [BASE, CHECK_VERSIONS_FLAGS, PYTHON, VENV]
 pre-push: ci-tests ci-validate-everything ci-check-versions check-locks
 	@git diff --check
 	@echo "pre-push checks passed"
 
-# install-hooks: Run pre-push automatically via git hooks
+# install-hooks: Run pre-push automatically via git hooks. [HOOKS_PATH]
 install-hooks:
 	@git config core.hooksPath "$(HOOKS_PATH)"
 	@echo "core.hooksPath = $(HOOKS_PATH)"
 	@echo "Undo with: git config --unset core.hooksPath"
 
-# pull-develop: Merge origin/develop into the current branch and commit the merge.
-# A clean tracked worktree prevents this target from accidentally committing
-# unfinished work. Untracked files are left alone.
+# pull-develop: Merge origin/develop into the current branch and commit the
+# merge. A clean tracked worktree prevents this target from accidentally
+# committing unfinished work. Untracked files are left alone. [PYTHON, VENV]
 pull-develop:
 	@if ! git diff --quiet || ! git diff --cached --quiet; then \
 		echo "Refusing to pull: commit or stash tracked local changes first."; \
@@ -693,24 +776,26 @@ endef
 
 # sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
 # Charts without dependencies are skipped rather than treated as an error.
+# [PYTHON, VENV]
 sync-locks:
 	$(call require-pyyaml)
 	$(call sync-lock-and-resolve,--all,*/Chart.lock)
 
-# sync-helx-lock: Regenerate only the umbrella chart's Chart.lock
+# sync-helx-lock: Regenerate only the umbrella chart's Chart.lock.
+# [PYTHON, VENV]
 sync-helx-lock:
 	$(call require-pyyaml)
 	$(call sync-lock-and-resolve,"$(UMBRELLA_CHART)",$(UMBRELLA_CHART)/Chart.lock)
 
-# check-locks: Verify every lock matches its Chart.yaml without writing anything
+# check-locks: Verify every lock matches its Chart.yaml without writing
+# anything. [PYTHON, VENV]
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
-##>
-##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ build Building and inspecting one service
-# build-chart: Vendor dependencies, lint, and package one service chart
+# build-chart SERVICE=<name>: Vendor dependencies, lint, and package one
+# service chart. [PYTHON, VENV]
 build-chart: $(PYTHON_READY)
 	$(call require-service)
 	@if test ! -f "services/$(SERVICE)/chart/Chart.yaml"; then \
@@ -718,21 +803,25 @@ build-chart: $(PYTHON_READY)
 	fi
 	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "services/$(SERVICE)/chart"
 
-# locked-deps: Print one chart's resolved dependency name/version/repository tuples
+# locked-deps SERVICE=<name>: Print one chart's resolved dependency
+# name/version/repository tuples. [PYTHON, VENV]
 locked-deps: $(PYTHON_READY)
 	$(call require-service)
 	@$(PYTHON) $(CI_SCRIPT) locked-dependencies "services/$(SERVICE)/chart"
 
-# candidate-version: Print the chart version a candidate channel publishes under
+# candidate-version: Print the chart version a candidate channel publishes
+# under. [CHANNEL, PYTHON, VENV]
 candidate-version: $(PYTHON_READY)
 	@$(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)"
 
 # build-common-chart: Vendor dependencies, lint, and package the shared
 # library chart. It lives outside services/, so build-chart cannot reach it.
+# [PYTHON, VENV]
 build-common-chart: $(PYTHON_READY)
 	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "$(COMMON_CHART)"
 
-# docker-build: Build one service image exactly as CI builds it
+# docker-build SERVICE=<name>: Build one service image exactly as CI builds it.
+# [IMAGE_PLATFORM]
 docker-build:
 	$(call require-service)
 	@if test ! -f "services/$(SERVICE)/Dockerfile"; then \
@@ -741,13 +830,9 @@ docker-build:
 	@docker build --platform "$(IMAGE_PLATFORM)" -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
 
 ##@ local-dev Deploying a local build (see README.md "DevEx")
-##> Set these in your shell; every target below reads them:
-##>   export SERVICES="a b"              Services you rebuilt; only these get pinned (required)
-##>                                      or SERVICES=all for every service that builds an image
-##>   export TAG=<tag>                   Image tag to build, push, and pin (default test-<short-sha>)
-##>   export IMAGE_REGISTRY=<url>        Registry to build, push, and pin against (default Harbor)
-# build-helx-images: Build and tag one image per configured variant of each
-# named service, using the same context and Dockerfile CI uses.
+# build-helx-images SERVICES=<name...>: Build and tag one image per configured
+# variant of each named service, using the same context and Dockerfile CI uses.
+# [TAG, IMAGE_REGISTRY, IMAGE_PLATFORM, PYTHON, VENV]
 build-helx-images: $(PYTHON_READY)
 	$(call require-services)
 	@set -euo pipefail; \
@@ -758,8 +843,9 @@ build-helx-images: $(PYTHON_READY)
 	done <<< "$$plan"
 	@echo 'Next: make load-helx-images or make push-helx-images, with the same SERVICES and TAG$(if $(IMAGE_REGISTRY), and IMAGE_REGISTRY)'
 
-# load-helx-images: Load the built images straight into a local cluster, so
-# nothing has to reach a registry.
+# load-helx-images SERVICES=<name...>: Load the built images straight into a
+# local cluster, so nothing has to reach a registry.
+# [TAG, IMAGE_REGISTRY, CLUSTER_TOOL, CLUSTER_NAME, PYTHON, VENV]
 load-helx-images: $(PYTHON_READY)
 	$(call require-services)
 	@set -euo pipefail; \
@@ -790,9 +876,11 @@ load-helx-images: $(PYTHON_READY)
 		esac; \
 	done <<< "$$plan"
 
-# push-helx-images: Push the built images to a registry, for a cluster that
-# cannot be loaded into directly. Defaults to Harbor, so docker login
+# push-helx-images SERVICES=<name...>: Push the built images to a registry,
+# for a cluster that cannot be loaded into directly. Defaults to Harbor, so
+# docker login
 # containers.renci.org first, or set IMAGE_REGISTRY to push elsewhere.
+# [TAG, IMAGE_REGISTRY, PYTHON, VENV]
 push-helx-images: $(PYTHON_READY)
 	$(call require-services)
 	@set -euo pipefail; \
@@ -809,6 +897,8 @@ push-helx-images: $(PYTHON_READY)
 
 # build-helx-chart: Package the umbrella chart. Set CHART_CHANNEL to build a
 # candidate; CHART_CHANNEL_COMMIT defaults to HEAD.
+# [SERVICES, TAG, IMAGE_REGISTRY, CHART_CHANNEL, CHART_CHANNEL_COMMIT,
+#  CHART_DIST, PYTHON, VENV]
 build-helx-chart: $(PYTHON_READY)
 	$(call check-services)
 	@channel="$(CHART_CHANNEL)"; \
@@ -841,6 +931,8 @@ build-helx-chart: $(PYTHON_READY)
 # helm-deploy: Install or upgrade RELEASE from the archive build-helx-chart
 # packaged, found through the pointer that build leaves behind. Values files
 # come from LOCAL_VALUES_FILE, then VALUES.
+# [RELEASE, NAMESPACE, VALUES, LOCAL_VALUES_FILE, ASSUME_YES, HELM_FLAGS,
+#  CHART_DIST]
 helm-deploy:
 	@set -euo pipefail; \
 	pointer="$(UMBRELLA_PACKAGE_POINTER)"; \
@@ -934,8 +1026,8 @@ helm-deploy:
 		$${values_args[@]+"$${values_args[@]}"} \
 		$(foreach values_file,$(VALUES),--values "$(values_file)") \
 		$(HELM_FLAGS)
-##> Exporting TAG is what keeps all four agreeing; left unset it is recomputed from
-##> HEAD each command. Unset SERVICES to leave every image on its released tag.
+##> Exporting TAG keeps all four agreeing; left unset it is recomputed from HEAD
+##> each command. Unset SERVICES to leave every image on its released tag.
 
 ##@ local-dev Tearing down a release
 # uninstall-release RELEASE=<name>: Uninstall RELEASE, then delete the
@@ -945,6 +1037,7 @@ helm-deploy:
 # to be named explicitly: this deletes data, so the default is not assumed. A
 # release that is already gone is not an error, which is what lets this finish a
 # teardown that stopped halfway.
+# [NAMESPACE, UNINSTALL_PVCS, UNINSTALL_SECRETS, ASSUME_YES]
 uninstall-release:
 	@set -euo pipefail; \
 	if test '$(origin RELEASE)' = file; then \
@@ -1031,6 +1124,6 @@ uninstall-release:
 		kubectl delete secret --namespace "$$namespace" \
 			--ignore-not-found $${secrets[@]+"$${secrets[@]}"}; \
 	fi
-##> A claim can sit in Terminating until the pods using it are gone; kubectl waits
-##> it out. Anything the charts did not create is left alone, PersistentVolumes
-##> included -- a Retain volume outlives its claim and is yours to delete.
+##> A claim can sit in Terminating until its pods are gone; kubectl waits it
+##> out. Anything the charts did not create is left alone. PersistentVolumes
+##> included: a Retain volume outlives its claim and is yours to delete.

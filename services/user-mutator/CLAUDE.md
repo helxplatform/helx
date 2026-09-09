@@ -95,7 +95,13 @@ Edit `config.env` to customize:
 **chart/** - Helm chart for deployment
 - Deploys webhook server as Kubernetes Deployment
 - Creates Service, ServiceAccount, RBAC resources
-- Mounts TLS certificates and configuration
+- Uses the `helx-common` library for the webhook TLS and optional LDAP password Secret contracts
+- Generates the webhook serving certificate and renders the cluster-scoped `MutatingWebhookConfiguration` by default (`secret.mode: generate` and `webhook.enabled: true`), so `helm install` needs no `make` targets
+- To opt out, select `secret.mode: existingSecret`, `values`, or `externalSecret`; there is no implicit fallback to a historical Secret name
+- `make deploy-webhook-server` passes those two opt-outs, because that target still creates the certificate and the webhook configuration out of band
+- `templates/webhook.yaml` renders the generated Secret and the webhook configuration together on purpose: Helm templates are pure functions, so splitting them would produce a CA bundle that does not match the serving certificate on a fresh install
+- Namespaces are selected by the automatic `kubernetes.io/metadata.name` label, so no namespace has to be labelled and the chart needs no namespace-patching RBAC
+- Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration
 
 ### Core Workflow
 
@@ -170,7 +176,10 @@ volumeMounts:
       "group_base_dn": "ou=groups,dc=example,dc=com"
     }
   },
-  "secrets": {"cert": "user-mutator-cert-tls"}
+  "secrets": {
+    "cert": "<resolved webhook TLS Secret>",
+    "ldap-password": "<resolved LDAP password Secret when LDAP is enabled>"
+  }
 }
 ```
 
@@ -190,6 +199,12 @@ volumes:
 secretsFrom:
   - secretName: user-credentials
 ```
+
+The chart generates the runtime `secrets` map from the known contracts plus `config.additionalSecrets`. Configure webhook TLS through top-level `secret`, LDAP credentials through `ldap.secret`, and unknown caller-managed contracts through `config.additionalSecrets`. The aliases `cert` and `ldap-password` are reserved.
+
+`config.secrets` is deliberately absent from `values.yaml` so `hasKey` detects a caller-supplied map and fails, rather than ignoring a custom Secret name. Use `secret.mode: existingSecret` with `secret.existingSecret` for the webhook TLS Secret, `ldap.secret.mode: existingSecret` with `ldap.secret.existingSecret` for the LDAP password Secret, and `config.additionalSecrets` for other caller-managed Secrets.
+
+Neither contract carries a historical Secret name by default. A deployment that keeps a Secret from an earlier install selects existingSecret mode and names that Secret explicitly.
 
 ### LDAP Integration
 

@@ -1,0 +1,80 @@
+{{- include "user-mutator.validateTlsMode" . -}}
+{{- $generate := eq .Values.secret.mode "generate" -}}
+{{- $caBundle := "" -}}
+{{- $certs := dict -}}
+{{- if $generate -}}
+  {{- $certs = include "user-mutator.webhookCertData" . | fromYaml -}}
+  {{- $caBundle = get $certs "ca.crt" -}}
+{{- else -}}
+  {{- $caBundle = default "" .Values.webhook.caBundle -}}
+{{- end -}}
+{{- if $generate }}
+{{/*
+The chart-generated Secret and the MutatingWebhookConfiguration are rendered
+from this one file on purpose. Helm templates are pure functions with no
+memoisation, so resolving the certificate in two separate files would generate
+two unrelated key pairs on a fresh install and the caBundle would not match the
+serving certificate.
+*/}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "user-mutator.tlsManagedSecretName" . }}
+  labels:
+    {{- include "user-mutator.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ get $certs "tls.crt" }}
+  tls.key: {{ get $certs "tls.key" }}
+  ca.crt: {{ get $certs "ca.crt" }}
+{{- end }}
+{{- if .Values.webhook.enabled }}
+{{- if not $caBundle }}
+  {{- fail "user-mutator: webhook.enabled requires a CA bundle; set secret.mode to generate, or set webhook.caBundle to the base64 CA that signed the serving certificate" -}}
+{{- end }}
+{{- $namespaces := .Values.webhook.namespaces }}
+{{- if not $namespaces }}
+  {{- $namespaces = list .Release.Namespace }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "user-mutator.webhookName" . }}
+  labels:
+    {{- include "user-mutator.labels" . | nindent 4 }}
+webhooks:
+  - name: {{ printf "%s.%s.svc" (include "user-mutator.fullname" .) .Release.Namespace }}
+    admissionReviewVersions:
+      - v1
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    reinvocationPolicy: {{ .Values.webhook.reinvocationPolicy }}
+    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    clientConfig:
+      caBundle: {{ $caBundle }}
+      service:
+        name: {{ include "user-mutator.fullname" . }}
+        namespace: {{ .Release.Namespace }}
+        path: {{ .Values.webhook.path }}
+        port: {{ .Values.service.port }}
+    rules:
+      {{- toYaml .Values.webhook.rules | nindent 6 }}
+    namespaceSelector:
+      {{- with .Values.webhook.matchLabels }}
+      matchLabels:
+        {{- range $labelKey, $labelValue := . }}
+        {{ $labelKey }}: {{ $labelValue | toString | quote }}
+        {{- end }}
+      {{- end }}
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            {{- toYaml $namespaces | nindent 12 }}
+        {{- with .Values.webhook.extraMatchExpressions }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

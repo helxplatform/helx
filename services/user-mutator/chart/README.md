@@ -1,0 +1,149 @@
+# user-mutator Helm chart
+
+Chart `2.0.1` uses the `helx-common` `0.2.0` library for its webhook TLS and optional LDAP password Secret contracts.
+
+## Secret modes
+
+Each known contract selects exactly one ownership mode. Webhook TLS uses
+`secret.mode` and supports `generate`, `existingSecret`, `values`, and
+`externalSecret`. LDAP credentials use `ldap.secret.mode` and support
+`existingSecret`, `values`, and `externalSecret`.
+
+0. **Chart-generated** (webhook TLS only, and the default): set
+   `secret.mode: generate` and let the chart generate the CA and serving
+   certificate. See below.
+1. **Existing Secret**: set the relevant `mode` to `existingSecret` and name
+   the Secret in `existingSecret`. The chart references it but does not manage
+   it.
+2. **Chart-managed Secret**: set the relevant `mode` to `values` and supply
+   plaintext entries under `values`. Persisted target data is retained on
+   upgrades.
+3. **External Secrets Operator**: set the relevant `mode` to `externalSecret`
+   and configure `remoteRef` plus `secretStoreRef`.
+
+### Webhook TLS
+
+The top-level `secret` contract defaults to `generate`. All modes target
+`<fullname>-tls` with type `kubernetes.io/tls`. In `values` mode, `tls.crt` and
+`tls.key` are required and `ca.crt` is optional. The historical Secret name was
+`user-mutator-cert-tls`; use `secret.mode: existingSecret` to keep referencing
+it.
+
+```yaml
+secret:
+  mode: values
+  values:
+    tls.crt: replace-me
+    tls.key: replace-me
+    # ca.crt: optional
+```
+
+### LDAP password
+
+The `ldap.secret` contract is rendered and mounted only when
+`config.features.ldap` is enabled. All modes target `<fullname>-ldap-password`.
+In `values` mode, the Secret requires the `password` key. To keep a Secret
+preserved from an earlier deployment, set `ldap.secret.mode: existingSecret` and
+name it in `ldap.secret.existingSecret`; the historical name was
+`user-mutator-ldap-password`.
+
+```yaml
+config:
+  features:
+    ldap:
+      host: ldap.example.org
+      port: 389
+      username: cn=admin,dc=example,dc=org
+      user_base_dn: ou=users,dc=example,dc=org
+      group_base_dn: ou=groups,dc=example,dc=org
+ldap:
+  secret:
+    mode: values
+    values:
+      password: replace-me
+```
+
+## Webhook TLS and the MutatingWebhookConfiguration
+
+A mutating webhook needs three things beyond the workload: a serving certificate, a `MutatingWebhookConfiguration` carrying the CA that signed it, and a way to select which namespaces are mutated. **As of chart `2.0.0` the chart renders all three by default**, so `helm install` produces a working webhook and no `make` target has to run out of band.
+
+To manage the certificate and the configuration yourself instead, opt out explicitly:
+
+```yaml
+secret:
+  mode: existingSecret
+webhook:
+  enabled: false
+```
+
+To use a non-generated TLS Secret, set `secret.mode` to `existingSecret`,
+`values`, or `externalSecret`. Configure the corresponding Secret settings for
+the selected mode.
+
+### Certificate lifecycle
+
+`secret.mode: generate` is the default webhook TLS ownership mode and is
+mutually exclusive with `existingSecret`, `values`, and `externalSecret`. The chart generates a self-signed CA and a serving certificate whose SANs cover `<fullname>`, `<fullname>.<namespace>`, `<fullname>.<namespace>.svc`, and `<fullname>.<namespace>.svc.cluster.local`.
+
+Generated material is looked up and reused on every render, so upgrades never rotate the certificate out from under a webhook configuration that already carries the matching CA bundle. The Secret also carries `helm.sh/resource-policy: keep`, so it survives an uninstall and is picked back up by a reinstall. To rotate deliberately, delete the Secret named `<fullname>-tls` and upgrade.
+
+There is no automatic rotation, so `secret.generate.validityDays` defaults to ten years.
+
+The Secret and the configuration are rendered from a single template file. Helm templates are pure functions with no memoisation, so resolving the certificate in two files would generate two unrelated key pairs on a fresh install and the CA bundle would not match the serving certificate.
+
+`lookup` returns nothing during `helm template`, `helm lint`, and client-side dry runs, so rendering the chart offline twice produces two different certificates. That output is only ever inspected, never applied.
+
+To render the configuration against a certificate the chart does not manage,
+select a non-generated `secret.mode` and set `webhook.caBundle` to the base64
+CA that signed it. Rendering fails if `webhook.enabled` is set with no CA bundle
+available from either source.
+
+### Namespace selection
+
+Namespaces are selected by the `kubernetes.io/metadata.name` label, which Kubernetes applies to every namespace automatically. **Nothing has to be labelled for mutation to take effect**, and the chart needs no permission to patch namespaces. `webhook.namespaces` defaults to the release namespace.
+
+`webhook.extraMatchExpressions` is ANDed with that clause and defaults to keeping the webhook away from control-plane and AKS-managed namespaces. To restore the historical opt-in label as a per-namespace toggle, add it to `webhook.matchLabels`:
+
+```yaml
+webhook:
+  matchLabels:
+    enable-user-mutator-webhook-ai-sb-test: "true"
+```
+
+### Adopting a configuration created out of band
+
+The configuration is cluster-scoped, so `webhook.name` defaults to `<fullname>-webhook-<namespace>`. Both qualifiers matter: the release name keeps two releases in one namespace apart, and the namespace keeps one release name in two namespaces apart. The `webhook` token makes the object self-describing in a cluster-wide listing.
+
+That default matches the `MUTATE_CONFIG` convention the old `make mutate-config` flow used, so a deployment that also sets `fullnameOverride` to the historical Service name will land on the name it already has. Set `webhook.name` explicitly for anything else.
+
+Delete any configuration created out of band before installing. Helm will not take over an object it does not own, and one left in place under a different name keeps firing alongside the chart's with a stale `caBundle`.
+
+```sh
+kubectl delete mutatingwebhookconfiguration "$NAME"
+```
+
+Installing the chart requires cluster-level permission on `admissionregistration.k8s.io`, since that is where the configuration lives.
+
+## Additional caller-managed Secrets
+
+Use `config.additionalSecrets` only for unknown extra contracts. Its keys become entries in the generated `config.json` `secrets` map and mount paths under `/etc/user-mutator-secrets/<key>`; values are existing Kubernetes Secret names. The known aliases `cert` and `ldap-password` are reserved and cause rendering to fail if overridden.
+
+```yaml
+config:
+  additionalSecrets:
+    extra-credentials: caller-managed-secret
+```
+
+## Removed: `config.secrets`
+
+`config.secrets` was removed in chart `2.0.0`. Supplying it fails to render, naming the values to move it to. Rendering fails rather than ignoring the map because silently dropping a custom Secret name would leave the webhook serving a certificate the caller never chose.
+
+| Old entry | Replacement |
+| --- | --- |
+| `config.secrets.cert` | `secret.mode: existingSecret` with `secret.existingSecret` |
+| `config.secrets.ldap-password` | `ldap.secret.mode: existingSecret` with `ldap.secret.existingSecret` |
+| anything else | `config.additionalSecrets` |
+
+`config.secrets` is intentionally absent from `values.yaml`; that absence is what lets the chart tell a caller-supplied map from a chart default, so re-adding it would break the check.
+
+The committed `Chart.lock` pins the exact `helx-common` dependency used by this chart.

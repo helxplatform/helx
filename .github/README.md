@@ -157,8 +157,10 @@ publication.
   resolution and is derivable from `Chart.yaml` with no registry access.
   Regenerate it with `make sync-locks` (every chart) or `make sync-helx-lock`
   (umbrella only) rather than `helm dependency update`; `make check-locks`
-  verifies without writing. Because no resolution is involved, this also works
-  for a dependency version that is not published yet, which `helm dependency
+  verifies without writing. If a `Chart.lock` has an unresolved Git conflict,
+  either sync target recreates it from the merged `Chart.yaml` and stages that
+  resolution. Because no resolution is involved, this also works for a dependency
+  version that is not published yet, which `helm dependency
   update` cannot do. The digest reproduces Helm's `resolver.HashReq`.
 - Repository-owned dependencies should use
   `oci://ghcr.io/helxplatform/helm-charts` in committed metadata.

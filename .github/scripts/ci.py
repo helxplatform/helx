@@ -485,7 +485,12 @@ def lock_matches_chart(chart_dir: Path) -> bool:
     if not lock_path.is_file():
         return False
     expected = yaml.safe_load(render_lock(chart_dir))
-    actual = read_yaml(lock_path)
+    try:
+        actual = read_yaml(lock_path)
+    except CIError:
+        # An unresolved Git conflict leaves non-YAML conflict markers behind.
+        # Treat any malformed lock as stale so sync-lock can replace it.
+        return False
     dependencies = [
         {key: item.get(key) for key in ("name", "repository", "version")}
         for item in (actual.get("dependencies") or [])

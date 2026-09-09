@@ -664,6 +664,18 @@ class LockSyncTests(TempTreeTest):
         chart.write_text(chart.read_text().replace("1.2.3", "1.2.4"), encoding="utf-8")
         self.assertFalse(ci.lock_matches_chart(self.chart_dir))
 
+    def test_sync_replaces_a_conflicted_lock(self) -> None:
+        self.write(
+            "deploy/helm/helx-chart/Chart.lock",
+            "<<<<<<< HEAD\ninvalid lock\n=======\nother invalid lock\n>>>>>>> develop\n",
+        )
+        self.assertFalse(ci.lock_matches_chart(self.chart_dir))
+
+        with patch.object(ci, "ROOT", self.root), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(ci.main(["sync-lock", "deploy/helm/helx-chart"]), 0)
+
+        self.assertTrue(ci.lock_matches_chart(self.chart_dir))
+
 
 BASELINE_HELMIGNORE = "\n".join(ci.REQUIRED_HELMIGNORE) + "\n"
 

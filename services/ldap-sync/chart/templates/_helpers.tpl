@@ -111,10 +111,12 @@ existingSecret, the PostgreSQL dependency creates a Secret with its fullname.
 {{- end -}}
 
 {{/*
-Resolve the LDAP credential Secret selected by managed, existingSecret, or ESO mode.
+Resolve the LDAP credential Secret selected by the configured ownership mode.
 */}}
 {{- define "ldap-sync.secretName" -}}
 {{- include "helx-common.secret.name.v1" (dict
+  "mode" .Values.secret.mode
+  "secretValueBlockPath" "secret"
   "defaultName" (include "ldap-sync.managedSecretName" .)
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret

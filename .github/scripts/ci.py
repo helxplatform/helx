@@ -992,6 +992,53 @@ def _base_chart(root: Path, base: str, chart_dir: Path) -> dict[str, Any] | None
     return _yaml_mapping(content, f"{base}:{path}") if content is not None else None
 
 
+def base_version_introduction(
+    root: Path, base: str, chart_dir: Path, version: str
+) -> tuple[str, str] | None:
+    """Find the base-history commit that first set a chart to ``version``.
+
+    This is diagnostic context only. A malformed historical Chart.yaml or an
+    unavailable parent must not hide the primary version-gate failure.
+    """
+    path = relative_path(root, chart_dir / "Chart.yaml")
+    commits = git_run(root, "log", "--format=%H", base, "--", path, check=False)
+    if commits.returncode != 0:
+        return None
+    for commit in commits.stdout.splitlines():
+        content = git_file(root, commit, path)
+        if content is None:
+            continue
+        try:
+            current = metadata_value(_yaml_mapping(content, f"{commit}:{path}"), "version", path)
+        except CIError:
+            continue
+        if current != version:
+            continue
+        parent_line = git_run(root, "rev-list", "--parents", "-n", "1", commit, check=False)
+        parent_parts = parent_line.stdout.split()
+        parents = parent_parts[1:]
+        if not parents:
+            continue
+        parent_versions: list[str | None] = []
+        for parent in parents:
+            parent_content = git_file(root, parent, path)
+            if parent_content is None:
+                parent_versions.append(None)
+                continue
+            try:
+                parent_versions.append(
+                    metadata_value(_yaml_mapping(parent_content, f"{parent}:{path}"), "version", path)
+                )
+            except CIError:
+                parent_versions.append(None)
+        # If a parent already had this version, it entered base history earlier.
+        if any(parent_version == version for parent_version in parent_versions):
+            continue
+        subject = git_run(root, "show", "-s", "--format=%s", commit, check=False)
+        return commit[:12], subject.stdout.strip() or "(no commit subject)"
+    return None
+
+
 def _require_increase(
     current: str, previous: str, label: str, allow_equal: bool = False, hint: str = ""
 ) -> None:
@@ -1089,6 +1136,7 @@ def check_versions(
         current = read_yaml(chart_dir / "Chart.yaml")
         is_umbrella = chart_dir.resolve() == (root / UMBRELLA_DIR).resolve()
         current_version = metadata_value(current, "version", str(chart_dir / "Chart.yaml"))
+        chart_name = metadata_value(current, "name", str(chart_dir / "Chart.yaml"))
         base_version = metadata_value(
             previous, "version", f"{base}:{relative_dir}/Chart.yaml"
         )
@@ -1115,11 +1163,22 @@ def check_versions(
                 errors.append(str(exc))
             continue
         try:
-            _require_increase(
-                current_version, base_version, f"{relative_dir} chart version"
-            )
+            _require_increase(current_version, base_version, f"{relative_dir} chart version")
         except CIError as exc:
-            errors.append(str(exc))
+            introduction = base_version_introduction(root, base, chart_dir, base_version)
+            if introduction is None:
+                errors.append(
+                    "We were unable to identify what caused the convergence, but the "
+                    f"{base} branch and your branch now have the same version for the "
+                    f"{chart_name} service chart. Therefore the {relative_dir} chart version "
+                    f"must increase above {base_version!r}; current value is {current_version!r}."
+                )
+                continue
+            commit, subject = introduction
+            errors.append(
+                f"The {exc}. The {base} branch introduced {base_version!r} in {commit} ({subject!r}); "
+                "your branch also changes files in the packaged chart, so choose a newer version."
+            )
 
     config = load_images_config(config_path or root / IMAGES_FILE)
     checked_components: set[tuple[str, str]] = set()

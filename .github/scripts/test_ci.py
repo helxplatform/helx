@@ -884,14 +884,46 @@ class UntrackedChangeTests(TempTreeTest):
             "ignored/junk.txt", ci.changed_paths(self.root, self.base, include_untracked=True)
         )
 
-    def test_version_gate_catches_an_untracked_chart_file(self) -> None:
+    def test_version_gate_explains_an_unidentified_version_convergence(self) -> None:
+        self.git("branch", "develop", self.base)
         self.write("services/api/chart/.helmignore", ".gitignore\n")
         empty = {"registry": ci.REGISTRY, "images": []}
         with patch.object(ci, "load_images_config", return_value=empty):
             # Committed history alone shows nothing to gate on.
-            ci.check_versions(self.root, self.base)
-            with self.assertRaisesRegex(ci.CIError, "chart version must increase"):
+            ci.check_versions(self.root, "develop")
+            with self.assertRaises(ci.CIError) as raised:
+                ci.check_versions(self.root, "develop", include_untracked=True)
+
+        self.assertEqual(
+            str(raised.exception),
+            "Version checks failed:\n"
+            "- We were unable to identify what caused the convergence, but the develop "
+            "branch and your branch now have the same version for the api service chart. "
+            "Therefore the services/api/chart chart version must increase above '1.0.0'; "
+            "current value is '1.0.0'.",
+        )
+
+    def test_version_gate_names_the_base_commit_that_introduced_the_version(self) -> None:
+        chart = self.root / "services/api/chart/Chart.yaml"
+        chart.write_text(chart.read_text().replace("version: 1.0.0", "version: 1.0.1"), encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "Bump api chart version")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.write("services/api/chart/templates/deployment.yaml", "apiVersion: v1\nkind: ConfigMap\n")
+
+        empty = {"registry": ci.REGISTRY, "images": []}
+        with patch.object(ci, "load_images_config", return_value=empty):
+            with self.assertRaises(ci.CIError) as raised:
                 ci.check_versions(self.root, self.base, include_untracked=True)
+
+        message = str(raised.exception)
+        self.assertIn("The services/api/chart chart version must increase above '1.0.1'", message)
+        self.assertIn(f"The {self.base} branch introduced '1.0.1' in {self.base[:12]}", message)
+        self.assertIn("Bump api chart version", message)
+        self.assertIn(
+            "your branch also changes files in the packaged chart, so choose a newer version.",
+            message,
+        )
 
 
 class LocalServiceBuildTests(TempTreeTest):
@@ -1211,6 +1243,64 @@ class ImagePlanContractTests(TempTreeTest):
         self.assertTrue(selective, "no image-plan call passes flags")
         for flags in selective:
             self.assertIn("$(IMAGE_PLAN_FLAGS)", flags)
+
+
+class ServicesAllTests(unittest.TestCase):
+    """SERVICES=all is a Makefile-side shorthand, so ci.py must never see it.
+
+    The expansion happens in $(RESOLVED_SERVICES); anything that forwarded the
+    raw $(SERVICES) instead would reach --services with the literal word 'all'
+    and fail the inventory check, so each consumer is pinned here.
+    """
+
+    def setUp(self) -> None:
+        self.makefile = SCRIPT.resolve().parents[2] / "Makefile"
+        if not self.makefile.is_file():  # pragma: no cover - only outside the repo
+            self.skipTest("Makefile not present")
+        self.text = self.makefile.read_text(encoding="utf-8")
+
+    def test_all_is_expanded_from_the_image_plan_component_column(self) -> None:
+        # Column 1 is 'component', which is the name --services matches on.
+        self.assertRegex(
+            self.text,
+            r"ALL_IMAGE_SERVICES\s*=\s*\$\(shell \$\(PYTHON\) \$\(CI_SCRIPT\) image-plan \| cut -f1",
+        )
+        self.assertRegex(
+            self.text,
+            r"RESOLVED_SERVICES\s*=\s*\$\(if \$\(filter all,\$\(SERVICES\)\),"
+            r"\$\(ALL_IMAGE_SERVICES\),\$\(SERVICES\)\)",
+        )
+
+    def test_every_services_consumer_reads_the_expanded_list(self) -> None:
+        # --services and CHART_CHANNEL_SERVICES are the two values ci.py
+        # validates against the image inventory; both take the expansion.
+        self.assertIn('--services "$(RESOLVED_SERVICES)"', self.text)
+        self.assertIn('CHART_CHANNEL_SERVICES="$$services"', self.text)
+        self.assertNotIn('--services "$(SERVICES)"', self.text)
+        self.assertNotIn('CHART_CHANNEL_SERVICES="$(SERVICES)"', self.text)
+
+    def test_every_target_reading_services_rejects_all_plus_names(self) -> None:
+        # 'all ui' would expand to every service and silently drop the 'ui' the
+        # caller clearly meant something by, so both entry points guard first:
+        # require-services for the image targets, and the chart target directly,
+        # since SERVICES is optional there and it calls no other guard.
+        self.assertIn("define check-services", self.text)
+        guarded = re.findall(
+            r"^(?:define (require-services)|(build-helx-chart):[^\n]*)\n\t\$\(call check-services\)$",
+            self.text,
+            re.MULTILINE,
+        )
+        self.assertEqual(
+            {name for pair in guarded for name in pair if name},
+            {"require-services", "build-helx-chart"},
+        )
+
+    def test_no_component_is_named_all(self) -> None:
+        # A service literally called 'all' would be unreachable: the Makefile
+        # expands the name away before ci.py ever sees it.
+        components = set(ci.component_images(SCRIPT.resolve().parents[2]))
+        self.assertTrue(components)
+        self.assertNotIn("all", components)
 
 
 class RegistryUrlTests(unittest.TestCase):

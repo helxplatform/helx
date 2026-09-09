@@ -1,3 +1,4 @@
+{{- $secretNames := include "user-mutator.effectiveSecretNames" . | fromYaml }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -57,7 +58,7 @@ spec:
               mountPath: {{ printf "/etc/user-mutator-maps/%s" $mapName }}
               readOnly: true
             {{- end }}
-            {{- range $key, $value := .Values.config.secrets }}
+            {{- range $key, $_ := $secretNames }}
             - name: {{ $key }}-secret
               mountPath: /etc/user-mutator-secrets/{{ $key }}
               readOnly: true
@@ -72,10 +73,10 @@ spec:
             name: {{ $mapName }}
             optional: true
         {{- end }}
-        {{- range $key, $value := .Values.config.secrets }}
+        {{- range $key, $secretName := $secretNames }}
         - name: {{ $key }}-secret
           secret:
-            secretName: {{ $value }}
+            secretName: {{ $secretName }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -549,45 +549,6 @@ $(VENV_STAMP): $(CI_REQUIREMENTS)
 	@"$(VENV_PYTHON)" -m pip install --quiet --requirement "$(CI_REQUIREMENTS)"
 	@touch "$@"
 
-##@ ci Developer checks (see README.md "DevEx")
-# ci-pip-install: Create the virtualenv and install the CI requirements into it
-ci-pip-install: $(VENV_STAMP)
-	@echo "Ready: $(VENV_PYTHON)"
-	@echo "make targets and .github/scripts/*.sh use it automatically."
-	@echo "To get it in your own shell (optional): source $(VENV)/bin/activate"
-
-# ci-validate-everything: Validate every chart, lock, .helmignore, and image definition
-ci-validate-everything: $(PYTHON_READY)
-	@$(PYTHON) $(CI_SCRIPT) validate-config
-
-# ci-check-versions: Require version bumps for anything whose artifact changed
-ci-check-versions: $(PYTHON_READY)
-	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
-		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
-	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
-
-# ci-tests: Run the unit tests for the CI helpers
-ci-tests: $(PYTHON_READY)
-	@$(PYTHON) -m unittest discover -s .github/scripts -p 'test_*.py'
-
-##@ ci Building and inspecting one service
-# build-chart: Vendor dependencies, lint, and package one service chart
-build-chart: $(PYTHON_READY)
-	$(call require-service)
-	@if test ! -f "services/$(SERVICE)/chart/Chart.yaml"; then \
-		echo "services/$(SERVICE)/chart has no Chart.yaml"; exit 1; \
-	fi
-	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "services/$(SERVICE)/chart"
-
-# locked-deps: Print one chart's resolved dependency name/version/repository tuples
-locked-deps: $(PYTHON_READY)
-	$(call require-service)
-	@$(PYTHON) $(CI_SCRIPT) locked-dependencies "services/$(SERVICE)/chart"
-
-# candidate-version: Print the chart version a candidate channel publishes under
-candidate-version: $(PYTHON_READY)
-	@$(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)"
-
 # check-services: 'all' is the whole list, so mixing it with service names means
 # one of the two was not meant. Every target that reads SERVICES runs this,
 # including the ones where SERVICES is optional.
@@ -611,6 +572,145 @@ define require-services
 		exit 1; \
 	fi
 endef
+
+##@ ci Developer checks (see README.md "DevEx")
+# ci-pip-install: Create the virtualenv and install the CI requirements into it
+ci-pip-install: $(VENV_STAMP)
+	@echo "Ready: $(VENV_PYTHON)"
+	@echo "make targets and .github/scripts/*.sh use it automatically."
+	@echo "To get it in your own shell (optional): source $(VENV)/bin/activate"
+
+# ci-validate-everything: Validate every chart, lock, .helmignore, and image definition
+ci-validate-everything: $(PYTHON_READY)
+	@$(PYTHON) $(CI_SCRIPT) validate-config
+
+# ci-check-versions: Require version bumps for anything whose artifact changed
+ci-check-versions: $(PYTHON_READY)
+	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
+		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
+	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
+
+# ci-tests: Run the unit tests for the CI helpers
+ci-tests: $(PYTHON_READY)
+	@$(PYTHON) -m unittest discover -s .github/scripts -p 'test_*.py'
+
+# pre-push: Every check CI will run that can run locally
+pre-push: ci-tests ci-validate-everything ci-check-versions check-locks
+	@git diff --check
+	@echo "pre-push checks passed"
+
+# install-hooks: Run pre-push automatically via git hooks
+install-hooks:
+	@git config core.hooksPath "$(HOOKS_PATH)"
+	@echo "core.hooksPath = $(HOOKS_PATH)"
+	@echo "Undo with: git config --unset core.hooksPath"
+
+# pull-develop: Merge origin/develop into the current branch and commit the merge.
+# A clean tracked worktree prevents this target from accidentally committing
+# unfinished work. Untracked files are left alone.
+pull-develop:
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "Refusing to pull: commit or stash tracked local changes first."; \
+		exit 1; \
+	fi
+	$(call require-pyyaml)
+	@pull_status=0; \
+	git pull --no-rebase --no-commit origin develop || pull_status=$$?; \
+	if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then \
+		if test "$$pull_status" -ne 0; then \
+			echo "Could not pull origin/develop; no merge is in progress."; \
+			exit "$$pull_status"; \
+		fi; \
+		echo "origin/develop was fast-forwarded or already up to date; no merge commit is needed."; \
+		exit 0; \
+	fi; \
+	non_lock_conflicts=(); \
+	while IFS= read -r -d '' unmerged_path; do \
+		case "$$unmerged_path" in \
+			*/Chart.lock|Chart.lock) ;; \
+			*) non_lock_conflicts+=("$$unmerged_path");; \
+		esac; \
+	done < <(git diff --name-only -z --diff-filter=U); \
+	if test -n "$$non_lock_conflicts"; then \
+		echo "There are merge conflicts outside generated Chart.lock files. Resolve them, then run make sync-locks before committing:"; \
+		printf '%s\n' "$${non_lock_conflicts[@]}"; \
+		exit 1; \
+	fi; \
+	if ! $(PYTHON) $(CI_SCRIPT) sync-lock --all; then exit 1; fi; \
+	changed_locks=(); \
+	while IFS= read -r -d '' changed_lock; do \
+		changed_locks+=("$$changed_lock"); \
+	done < <(git diff --name-only -z -- ':(glob)**/Chart.lock'); \
+	if test -n "$$changed_locks"; then git add -- "$${changed_locks[@]}"; fi; \
+	conflicts="$$(git diff --name-only --diff-filter=U)"; \
+	if test -n "$$conflicts"; then \
+		echo "There are still merge conflicts. Please resolve them before committing the merge:"; \
+		printf '%s\n' "$$conflicts"; \
+		exit 1; \
+	fi; \
+	GIT_EDITOR=true git commit --no-edit
+
+# Recreate generated locks, then stage only locks that were unmerged before
+# regeneration. Ordinary stale locks remain unstaged, as before.
+define sync-lock-and-resolve
+	@conflicted_locks=(); \
+	while IFS= read -r -d '' lock; do \
+		case "$$lock" in $(2)) conflicted_locks+=("$$lock");; esac; \
+	done < <(git diff --name-only -z --diff-filter=U); \
+	if ! $(PYTHON) $(CI_SCRIPT) sync-lock $(1); then exit 1; fi; \
+	if test -n "$$conflicted_locks"; then \
+		git add -- "$${conflicted_locks[@]}"; \
+		echo "Resolved and staged conflicted Chart.lock file(s)"; \
+	fi
+endef
+
+# sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
+# Charts without dependencies are skipped rather than treated as an error.
+sync-locks:
+	$(call require-pyyaml)
+	$(call sync-lock-and-resolve,--all,*/Chart.lock)
+
+# sync-helx-lock: Regenerate only the umbrella chart's Chart.lock
+sync-helx-lock:
+	$(call require-pyyaml)
+	$(call sync-lock-and-resolve,"$(UMBRELLA_CHART)",$(UMBRELLA_CHART)/Chart.lock)
+
+# check-locks: Verify every lock matches its Chart.yaml without writing anything
+check-locks:
+	$(call require-pyyaml)
+	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
+
+##@ ci Building and inspecting one service
+# build-chart: Vendor dependencies, lint, and package one service chart
+build-chart: $(PYTHON_READY)
+	$(call require-service)
+	@if test ! -f "services/$(SERVICE)/chart/Chart.yaml"; then \
+		echo "services/$(SERVICE)/chart has no Chart.yaml"; exit 1; \
+	fi
+	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "services/$(SERVICE)/chart"
+
+# locked-deps: Print one chart's resolved dependency name/version/repository tuples
+locked-deps: $(PYTHON_READY)
+	$(call require-service)
+	@$(PYTHON) $(CI_SCRIPT) locked-dependencies "services/$(SERVICE)/chart"
+
+# candidate-version: Print the chart version a candidate channel publishes under
+candidate-version: $(PYTHON_READY)
+	@$(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)"
+
+# build-common-chart: Vendor dependencies, lint, and package the shared
+# library chart. It lives outside services/, so build-chart cannot reach it.
+build-common-chart: $(PYTHON_READY)
+	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "$(COMMON_CHART)"
+
+# docker-build: Build one service image exactly as CI builds it
+docker-build:
+	$(call require-service)
+	@if test ! -f "services/$(SERVICE)/Dockerfile"; then \
+		echo "services/$(SERVICE) has no Dockerfile; it is chart-only"; exit 1; \
+	fi
+	@docker build --platform "$(IMAGE_PLATFORM)" -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
 
 ##@ ci Deploying a local build (see README.md "DevEx")
 ##> Set these in your shell; every target below reads them:
@@ -679,14 +779,6 @@ push-helx-images: $(PYTHON_READY)
 		docker push "$$reference:$(TAG)"; \
 	done <<< "$$plan"
 
-##> Then make build-helx-chart, listed above, to package the umbrella
-
-##@ ci Building and inspecting one service
-# build-common-chart: Vendor dependencies, lint, and package the shared
-# library chart. It lives outside services/, so build-chart cannot reach it.
-build-common-chart: $(PYTHON_READY)
-	@PYTHON="$(PYTHON)" bash $(BUILD_CHART) "$(COMMON_CHART)"
-
 # build-helx-chart: Package the umbrella chart. Set CHART_CHANNEL to build a
 # candidate; CHART_CHANNEL_COMMIT defaults to HEAD.
 build-helx-chart: $(PYTHON_READY)
@@ -718,7 +810,6 @@ build-helx-chart: $(PYTHON_READY)
 		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
 	@echo 'Next: make helm-deploy RELEASE=<name> NAMESPACE=<ns> VALUES="a.yaml b.yaml"'
 
-##@ ci Deploying a local build (see README.md "DevEx")
 # helm-deploy: Install or upgrade RELEASE from the archive build-helx-chart
 # packaged, found through the pointer that build leaves behind. Values files
 # come from LOCAL_VALUES_FILE, then VALUES.
@@ -915,103 +1006,6 @@ uninstall-release:
 ##> A claim can sit in Terminating until the pods using it are gone; kubectl waits
 ##> it out. Anything the charts did not create is left alone, PersistentVolumes
 ##> included -- a Retain volume outlives its claim and is yours to delete.
-
-##@ ci Building and inspecting one service
-# docker-build: Build one service image exactly as CI builds it
-docker-build:
-	$(call require-service)
-	@if test ! -f "services/$(SERVICE)/Dockerfile"; then \
-		echo "services/$(SERVICE) has no Dockerfile; it is chart-only"; exit 1; \
-	fi
-	@docker build --platform "$(IMAGE_PLATFORM)" -f "services/$(SERVICE)/Dockerfile" "services/$(SERVICE)"
-
-##@ ci Developer checks (see README.md "DevEx")
-# pre-push: Every check CI will run that can run locally
-pre-push: ci-tests ci-validate-everything ci-check-versions check-locks
-	@git diff --check
-	@echo "pre-push checks passed"
-
-# install-hooks: Run pre-push automatically via git hooks
-install-hooks:
-	@git config core.hooksPath "$(HOOKS_PATH)"
-	@echo "core.hooksPath = $(HOOKS_PATH)"
-	@echo "Undo with: git config --unset core.hooksPath"
-
-# pull-develop: Merge origin/develop into the current branch and commit the merge.
-# A clean tracked worktree prevents this target from accidentally committing
-# unfinished work. Untracked files are left alone.
-pull-develop:
-	@if ! git diff --quiet || ! git diff --cached --quiet; then \
-		echo "Refusing to pull: commit or stash tracked local changes first."; \
-		exit 1; \
-	fi
-	$(call require-pyyaml)
-	@pull_status=0; \
-	git pull --no-rebase --no-commit origin develop || pull_status=$$?; \
-	if ! git rev-parse -q --verify MERGE_HEAD >/dev/null; then \
-		if test "$$pull_status" -ne 0; then \
-			echo "Could not pull origin/develop; no merge is in progress."; \
-			exit "$$pull_status"; \
-		fi; \
-		echo "origin/develop was fast-forwarded or already up to date; no merge commit is needed."; \
-		exit 0; \
-	fi; \
-	non_lock_conflicts=(); \
-	while IFS= read -r -d '' unmerged_path; do \
-		case "$$unmerged_path" in \
-			*/Chart.lock|Chart.lock) ;; \
-			*) non_lock_conflicts+=("$$unmerged_path");; \
-		esac; \
-	done < <(git diff --name-only -z --diff-filter=U); \
-	if test -n "$$non_lock_conflicts"; then \
-		echo "There are merge conflicts outside generated Chart.lock files. Resolve them, then run make sync-locks before committing:"; \
-		printf '%s\n' "$${non_lock_conflicts[@]}"; \
-		exit 1; \
-	fi; \
-	if ! $(PYTHON) $(CI_SCRIPT) sync-lock --all; then exit 1; fi; \
-	changed_locks=(); \
-	while IFS= read -r -d '' changed_lock; do \
-		changed_locks+=("$$changed_lock"); \
-	done < <(git diff --name-only -z -- ':(glob)**/Chart.lock'); \
-	if test -n "$$changed_locks"; then git add -- "$${changed_locks[@]}"; fi; \
-	conflicts="$$(git diff --name-only --diff-filter=U)"; \
-	if test -n "$$conflicts"; then \
-		echo "There are still merge conflicts. Please resolve them before committing the merge:"; \
-		printf '%s\n' "$$conflicts"; \
-		exit 1; \
-	fi; \
-	GIT_EDITOR=true git commit --no-edit
-
-# Recreate generated locks, then stage only locks that were unmerged before
-# regeneration. Ordinary stale locks remain unstaged, as before.
-define sync-lock-and-resolve
-	@conflicted_locks=(); \
-	while IFS= read -r -d '' lock; do \
-		case "$$lock" in $(2)) conflicted_locks+=("$$lock");; esac; \
-	done < <(git diff --name-only -z --diff-filter=U); \
-	if ! $(PYTHON) $(CI_SCRIPT) sync-lock $(1); then exit 1; fi; \
-	if test -n "$$conflicted_locks"; then \
-		git add -- "$${conflicted_locks[@]}"; \
-		echo "Resolved and staged conflicted Chart.lock file(s)"; \
-	fi
-endef
-
-# sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
-# Charts without dependencies are skipped rather than treated as an error.
-sync-locks:
-	$(call require-pyyaml)
-	$(call sync-lock-and-resolve,--all,*/Chart.lock)
-
-# sync-helx-lock: Regenerate only the umbrella chart's Chart.lock
-sync-helx-lock:
-	$(call require-pyyaml)
-	$(call sync-lock-and-resolve,"$(UMBRELLA_CHART)",$(UMBRELLA_CHART)/Chart.lock)
-
-# check-locks: Verify every lock matches its Chart.yaml without writing anything
-check-locks:
-	$(call require-pyyaml)
-	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
-##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ subtrees Subtree updates
 # pull-remotes: Pull every configured service subtree in sequence

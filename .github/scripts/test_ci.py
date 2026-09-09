@@ -1303,6 +1303,68 @@ class ServicesAllTests(unittest.TestCase):
         self.assertNotIn("all", components)
 
 
+class CiHelpLayoutTests(unittest.TestCase):
+    """The Makefile is the source of truth for the rendered CI help order."""
+
+    SECTIONS = (
+        (
+            '##@ ci Developer checks (see README.md "DevEx")',
+            (
+                "ci-pip-install",
+                "ci-validate-everything",
+                "ci-check-versions",
+                "ci-tests",
+                "pre-push",
+                "install-hooks",
+                "pull-develop",
+                "sync-locks",
+                "sync-helx-lock",
+                "check-locks",
+            ),
+        ),
+        (
+            "##@ ci Building and inspecting one service",
+            (
+                "build-chart",
+                "locked-deps",
+                "candidate-version",
+                "build-common-chart",
+                "docker-build",
+            ),
+        ),
+        (
+            '##@ ci Deploying a local build (see README.md "DevEx")',
+            (
+                "build-helx-images",
+                "load-helx-images",
+                "push-helx-images",
+                "build-helx-chart",
+                "helm-deploy",
+            ),
+        ),
+        ("##@ ci Tearing down a release", ("uninstall-release",)),
+    )
+
+    def test_sections_are_single_ordered_blocks(self) -> None:
+        makefile = SCRIPT.resolve().parents[2] / "Makefile"
+        if not makefile.is_file():  # pragma: no cover - only outside the repo
+            self.skipTest("Makefile not present")
+        text = makefile.read_text(encoding="utf-8")
+
+        starts = []
+        for marker, targets in self.SECTIONS:
+            self.assertEqual(text.count(marker), 1, f"reopened CI help section: {marker}")
+            start = text.index(marker)
+            starts.append(start)
+            next_start = text.find("\n##@", start + 1)
+            if next_start < 0:
+                next_start = len(text)
+            found = re.findall(r"^([A-Za-z0-9_-]+):", text[start:next_start], re.MULTILINE)
+            self.assertEqual(found, list(targets), marker)
+
+        self.assertEqual(starts, sorted(starts))
+
+
 class RegistryUrlTests(unittest.TestCase):
     """A registry base URL is normalized into an image reference prefix."""
 

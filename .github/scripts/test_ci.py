@@ -909,21 +909,44 @@ class UntrackedChangeTests(TempTreeTest):
         self.git("add", "-A")
         self.git("commit", "-qm", "Bump api chart version")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("branch", "develop", self.base)
         self.write("services/api/chart/templates/deployment.yaml", "apiVersion: v1\nkind: ConfigMap\n")
 
         empty = {"registry": ci.REGISTRY, "images": []}
-        with patch.object(ci, "load_images_config", return_value=empty):
-            with self.assertRaises(ci.CIError) as raised:
-                ci.check_versions(self.root, self.base, include_untracked=True)
+        with (
+            patch.object(ci, "load_images_config", return_value=empty),
+            self.assertRaises(ci.CIError) as raised,
+        ):
+            ci.check_versions(self.root, "develop", include_untracked=True)
+
+        self.assertEqual(
+            str(raised.exception),
+            "Version checks failed:\n"
+            "- The services/api/chart chart version must increase above '1.0.1'; "
+            "current value is '1.0.1'. The develop branch introduced '1.0.1' in "
+            f"{self.base[:12]} ('Bump api chart version'); your branch also changes files "
+            "in the packaged chart, so choose a newer version.",
+        )
+
+    def test_version_gate_does_not_call_a_regression_convergence(self) -> None:
+        chart = self.root / "services/api/chart/Chart.yaml"
+        chart.write_text(chart.read_text().replace("version: 1.0.0", "version: 1.0.1"), encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "Bump api chart version")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("branch", "develop", self.base)
+        chart.write_text(chart.read_text().replace("version: 1.0.1", "version: 1.0.0"), encoding="utf-8")
+
+        empty = {"registry": ci.REGISTRY, "images": []}
+        with (
+            patch.object(ci, "load_images_config", return_value=empty),
+            self.assertRaises(ci.CIError) as raised,
+        ):
+            ci.check_versions(self.root, "develop", include_untracked=True)
 
         message = str(raised.exception)
-        self.assertIn("The services/api/chart chart version must increase above '1.0.1'", message)
-        self.assertIn(f"The {self.base} branch introduced '1.0.1' in {self.base[:12]}", message)
-        self.assertIn("Bump api chart version", message)
-        self.assertIn(
-            "your branch also changes files in the packaged chart, so choose a newer version.",
-            message,
-        )
+        self.assertIn("services/api/chart chart version must increase above '1.0.1'", message)
+        self.assertNotIn("convergence", message)
 
 
 class LocalServiceBuildTests(TempTreeTest):

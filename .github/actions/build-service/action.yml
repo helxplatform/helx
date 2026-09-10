@@ -98,5 +98,3 @@ runs:
         provenance: true
         sbom: true
         tags: ${{ inputs.repository }}:${{ inputs.tag }}
-        cache-from: type=registry,ref=${{ inputs.repository }}:buildcache
-        cache-to: type=registry,ref=${{ inputs.repository }}:buildcache,mode=max

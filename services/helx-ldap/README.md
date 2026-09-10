@@ -1,22 +1,22 @@
 # helx-ldap
 
-This service provides the HeLx LDAP deployment and the tools used to administer
-LDAP users and groups.
+This service provides the HeLx LDAP service and the tools used to administer
+HeLx LDAP users and groups.
 
 ## Repository layout
 
 - `chart/` is the Helm wrapper chart. It wraps the pinned
-  `openldap-stack-ha` dependency and applies the HeLx-specific LDAP
-  configuration as a Helm hook.
+  `openldap-stack-ha` dependency and applies the HeLx-specific configuration
+  for the HeLx LDAP service as a Helm hook.
 - `scripts/` contains optional Python administration utilities for querying and
-  changing LDAP users, groups, and entries.
+  changing HeLx LDAP users, groups, and entries.
 - `test/users.yaml` contains sample input for the user-management scripts.
 
 The LDIF files used during deployment are packaged under
 `chart/files/ldif/`. The chart is now the source of truth for the deployment
 configuration.
 
-## Deploying LDAP
+## Deploying HeLx LDAP
 
 The recommended deployment is through the umbrella chart in
 `deploy/helm/helx-chart`. The target Kubernetes namespace must already exist;
@@ -34,19 +34,80 @@ export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
 bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
 
-The script creates or updates the `openldap-credentials` Secret, prepares the
-Helm dependencies, installs only the `helx-ldap` service, and waits for the
-OpenLDAP StatefulSet and configuration hook. The same configuration Job runs
-on upgrades.
+The script uses a caller-managed credentials Secret: it creates or updates
+`openldap-credentials`, prepares the Helm dependencies, installs only the
+`helx-ldap` service, and waits for the HeLx LDAP StatefulSet and configuration
+hook. The same configuration Job runs on upgrades.
 
-The Secret must contain these keys:
+The selected Secret must contain these keys:
 
 - `LDAP_ADMIN_PASSWORD`
 - `LDAP_CONFIG_ADMIN_PASSWORD`
 
-Do not put these credentials in Helm values or commit them to the repository.
+Choose the credentials Secret owner with `secret.mode`: `values` creates a
+chart-managed Secret from `secret.values`, `existingSecret` uses a Secret you
+manage, and `externalSecret` creates an ExternalSecret resource. ESO backed by
+Vault is recommended for GitOps; do not commit plaintext credentials. See
+`chart/README.md` for the complete configuration and the upstream chart's
+Secret-name constraint.
 
-## What the wrapper chart configures
+## Migrating an existing release
+
+The wrapper exposes the upstream chart's explicit PVC adoption path. First back
+up the HeLx LDAP volume and verify the live names; with the current stable fullname,
+the generated PVC is normally `data-openldap-0`:
+
+```sh
+kubectl -n "$NAMESPACE" get statefulset,pvc,secret
+kubectl -n "$NAMESPACE" get pvc data-legacy-statefulset-0 -o yaml
+```
+
+Use the same Helm release name for the upgrade and provide values like these:
+
+```yaml
+helx-ldap:
+  openldap:
+    migration:
+      enabled: true
+      legacyPvc: "data-legacy-statefulset-0"
+      # Only needed when automatic label discovery finds more than one
+      # StatefulSet belonging to this release.
+      legacyStatefulSet: ""
+    persistence:
+      existingClaim: "data-legacy-statefulset-0"
+  secret:
+    mode: existingSecret
+    existingSecret: openldap-credentials
+    migration:
+      enabled: true
+      legacySecret: "legacy-credentials-secret"
+```
+
+When `openldap.migration.enabled` is true, the `helx-ldap` pre-upgrade hook
+checks that the PVC is `Bound`, discovers the prior HeLx LDAP StatefulSet for
+the same Helm release, scales it to zero, waits for its pod to terminate, and
+deletes only the old StatefulSet object with orphan propagation. The PVC and
+its backing volume are not copied or deleted, so no manual scale-down step is
+required. Set `legacyStatefulSet` explicitly if the prior StatefulSet does not
+carry the expected OpenLDAP labels or if discovery finds multiple candidates.
+
+Set `secret.migration.enabled` only when the old credentials Secret is not
+already `openldap-credentials`; otherwise leave that flag disabled. The
+pre-upgrade Secret hook copies `LDAP_ADMIN_PASSWORD` and
+`LDAP_CONFIG_ADMIN_PASSWORD` (and any other data keys) into the target without
+deleting the old Secret. It requires a live `helm upgrade` because it uses
+`lookup`; it is not an Argo CD/client-side render operation.
+
+This automated handoff is intentionally opt-in and destructive to the old
+StatefulSet controller: if a later part of the upgrade fails, Helm cannot
+recreate that old controller, and `--atomic` cannot undo the hook. Back up the
+HeLx LDAP volume first and use a maintenance window. After a successful
+migration, set both migration flags to `false`, but keep
+`openldap.persistence.existingClaim` set so future upgrades continue using the
+adopted PVC. Verify the PVC UID and the new StatefulSet's direct `claimName`
+before considering the migration complete.
+
+## What the helx-ldap wrapper configures
 
 The wrapper chart deploys the pinned `openldap-stack-ha` chart and applies the
 following HeLx-specific configuration in a hardened
@@ -61,8 +122,8 @@ following HeLx-specific configuration in a hardened
    - `supplementalGroups`
    - `userAlias`
 
-The Job waits for LDAP readiness, discovers the generated MDB database DN and
-schema DN, and is idempotent across upgrades. Existing installations with the
+The HeLx LDAP configuration Job waits for service readiness, discovers the generated
+MDB database DN and schema DN, and is idempotent across upgrades. Existing installations with the
 former `kubernetesSC` schema must be migrated explicitly because the old and
 new object classes use the same OID.
 
@@ -96,7 +157,7 @@ Disabling the setting after the permissive ACL has already been applied does
 not currently remove that ACL; existing installations require an explicit ACL
 migration.
 
-For custom LDAP naming contexts, configure `openldap.global.ldapDomain`, or
+For custom HeLx LDAP naming contexts, configure `openldap.global.ldapDomain`, or
 set `configuration.baseDN` and `configuration.adminDN` explicitly. The
 configuration Job uses the OpenLDAP dependency image by default, which must
 contain `/bin/sh`, `awk`, `sed`, `grep`, `ldapsearch`, and `ldapmodify`.
@@ -123,7 +184,7 @@ helm lint services/helx-ldap/chart --with-subcharts
 helm dependency update services/helx-ldap/chart
 ```
 
-The umbrella chart's LDAP-only render can be checked with:
+The umbrella chart's HeLx LDAP-only render can be checked with:
 
 ```sh
 helm template helx deploy/helm/helx-chart \
@@ -131,9 +192,9 @@ helm template helx deploy/helm/helx-chart \
   --values deploy/helm/helx-chart/examples/ldap-test-values.yaml
 ```
 
-## Accessing LDAP
+## Accessing HeLx LDAP
 
-Forward the LDAP service to a local port:
+Forward the `helx-ldap` service to a local port:
 
 ```sh
 kubectl -n ai-sb-test port-forward svc/openldap 5389:389
@@ -177,4 +238,4 @@ python scripts/set_ldap_users.py test/users.yaml \
 ```
 
 Use caution with administration and deletion scripts; they modify or remove
-LDAP entries.
+HeLx LDAP entries.

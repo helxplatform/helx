@@ -1,6 +1,9 @@
 dependencies:
+- name: helx-common
+  repository: oci://ghcr.io/helxplatform/helm-charts
+  version: 0.2.0
 - name: openldap-stack-ha
   repository: https://jp-gouin.github.io/helm-openldap/
   version: 4.3.3
-digest: sha256:bc0ab881e34fc2b998f3fd132976571bad1fa8cad12028ed674b0a44c3bb2e19
-generated: "2026-08-12T15:47:49.565654-04:00"
+digest: sha256:fe79e2ae1267e60fe3806782022130ef7d2605d8c9873eb22d844eb417121bb0
+generated: '2026-09-03T15:37:23.894315+00:00'

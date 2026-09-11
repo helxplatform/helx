@@ -23,17 +23,17 @@ data:
     source:
       url: {{ .Values.config.source.url | quote }}
       bind_dn: {{ .Values.config.source.bindDN | quote }}
-      bind_password: {{ .Values.config.source.bindPassword | quote }}
+      bind_password_file: "/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD"
       base_dn: {{ .Values.config.source.baseDN | quote }}
     target:
       url: {{ .Values.config.target.url | quote }}
       bind_dn: {{ .Values.config.target.bindDN | quote }}
-      bind_password: {{ .Values.config.target.bindPassword | quote }}
+      bind_password_file: "/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD"
       base_dn: {{ .Values.config.target.baseDN | quote }}
     {{- if .Values.postgres.enabled }}
     database:
       enabled: true
-      host: {{ .Release.Name }}-postgres
+      host: {{ include "ldap-sync.postgresFullname" . }}
       port: 5432
       username: {{ .Values.postgres.auth.username | quote }}
       database: {{ .Values.postgres.auth.database | quote }}

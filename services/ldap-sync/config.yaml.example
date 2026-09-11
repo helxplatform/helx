@@ -5,7 +5,10 @@
 source:
   url: "ldap://source-ldap.example.com:389"
   bind_dn: "cn=admin,dc=example,dc=org"
+  # Use bind_password for local development, or bind_password_file when the
+  # credential is mounted from a Kubernetes Secret.
   bind_password: "source-password"
+  # bind_password_file: "/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD"
   base_dn: "dc=example,dc=org"
 
 # Target LDAP server configuration
@@ -13,6 +16,7 @@ target:
   url: "ldap://target-ldap.example.com:389"
   bind_dn: "cn=admin,dc=example,dc=org"
   bind_password: "target-password"
+  # bind_password_file: "/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD"
   base_dn: "dc=example,dc=org"
 
 # Hook URLs for transformation services

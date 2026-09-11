@@ -934,7 +934,7 @@ def image_source_changed(
     context = image.get("context")
     context_dir = (
         _configured_path(root, context, f"{image.get('name')}.context")
-        if root is not None and context
+        if root is not None and isinstance(context, str) and context
         else None
     )
     for path in paths:
@@ -942,7 +942,7 @@ def image_source_changed(
             continue
         if any(path_is_within(path, excluded) for excluded in image["excludes"]):
             continue
-        if context_dir is not None and path_is_within(path, context):
+        if context_dir is not None and isinstance(context, str) and path_is_within(path, context):
             inner = path[len(context):].lstrip("/")
             if inner and docker_ignores(context_dir, inner):
                 continue
@@ -992,51 +992,72 @@ def _base_chart(root: Path, base: str, chart_dir: Path) -> dict[str, Any] | None
     return _yaml_mapping(content, f"{base}:{path}") if content is not None else None
 
 
+def historical_chart_version(root: Path, revision: str, path: str) -> str | None:
+    """Read a chart version from history, returning None when it is unavailable."""
+    content = git_file(root, revision, path)
+    if content is None:
+        return None
+    try:
+        return metadata_value(_yaml_mapping(content, f"{revision}:{path}"), "version", path)
+    except CIError:
+        return None
+
+
 def base_version_introduction(
     root: Path, base: str, chart_dir: Path, version: str
 ) -> tuple[str, str] | None:
     """Find the base-history commit that first set a chart to ``version``.
 
     This is diagnostic context only. A malformed historical Chart.yaml or an
-    unavailable parent must not hide the primary version-gate failure.
+    unavailable parent must not hide the version-gate failure message.
     """
     path = relative_path(root, chart_dir / "Chart.yaml")
     commits = git_run(root, "log", "--format=%H", base, "--", path, check=False)
     if commits.returncode != 0:
         return None
     for commit in commits.stdout.splitlines():
-        content = git_file(root, commit, path)
-        if content is None:
+        if historical_chart_version(root, commit, path) != version:
             continue
-        try:
-            current = metadata_value(_yaml_mapping(content, f"{commit}:{path}"), "version", path)
-        except CIError:
+        parents = git_run(
+            root, "rev-list", "--parents", "-n", "1", commit, check=False
+        ).stdout.split()[1:]
+        if not parents:  # A root commit has no earlier introduction to identify.
             continue
-        if current != version:
-            continue
-        parent_line = git_run(root, "rev-list", "--parents", "-n", "1", commit, check=False)
-        parent_parts = parent_line.stdout.split()
-        parents = parent_parts[1:]
-        if not parents:
-            continue
-        parent_versions: list[str | None] = []
-        for parent in parents:
-            parent_content = git_file(root, parent, path)
-            if parent_content is None:
-                parent_versions.append(None)
-                continue
-            try:
-                parent_versions.append(
-                    metadata_value(_yaml_mapping(parent_content, f"{parent}:{path}"), "version", path)
-                )
-            except CIError:
-                parent_versions.append(None)
         # If a parent already had this version, it entered base history earlier.
-        if any(parent_version == version for parent_version in parent_versions):
+        parent_has_version = any(
+            historical_chart_version(root, parent, path) == version for parent in parents
+        )
+        if parent_has_version:
             continue
         subject = git_run(root, "show", "-s", "--format=%s", commit, check=False)
         return commit[:12], subject.stdout.strip() or "(no commit subject)"
     return None
+
+
+def version_convergence_message(
+    root: Path,
+    base: str,
+    chart_dir: Path,
+    chart_name: str,
+    chart_path: str,
+    version: str,
+) -> str:
+    """Explain that a changed chart reuses the same version as its base."""
+    introduction = base_version_introduction(root, base, chart_dir, version)
+    if introduction is None:
+        return (
+            "We were unable to identify what caused the convergence, but the "
+            f"{base} branch and your branch now have the same version for the "
+            f"{chart_name} service chart. Therefore the {chart_path} chart version "
+            f"must increase above {version!r}; current value is {version!r}."
+        )
+    commit, subject = introduction
+    return (
+        f"The {chart_path} chart version must increase above {version!r}; "
+        f"current value is {version!r}. The {base} branch introduced {version!r} "
+        f"in {commit} ({subject!r}); your branch also changes files in the packaged chart, "
+        "so choose a newer version."
+    )
 
 
 def _require_increase(
@@ -1165,20 +1186,19 @@ def check_versions(
         try:
             _require_increase(current_version, base_version, f"{relative_dir} chart version")
         except CIError as exc:
-            introduction = base_version_introduction(root, base, chart_dir, base_version)
-            if introduction is None:
+            if current_version == base_version:
                 errors.append(
-                    "We were unable to identify what caused the convergence, but the "
-                    f"{base} branch and your branch now have the same version for the "
-                    f"{chart_name} service chart. Therefore the {relative_dir} chart version "
-                    f"must increase above {base_version!r}; current value is {current_version!r}."
+                    version_convergence_message(
+                        root,
+                        base,
+                        chart_dir,
+                        chart_name,
+                        relative_dir,
+                        current_version,
+                    )
                 )
-                continue
-            commit, subject = introduction
-            errors.append(
-                f"The {exc}. The {base} branch introduced {base_version!r} in {commit} ({subject!r}); "
-                "your branch also changes files in the packaged chart, so choose a newer version."
-            )
+            else:
+                errors.append(str(exc))
 
     config = load_images_config(config_path or root / IMAGES_FILE)
     checked_components: set[tuple[str, str]] = set()

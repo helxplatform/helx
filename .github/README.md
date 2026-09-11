@@ -91,7 +91,7 @@ pull request into main at 4.7.0 -> releases 4.7.0
 Nothing implements those channels. The candidate tag is derived from the umbrella
 version, so raising it to 4.7.0 simply starts publishing `4.7.0-develop`. Older
 channels such as `4.6.3-develop` stop being written to and become abandoned; use
-`make ci-candidate-version` to learn which one is current.
+`make candidate-version` to learn which one is current.
 
 Because develop always sits above the last release, `<version>-develop` is an
 honest preview of `<version>` and correctly sorts below it. "Last released" is
@@ -379,8 +379,8 @@ make ci-validate-everything
 make ci-check-versions BASE=origin/develop
 make check-locks
 bash -n .github/scripts/helm-build-chart.sh .github/scripts/helm-preflight.sh
-make ci-build-common-chart
-make ci-build-helx-chart
+make build-common-chart
+make build-helx-chart
 git diff --check
 ```
 

@@ -25,7 +25,7 @@ dependencies:
   #   repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore
     condition: appstore.enabled
-    version: "6.0.0"
+    version: "6.0.1"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-sockets
     condition: appstore-sockets.enabled
@@ -41,7 +41,7 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ldap-sync
     condition: ldap-sync.enabled
-    version: "3.0.0"
+    version: "3.0.1"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: pod-reaper
     condition: pod-reaper.enabled

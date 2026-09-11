@@ -13,7 +13,7 @@ dependencies:
   version: 0.2.0
 - name: ldap-sync
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.2.1
+  version: 3.0.0
 - name: pod-reaper
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 0.2.5
@@ -26,5 +26,5 @@ dependencies:
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.0.1
-digest: sha256:a0246dbb654f16f89eaca498aa1a551ef8694aae9c69b157f5892794c896e55c
-generated: '2026-09-10T18:49:58.881531+00:00'
+digest: sha256:3e936bee9698c4408fbeac1a49a4d0caf4355782f1a3744c844a71b6039892b6
+generated: '2026-09-11T15:56:41.088392+00:00'

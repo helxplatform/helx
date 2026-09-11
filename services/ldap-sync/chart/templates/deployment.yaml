@@ -13,10 +13,14 @@ spec:
       {{- include "ldap-sync.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.postgres.enabled }}
+        checksum/db-scripts: {{ include (print $.Template.BasePath "/db-scripts-configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "ldap-sync.selectorLabels" . | nindent 8 }}
     spec:
@@ -34,7 +38,7 @@ spec:
           command: ["/bin/bash", "/db/init-schema.sh"]
           env:
             - name: PGHOST
-              value: {{ .Release.Name }}-postgres
+              value: {{ include "ldap-sync.postgresFullname" . }}
             - name: PGPORT
               value: "5432"
             - name: PGUSER
@@ -44,7 +48,7 @@ spec:
             - name: PGPASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Release.Name }}-postgres
+                  name: {{ include "ldap-sync.postgresSecretName" . }}
                   key: postgres-password
           volumeMounts:
             - name: db-scripts
@@ -76,6 +80,9 @@ spec:
           volumeMounts:
             - name: config-volume
               mountPath: /etc/ldap-sync
+            - name: ldap-secret
+              mountPath: /etc/ldap-sync/ldap-secrets
+              readOnly: true
             {{- if .Values.postgres.enabled }}
             - name: postgres-secret
               mountPath: /etc/ldap-sync/secrets
@@ -96,10 +103,13 @@ spec:
         - name: config-volume
           configMap:
             name: {{ include "ldap-sync.fullname" . }}-config
+        - name: ldap-secret
+          secret:
+            secretName: {{ include "ldap-sync.secretName" . }}
         {{- if .Values.postgres.enabled }}
         - name: postgres-secret
           secret:
-            secretName: {{ .Release.Name }}-postgres
+            secretName: {{ include "ldap-sync.postgresSecretName" . }}
             items:
               - key: postgres-password
                 path: postgres-password

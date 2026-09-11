@@ -792,6 +792,7 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ build Building and inspecting one service
 # build-chart SERVICE=<name>: Vendor dependencies, lint, and package one

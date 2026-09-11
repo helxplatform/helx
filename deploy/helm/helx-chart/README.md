@@ -131,6 +131,7 @@ You can view the README.md files for each subchart to see the variables that exi
 | global.restartr_api_service_name | string | `"helx-restartr-api-service"` |  |
 | global.stdnfsPvc | string | `"stdnfs"` |  |
 | helx-ldap.enabled | bool | `true` | enable/disable deployment of the HeLx LDAP service |
+| ldap-sync.enabled | bool | `true` | enable/disable deployment of ldap-sync |
 | image-utils.enabled | bool | `false` | enable/disable deployment of image-utils (imagepullsecret-patcher and imagepuller) |
 | ldap-sync.enabled | bool | `true` | enable/disable deployment of ldap-sync |
 | monitoring.enabled | bool | `false` | enable/disable deployment of monitoring (kube-prometheus-stack, cost-analyzer, etc.) |

@@ -485,7 +485,12 @@ def lock_matches_chart(chart_dir: Path) -> bool:
     if not lock_path.is_file():
         return False
     expected = yaml.safe_load(render_lock(chart_dir))
-    actual = read_yaml(lock_path)
+    try:
+        actual = read_yaml(lock_path)
+    except CIError:
+        # An unresolved Git conflict leaves non-YAML conflict markers behind.
+        # Treat any malformed lock as stale so sync-lock can replace it.
+        return False
     dependencies = [
         {key: item.get(key) for key in ("name", "repository", "version")}
         for item in (actual.get("dependencies") or [])
@@ -987,6 +992,74 @@ def _base_chart(root: Path, base: str, chart_dir: Path) -> dict[str, Any] | None
     return _yaml_mapping(content, f"{base}:{path}") if content is not None else None
 
 
+def historical_chart_version(root: Path, revision: str, path: str) -> str | None:
+    """Read a chart version from history, returning None when it is unavailable."""
+    content = git_file(root, revision, path)
+    if content is None:
+        return None
+    try:
+        return metadata_value(_yaml_mapping(content, f"{revision}:{path}"), "version", path)
+    except CIError:
+        return None
+
+
+def base_version_introduction(
+    root: Path, base: str, chart_dir: Path, version: str
+) -> tuple[str, str] | None:
+    """Find the base-history commit that first set a chart to ``version``.
+
+    This is diagnostic context only. A malformed historical Chart.yaml or an
+    unavailable parent must not hide the version-gate failure message.
+    """
+    path = relative_path(root, chart_dir / "Chart.yaml")
+    commits = git_run(root, "log", "--format=%H", base, "--", path, check=False)
+    if commits.returncode != 0:
+        return None
+    for commit in commits.stdout.splitlines():
+        if historical_chart_version(root, commit, path) != version:
+            continue
+        parents = git_run(
+            root, "rev-list", "--parents", "-n", "1", commit, check=False
+        ).stdout.split()[1:]
+        if not parents:  # A root commit has no earlier introduction to identify.
+            continue
+        # If a parent already had this version, it entered base history earlier.
+        parent_has_version = any(
+            historical_chart_version(root, parent, path) == version for parent in parents
+        )
+        if parent_has_version:
+            continue
+        subject = git_run(root, "show", "-s", "--format=%s", commit, check=False)
+        return commit[:12], subject.stdout.strip() or "(no commit subject)"
+    return None
+
+
+def version_convergence_message(
+    root: Path,
+    base: str,
+    chart_dir: Path,
+    chart_name: str,
+    chart_path: str,
+    version: str,
+) -> str:
+    """Explain that a changed chart reuses the same version as its base."""
+    introduction = base_version_introduction(root, base, chart_dir, version)
+    if introduction is None:
+        return (
+            "We were unable to identify what caused the convergence, but the "
+            f"{base} branch and your branch now have the same version for the "
+            f"{chart_name} service chart. Therefore the {chart_path} chart version "
+            f"must increase above {version!r}; current value is {version!r}."
+        )
+    commit, subject = introduction
+    return (
+        f"The {chart_path} chart version must increase above {version!r}; "
+        f"current value is {version!r}. The {base} branch introduced {version!r} "
+        f"in {commit} ({subject!r}); your branch also changes files in the packaged chart, "
+        "so choose a newer version."
+    )
+
+
 def _require_increase(
     current: str, previous: str, label: str, allow_equal: bool = False, hint: str = ""
 ) -> None:
@@ -1084,6 +1157,7 @@ def check_versions(
         current = read_yaml(chart_dir / "Chart.yaml")
         is_umbrella = chart_dir.resolve() == (root / UMBRELLA_DIR).resolve()
         current_version = metadata_value(current, "version", str(chart_dir / "Chart.yaml"))
+        chart_name = metadata_value(current, "name", str(chart_dir / "Chart.yaml"))
         base_version = metadata_value(
             previous, "version", f"{base}:{relative_dir}/Chart.yaml"
         )
@@ -1110,11 +1184,21 @@ def check_versions(
                 errors.append(str(exc))
             continue
         try:
-            _require_increase(
-                current_version, base_version, f"{relative_dir} chart version"
-            )
+            _require_increase(current_version, base_version, f"{relative_dir} chart version")
         except CIError as exc:
-            errors.append(str(exc))
+            if current_version == base_version:
+                errors.append(
+                    version_convergence_message(
+                        root,
+                        base,
+                        chart_dir,
+                        chart_name,
+                        relative_dir,
+                        current_version,
+                    )
+                )
+            else:
+                errors.append(str(exc))
 
     config = load_images_config(config_path or root / IMAGES_FILE)
     checked_components: set[tuple[str, str]] = set()

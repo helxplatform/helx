@@ -91,7 +91,7 @@ pull request into main at 4.7.0 -> releases 4.7.0
 Nothing implements those channels. The candidate tag is derived from the umbrella
 version, so raising it to 4.7.0 simply starts publishing `4.7.0-develop`. Older
 channels such as `4.6.3-develop` stop being written to and become abandoned; use
-`make ci-candidate-version` to learn which one is current.
+`make candidate-version` to learn which one is current.
 
 Because develop always sits above the last release, `<version>-develop` is an
 honest preview of `<version>` and correctly sorts below it. "Last released" is
@@ -157,8 +157,10 @@ publication.
   resolution and is derivable from `Chart.yaml` with no registry access.
   Regenerate it with `make sync-locks` (every chart) or `make sync-helx-lock`
   (umbrella only) rather than `helm dependency update`; `make check-locks`
-  verifies without writing. Because no resolution is involved, this also works
-  for a dependency version that is not published yet, which `helm dependency
+  verifies without writing. If a `Chart.lock` has an unresolved Git conflict,
+  either sync target recreates it from the merged `Chart.yaml` and stages that
+  resolution. Because no resolution is involved, this also works for a dependency
+  version that is not published yet, which `helm dependency
   update` cannot do. The digest reproduces Helm's `resolver.HashReq`.
 - Repository-owned dependencies should use
   `oci://ghcr.io/helxplatform/helm-charts` in committed metadata.
@@ -377,8 +379,8 @@ make ci-validate-everything
 make ci-check-versions BASE=origin/develop
 make check-locks
 bash -n .github/scripts/helm-build-chart.sh .github/scripts/helm-preflight.sh
-make ci-build-common-chart
-make ci-build-helx-chart
+make build-common-chart
+make build-helx-chart
 git diff --check
 ```
 

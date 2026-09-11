@@ -56,14 +56,15 @@ make install-hooks    # run the pre-push checks automatically (optional)
 | `make ci-validate-everything` | Validate every chart, lock, `.helmignore`, image definition, and Dockerfile |
 | `make ci-check-versions` | Run the version gate the way CI will |
 | `make ci-tests` | Run the CI suite's own unit tests |
-| `make sync-locks` | Regenerate every `Chart.lock` from its `Chart.yaml` |
+| `make pull-develop` | Merge `origin/develop`, regenerate generated lock conflicts, and commit the merge; requires no tracked local changes |
+| `make sync-locks` | Regenerate every `Chart.lock` from its `Chart.yaml`; resolves and stages lock-only merge conflicts |
 | `make sync-helx-lock` | Same, umbrella chart only |
 | `make check-locks` | Verify every lock without writing |
-| `make ci-build-chart SERVICE=<name>` | Vendor dependencies, lint, and package one service chart |
-| `make ci-build-helx-chart` | Package the umbrella chart |
+| `make build-chart SERVICE=<name>` | Vendor dependencies, lint, and package one service chart |
+| `make build-helx-chart` | Package the umbrella chart |
 | `make docker-build SERVICE=<name>` | Build one service image as CI builds it |
-| `make ci-locked-deps SERVICE=<name>` | Print that chart's resolved dependency tuples |
-| `make ci-candidate-version` | Print the version the candidate channel publishes under |
+| `make locked-deps SERVICE=<name>` | Print that chart's resolved dependency tuples |
+| `make candidate-version` | Print the version the candidate channel publishes under |
 | `make help` | Every target, with the variables each accepts |
 
 ### Working on a chart
@@ -71,7 +72,7 @@ make install-hooks    # run the pre-push checks automatically (optional)
 Edit the chart, then:
 
 ```bash
-make ci-build-chart SERVICE=<name>
+make build-chart SERVICE=<name>
 ```
 
 That runs exactly what CI runs: it vendors each locked dependency (preferring an
@@ -112,15 +113,20 @@ not published yet. A bumped service chart is not in GHCR until the merge to
 Semantic ranges such as `^1.0.0` are rejected. A range can never equal a
 resolved lock entry, so `validate-config` fails. Use exact versions!
 
-`sync-locks` writes only the lock. If you need `charts/` populated to render or
-install a chart locally, use `helm-build-chart.sh` above, which vendors them.
+`sync-locks` writes only the lock. If it finds an unresolved `Chart.lock` merge
+conflict, it recreates that lock from the merged `Chart.yaml` and stages only the
+resolved lock; ordinary regenerated locks remain unstaged. `make pull-develop`
+uses this behavior after merging `origin/develop`, but stops rather than commits
+when conflicts outside generated locks need manual resolution. If you need
+`charts/` populated to render or install a chart locally, use
+`helm-build-chart.sh` above, which vendors them.
 
 If validation reports that `Chart.yaml` and `Chart.lock` "dependency
 name/version/repository tuples differ", this prints exactly what is being
 compared:
 
 ```bash
-make ci-locked-deps SERVICE=<name>
+make locked-deps SERVICE=<name>
 ```
 
 ### Working on a service's image
@@ -183,13 +189,13 @@ It is a SemVer prerelease, so it always sorts below the matching release. To
 find the version without opening the workflow run:
 
 ```bash
-make ci-candidate-version
+make candidate-version
 ```
 
 To reproduce what CI builds, from your branch:
 
 ```bash
-make ci-build-helx-chart CHART_CHANNEL=develop
+make build-helx-chart CHART_CHANNEL=develop
 ```
 
 That vendors your branch's service charts by name, ignoring the locked versions,
@@ -204,7 +210,7 @@ For deploying uncommitted work, see the next section.
 A Helm chart with dependencies cannot be rendered or installed from a directory
 until the dependency archives are physically present in its `charts/`
 subdirectory. Helm does not fetch them at install time. `make sync-locks` writes
-only `Chart.lock`, which is metadata. `make ci-build-helx-chart` is what actually
+only `Chart.lock`, which is metadata. `make build-helx-chart` is what actually
 vendors every dependency and produces a self-contained `.tgz` you can install
 anywhere.
 
@@ -214,7 +220,7 @@ a candidate with your commit's images already pinned:
 ```bash
 helm registry login ghcr.io
 helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version $(make -s ci-candidate-version) -n <deploy-namespace> \
+  --version $(make -s candidate-version) -n <deploy-namespace> \
   --values my-values.yaml
 ```
 
@@ -227,7 +233,7 @@ reach GitHub:
 2. Build images for just the services you changed:
 
    ```bash
-   make ci-build-helx-images SERVICES="user-mutator ui"
+   make build-helx-images SERVICES="user-mutator ui"
    ```
 
    `TAG` defaults to `test-<short-sha>`. A service with several image variants,
@@ -236,7 +242,7 @@ reach GitHub:
    no registry involved:
 
    ```bash
-   make ci-load-helx-images SERVICES="user-mutator ui"
+   make load-helx-images SERVICES="user-mutator ui"
    ```
 
    `kind`, `minikube`, and `k3d` are auto-detected; override with
@@ -244,7 +250,7 @@ reach GitHub:
    instead (`docker login containers.renci.org`):
 
    ```bash
-   make ci-push-helx-images SERVICES="user-mutator ui"
+   make push-helx-images SERVICES="user-mutator ui"
    ```
 
    To use a registry other than Harbor — your own ACR, a scratch project, a
@@ -254,7 +260,7 @@ reach GitHub:
    ```bash
    docker login myregistry.azurecr.io
    export SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
-   make ci-build-helx-images ci-push-helx-images
+   make build-helx-images push-helx-images
    ```
 
    The value is a host, an optional port, and an optional project path;
@@ -272,7 +278,7 @@ reach GitHub:
 4. Package the umbrella with those services pinned to your tag:
 
    ```bash
-   make ci-build-helx-chart SERVICES="user-mutator ui"
+   make build-helx-chart SERVICES="user-mutator ui"
    ```
 
    Every umbrella dependency already resolves from your working tree, so this
@@ -298,7 +304,7 @@ reach GitHub:
    still send the cluster to Harbor for those images:
 
    ```bash
-   make ci-build-helx-chart SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   make build-helx-chart SERVICES="user-mutator ui" IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
    ```
 
    That writes both the tag and the repository for those services. Everything
@@ -316,17 +322,17 @@ Use the same `SERVICES` and `TAG` for every step, plus the same
 
 ```bash
 export SERVICES="user-mutator ui" TAG=dev-1
-make ci-build-helx-images ci-load-helx-images ci-build-helx-chart
+make build-helx-images load-helx-images build-helx-chart
 ```
 
 `TAG` reaches the chart only through `SERVICES`. There is no flag that retags
 everything at once: with `CHART_CHANNEL` and no `SERVICES`,
-`make ci-build-helx-chart` computes the tag itself as `<channel>-<short-sha>`
+`make build-helx-chart` computes the tag itself as `<channel>-<short-sha>`
 and ignores `TAG` entirely. To put one tag of your choosing on every image,
 name every service:
 
 ```bash
-make ci-build-helx-chart TAG=my-tag \
+make build-helx-chart TAG=my-tag \
   SERVICES="appstore appstore-prepuller appstore-sockets ldap-sync ui user-mutator"
 ```
 
@@ -343,7 +349,7 @@ is left behind on Harbor, so the cluster needs credentials for your registry
 only:
 
 ```bash
-make ci-build-helx-chart TAG=my-tag IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform \
+make build-helx-chart TAG=my-tag IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform \
   SERVICES="appstore appstore-prepuller appstore-sockets ldap-sync ui user-mutator"
 ```
 
@@ -391,7 +397,7 @@ appstore-sockets:
       tag: my-tag
 ```
 
-Both win over whatever `ci-build-helx-chart` baked into the packaged values, so
+Both win over whatever `build-helx-chart` baked into the packaged values, so
 this also works to correct a pin after the fact. The image has to already exist
 at that tag in whichever registry the repository names — overriding values does
 not build or push anything.
@@ -433,7 +439,7 @@ The umbrella chart's version only has to sit **above the last release**, not
 increase on every change. So the first pull request after a release picks the
 next version — patch, minor, or major, whichever fits — and later pull requests
 leave it alone. Raising it starts publishing a new `<version>-develop` candidate
-channel; `make ci-candidate-version` tells you which is current. Umbrella
+channel; `make candidate-version` tells you which is current. Umbrella
 dependency pins still have to move with the charts they point at.
 
 The version gate compares against `develop` by default and includes uncommitted

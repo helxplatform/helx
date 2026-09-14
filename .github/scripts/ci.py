@@ -931,11 +931,15 @@ def image_source_changed(
     A path excluded by the build context's .dockerignore is never sent to the
     daemon, so it cannot change the image and must not demand an appVersion bump.
     """
-    context = image.get("context")
+    context = image["context"]
+    if not isinstance(context, str) or not context.strip():
+        raise CIError(
+            f"{image['name']}.context must be a non-empty relative path"
+        )
     context_dir = (
-        _configured_path(root, context, f"{image.get('name')}.context")
-        if root is not None and context
-        else None
+        None
+        if root is None
+        else _configured_path(root, context, f"{image['name']}.context")
     )
     for path in paths:
         if not any(path_is_within(path, source) for source in image["sources"]):

@@ -354,9 +354,10 @@ help-all-vars:
 	@echo 'Target groups: make help'
 
 ##@ setup Repository setup
-# setup: Add all remotes and missing service subtrees, plus install git hooks.
-# [HOOKS_PATH, *_URL, *_PREFIX, *_BRANCH]
-setup: add-subtrees install-hooks
+# setup: Provision Python tooling, add all remotes and missing service subtrees,
+# plus install git hooks. [PYTHON, VENV, *_URL, *_PREFIX, *_BRANCH
+# (APPSTORE_URL, LDAP_SYNC_BRANCH, etc.), HOOKS_PATH]
+setup: $(PYTHON_READY) add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected
 # URL.
@@ -792,6 +793,7 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ build Building and inspecting one service
 # build-chart SERVICE=<name>: Vendor dependencies, lint, and package one
@@ -1004,7 +1006,19 @@ helm-deploy:
 	echo "  release   $(RELEASE)"; \
 	echo "  context   $$context"; \
 	echo "  namespace $$namespace"; \
-	echo "  values   $${values_shown:- (none)}$(if $(VALUES), $(VALUES))"; \
+	if test -n "$$values_shown$(VALUES)"; then \
+		values_first=yes; \
+		for entry in $$values_shown $(VALUES); do \
+			if test "$$values_first" = yes; then \
+				echo "  values    $$entry"; \
+				values_first=no; \
+			else \
+				echo "            $$entry"; \
+			fi; \
+		done; \
+	else \
+		echo "  values    (none)"; \
+	fi; \
 	if test "$$warnings" -gt 0; then \
 		if test -n "$(ASSUME_YES)"; then \
 			echo "ASSUME_YES is set; continuing past $$warnings warning(s)."; \

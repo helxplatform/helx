@@ -46,8 +46,9 @@ It performs these checks:
 
 1. install the pinned CI dependency from [`requirements-ci.txt`](requirements-ci.txt);
 2. run the focused tests for [`scripts/ci.py`](scripts/ci.py);
-3. validate every chart, lockfile, image definition, Dockerfile, and local
-   dependency path;
+3. validate every chart, lock, image definition, and ignore file, and check that
+   each configured Dockerfile exists (details in
+   [What validate-config checks](#what-validate-config-checks));
 4. require service chart `version` increases when a changed file would land in the
    chart's package;
 5. require `appVersion` increases when a changed file would reach an image's
@@ -108,17 +109,16 @@ artifact, and each artifact's own ignore file is the authority on that:
 
 - **Charts** consult the chart's `.helmignore`. Editing `.gitignore` cannot
   change a package, so it never gates; editing `Chart.yaml`, `Chart.lock`,
-  `values.yaml`, `templates/`, or the `.helmignore` itself does. Every chart
-  must carry a `.helmignore` containing the baseline patterns in
-  `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
-  `templates/`; `validate-config` enforces both.
+  `values.yaml`, `templates/`, or the `.helmignore` itself does.
 - **Images** consult `excludes` in [`ci/images.yaml`](ci/images.yaml) and the
   build context's `.dockerignore`. A path Docker never receives cannot change
-  the image. Only the pattern subset used here is supported, so `validate-config`
-  rejects `!` negation and `**` rather than mismatching them silently.
+  the image.
 
 Both matchers follow Go's `filepath.Match`, which Helm and Docker use: `*` and
-`?` never cross a path separator.
+`?` never cross a path separator. The rules those ignore files themselves must
+follow (baseline `.helmignore` patterns, no excluding the chart essentials, no
+`!` or `**` in a `.dockerignore`) belong to `validate-config`, and are covered
+in [What validate-config checks](#what-validate-config-checks).
 
 The practical consequence is that the fix for a spurious version bump is usually
 to correct the ignore file, not to add a CI exception. If a README never reaches
@@ -127,6 +127,84 @@ an image, add it to that service's `.dockerignore`.
 Manual dispatch accepts one image target or `all`. The target is validated against
 the normalized image inventory generated from [`ci/images.yaml`](ci/images.yaml);
 there are no per-service workflows or shell `case` mappings.
+
+## What validate-config checks
+
+`make ci-validate-everything` just runs `python .github/scripts/ci.py
+validate-config`. It is a static check written in plain Python: it reads files
+and compares them against a set of rules. It never runs `helm` or `docker`, so
+nothing gets linted, rendered, packaged, or built here. This section walks
+through what it actually checks, for each file type.
+
+### Charts (`Chart.yaml`)
+
+For every chart under `services/*/chart`, plus the common and umbrella charts:
+
+- `Chart.yaml` must parse, and its `version` and `appVersion` must be strict
+  `x.y.z` SemVer.
+- Every dependency must be pinned to an exact version. The dependency list in
+  `Chart.yaml` has to match `Chart.lock` exactly (name, version, and
+  repository). This is also how ranges like `^1.0.0` get rejected: a range can
+  never equal a lock entry.
+- `file://` dependencies must resolve to a real chart in the tree, and that
+  chart's name and version must match the pin.
+- Two charts cannot share a name.
+- A dependency that also exists in this tree must be pinned to exactly the
+  in-tree version, so bumping a service chart without bumping the umbrella pin
+  fails. Library charts are exempt from this rule. A library is shared by
+  several charts, and if the rule applied, every chart using it would have to
+  bump its pin in the same commit as any library edit. Instead, each chart
+  stays on the library version it was written for and moves up when it chooses
+  to.
+
+`validate-config` does not run `helm lint`, render templates, or package
+anything. This check is plain Python with one dependency, so it runs fast
+and anywhere; in the CI self-test job, in `make pre-push`, on any machine
+with the project venv. We just want `validate-config` to be a first line of
+defense, not a full chart build replacement.
+
+### Locks (`Chart.lock`)
+
+- A chart that declares dependencies must have a `Chart.lock`, and a chart
+  with no dependencies must not carry a stale one.
+- The lock must match what `make sync-lock` would regenerate, byte for byte,
+  including the digest. The digest is computed the same way Helm computes it,
+  with no registry access needed.
+- When a lock is stale, the error tells you the exact fix: regenerate with
+  `python .github/scripts/ci.py sync-lock <chart-dir>`.
+
+### `.helmignore`
+
+- Every chart must have a `.helmignore`.
+- It must contain all the baseline patterns listed in `REQUIRED_HELMIGNORE`
+  in [`scripts/ci.py`](scripts/ci.py).
+- It must not exclude `Chart.yaml`, `values.yaml`, or `templates/`, because
+  every chart has to package those.
+
+### Image definitions (`ci/images.yaml`)
+
+- `registry` must be `containers.renci.org/helxplatform` (Harbor).
+- Every image needs all required fields, a unique name, and a `chart`,
+  `context`, `dockerfile`, `sources`, and `excludes` that all point at paths
+  that really exist.
+- The image's `component` has to match the owning chart's name, and that
+  chart's `appVersion` must be strict `x.y.z`.
+- `tag_path` and `repository_path` must be keys the chart's `values.yaml`
+  actually declares. A pin that lands nowhere would be invisible, so this
+  catches it up front.
+
+### `.dockerignore`
+
+This one is a syntax check only. `!` negation and `**` are rejected because
+the image version gate cannot reason about them. The fix for an unsupported
+pattern is to rewrite the entry, not to add a CI exception.
+
+### Dockerfiles
+
+The check here is just that the configured Dockerfile exists. It is never
+parsed or linted, and nothing is built. A syntax error in a Dockerfile only
+shows up when something actually builds the image: the build jobs in CI, or
+`make build` locally.
 
 ## Helm charts
 

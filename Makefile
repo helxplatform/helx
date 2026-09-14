@@ -1005,7 +1005,19 @@ helm-deploy:
 	echo "  release   $(RELEASE)"; \
 	echo "  context   $$context"; \
 	echo "  namespace $$namespace"; \
-	echo "  values   $${values_shown:- (none)}$(if $(VALUES), $(VALUES))"; \
+	if test -n "$$values_shown$(VALUES)"; then \
+		values_first=yes; \
+		for entry in $$values_shown $(VALUES); do \
+			if test "$$values_first" = yes; then \
+				echo "  values    $$entry"; \
+				values_first=no; \
+			else \
+				echo "            $$entry"; \
+			fi; \
+		done; \
+	else \
+		echo "  values    (none)"; \
+	fi; \
 	if test "$$warnings" -gt 0; then \
 		if test -n "$(ASSUME_YES)"; then \
 			echo "ASSUME_YES is set; continuing past $$warnings warning(s)."; \

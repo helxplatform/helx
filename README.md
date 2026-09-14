@@ -70,16 +70,13 @@ in the right group no matter where it sits in the file. Comments cannot expand
 | `make ci-validate-everything` | Validate every chart, lock, `.helmignore`, image definition, and Dockerfile |
 | `make ci-check-versions` | Run the version gate the way CI will |
 | `make ci-tests` | Run the CI suite's own unit tests |
-| `make pull-develop` | Merge `origin/develop`, regenerate generated lock conflicts, and commit the merge; requires no tracked local changes |
 | `make sync-locks` | Regenerate every `Chart.lock` from its `Chart.yaml`; resolves and stages lock-only merge conflicts |
-| `make sync-helx-lock` | Same, umbrella chart only |
 | `make check-locks` | Verify every lock without writing |
 | `make build-chart SERVICE=<name>` | Vendor dependencies, lint, and package one service chart |
 | `make build-helx-chart` | Package the umbrella chart |
 | `make docker-build SERVICE=<name>` | Build one service image as CI builds it |
-| `make locked-deps SERVICE=<name>` | Print that chart's resolved dependency tuples |
 | `make candidate-version` | Print the version the candidate channel publishes under |
-| `make help` | Every target, with the variables each accepts |
+| `make help` | Help documentation
 
 ### Working on a chart
 

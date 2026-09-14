@@ -1,0 +1,215 @@
+appstore:
+  ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
+  djangoSettings: helx
+  django:
+    ALLOW_SAML_LOGIN: "true"
+  global:
+    imageRegistry: aisandboxrencitgt.azurecr.io
+  gunicorn:
+    workers: 5
+  imagePostgresql:
+    registry: aisandboxrencitgt.azurecr.io
+    repository: helxplatform/bitnami-postgresql
+    tag: 17.5.0-debian-12-r18
+  ldap:
+    enabled: true
+  postgresql:
+    image:
+      registry: aisandboxrencitgt.azurecr.io
+      repository: helxplatform/bitnami-postgresql
+      tag: 17.5.0-debian-12-r18
+    primary:
+      resources:
+        limits:
+          cpu: 500m
+          memory: 2Gi
+        requests:
+          cpu: 500m
+          memory: 2Gi
+    volumePermissions:
+      image:
+        registry: aisandboxrencitgt.azurecr.io
+        repository: helxplatform/os-shell
+        tag: 12-debian-12-r50
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 2
+      memory: 4Gi
+    requests:
+      cpu: 1
+      memory: 2Gi
+  saml:
+    ASSERTION_URL:  # CHANGEME
+    ENTITY_ID:      # CHANGEME
+    AUTHORITY_URL: https://sso.unc.edu/metadata/unc
+    IDP_ENTITY_ID: https://sso.unc.edu/idp
+    PROVIDER_NAME: UNC Chapel Hill Single Sign-On
+    PROVIDER_SLUG: unc
+    cache:
+      FETCH_INTERVAL: 3600000
+      enabled: true
+      storageClass: azurefile
+      storageSize: 50M
+  tycho:
+    externalAppRegistryBranch: # CHANGEME
+    externalAppRegistryEnabled: true
+    fsGroup: 0
+    initRunAsUser: 1001
+    runAsUser: 1001
+  userStorage:
+    createPVC: true
+    storageClass: azurefile-csi-nfs-posix
+appstore-prepuller:
+  appRegistry:
+    repo: https://github.com/helxplatform/helx-apps/raw
+    branch: # CHANGEME
+    brand: # CHANGEME
+  controller:
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+appstore-sockets:
+  securityContext:
+    runAsUser: 1001
+global:
+  imagePullSecrets:
+  - renci-registry-creds
+  - aisandboxrencitgt-creds
+pod-reaper:
+  reapers:
+    long-running-apps:
+      max_duration: 8h
+      require_label_values: jupyter-ai-notebook
+    short-running-apps:
+      max_duration: 3h
+      require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
+resty:
+  image:
+    repository: aisandboxrencitgt.azurecr.io/helxplatform/openresty
+  SSL:
+    nginxTLSSecret: # CHANGEME
+  enabled: true
+  dnsResolver: 10.0.0.10
+  ingress:
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt
+      nginx.ingress.kubernetes.io/proxy-body-size: 100m
+      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+    create: true
+    ingressClassName: nginx
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 2
+      memory: 2Gi
+    requests:
+      cpu: 1
+      memory: 1Gi
+  service:
+    serverName: # CHANGEME
+ui:
+  config:
+    appstore_asset_base_url: https:\/\/raw.githubusercontent.com\/helxplatform\/appstore
+    appstore_asset_branch: develop
+    brand_description:
+      html: # CHANGEME
+    brand_name: # CHANGEME
+    default_space: workspaces
+    hidden_result_tabs: cdes
+    login_title: # CHANGEME
+    meta:
+      title: # CHANGEME
+    search:
+      enabled: "false"
+      url: ""
+    support:
+      faqs_url: ""
+      help_portal_url: # CHANGEME
+      user_guide_url: # CHANGEME
+    workspaces:
+      enabled: "true"
+  resources:
+    limits:
+      cpu: 1
+      memory: 2Gi
+    requests:
+      cpu: 0.5
+      memory: 1Gi
+  service:
+    annotations:
+      getambassador.io/config: |
+        ---
+        apiVersion: ambassador/v1
+        kind: Mapping
+        name: helx-ui
+        prefix: /helx
+        service: helx-ui:80
+        rewrite: /helx
+        cors:
+          origins: "*"
+          methods: POST, OPTIONS
+          headers:
+          - Content-Type
+        ---
+        apiVersion: ambassador/v1
+        kind: Mapping
+        name: ui-static
+        prefix: /static/frontend
+        service: helx-ui:80
+        rewrite: /static/frontend
+        cors:
+          origins: "*"
+          methods: POST, OPTIONS
+          headers:
+          - Content-Type
+ldap-sync:
+  searchBootstrap:
+    id: get-groups
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+    baseDN: ou=groups,dc=unc,dc=edu
+  config:
+    hooks:
+      - args:
+          - --baseGid=1025
+          - --baseGroup=helx-users
+        image:
+          repository: containers.renci.org/helxplatform/unc-group-x
+          tag: v2.3.2
+        name: unc-group-x
+        url: http://localhost:5001/hook
+    source:
+      url: "ldap://ldap.unc.edu/"
+      bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
+      # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
+      bindPassword: ""
+      baseDN: "dc=unc,dc=edu"
+    target:
+      url: "ldap://openldap/"
+      bindDN: "cn=admin,dc=example,dc=org"
+      # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
+      bindPassword: ""
+      baseDN: "dc=example,dc=org"
+    plugins:
+      # Creates a PVC in the release namespace for every synced group
+      # entry. When enabled, the chart also installs a Role/RoleBinding
+      # granting the service account get/list/create on PVCs.
+      pvcGroup:
+        enabled: true
+        storageClass: azurefile
+        size: 10Gi
+        accessModes:
+          - ReadWriteMany
+user-mutator:
+  config:
+    features:
+      ldap:
+        host: openldap
+        port: 389
+        username: "cn=admin,dc=example,dc=org"
+        user_base_dn: "ou=users,dc=example,dc=org"
+        group_base_dn: "ou=groups,dc=example,dc=org"

@@ -110,22 +110,44 @@ before considering the migration complete.
 ## What the helx-ldap wrapper configures
 
 The wrapper chart deploys the pinned `openldap-stack-ha` chart and applies the
-following HeLx-specific configuration in a hardened
-`post-install,post-upgrade` Job:
+HeLx-specific `cn=config` customizations that a stock OpenLDAP deployment does
+not have. They are applied by the configuration Job rendered from
+`chart/templates/configure-job.yaml` and named
+`<release>-helx-ldap-configure` (`helx-helx-ldap-configure` under the umbrella
+chart's default release name). It is a hardened Helm
+`post-install,post-upgrade` hook Job that runs the `configure.sh` script from
+the `-configure` ConfigMap against `ldap://openldap:389`, binding as the
+cn=config administrator (`configuration.configDN`, default
+`cn=admin,cn=config`) with the password mounted from the credentials Secret.
+The Job:
 
-1. Loads and enables the `memberOf` module and overlay.
-2. Applies the configured anonymous-access ACL when enabled.
-3. Installs the `helxUser` schema, including:
+1. Waits for the LDAP Service to answer queries (up to 300 seconds), then
+   discovers the MDB database DN below `cn=config` instead of assuming the
+   upstream chart generates `olcDatabase={2}mdb`.
+2. Loads the `memberOf` module and installs the `memberOf` overlay on the
+   discovered database, so OpenLDAP maintains reverse `memberOf` attributes
+   and group membership can be queried from the user side.
+3. Applies the configured anonymous-access ACL when enabled.
+4. Installs the `helxUser` schema, including:
    - `runAsUser`
    - `runAsGroup`
    - `fsGroup`
    - `supplementalGroups`
    - `userAlias`
 
-The HeLx LDAP configuration Job waits for service readiness, discovers the generated
-MDB database DN and schema DN, and is idempotent across upgrades. Existing installations with the
-former `kubernetesSC` schema must be migrated explicitly because the old and
-new object classes use the same OID.
+   These attributes are how HeLx stores each user's pod security context
+   (run-as IDs) directly in the LDAP entry.
+
+Every step is idempotent: each piece is checked with `ldapsearch` and skipped
+when already installed, so the Job is safe to rerun on every upgrade. The Job
+refuses to run when the legacy `kubernetesSC` schema is installed (it uses the
+same OID as `helxUser` and must be migrated explicitly first) or when the
+`helxUser` schema is only partially installed, since re-adding attributes
+would create duplicates. Under the umbrella chart the Job carries hook weight
+10 so it finishes before the `ldap-sync` search bootstrap Job (weight 20)
+registers its search. The Job is deleted after a successful run
+(`helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded`); set
+`configuration.enabled: false` to manage the LDAP configuration manually.
 
 The chart defaults preserve the current `develop` branch behavior, including:
 

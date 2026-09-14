@@ -141,18 +141,41 @@ member users.
 
 ### Search bootstrap
 
-The chart enables `searchBootstrap` by default. A Helm `post-install`/`post-upgrade`
-Job waits for the current Deployment rollout and for the ldap-sync Service to
-answer `/readyz`, then reconciles the configured search through the REST API. The default search is `get-groups` with
-the UNC group filter used by the HeLx deployment. Existing searches are updated
-rather than recreated, so upgrades remain safe and repeatable. The Job is
-removed after a successful run; set `searchBootstrap.enabled: false` to manage
-searches manually.
+`ldap-sync` manages its searches as runtime state through the REST API, so
+the chart cannot declare the initial search in `values.yaml` directly. The
+`searchBootstrap` hook Job closes that gap, and it is enabled by default. It
+is rendered from `chart/templates/search-bootstrap.yaml` and named
+`<release>-ldap-sync-search-bootstrap`
+(`helx-ldap-sync-search-bootstrap` under the umbrella chart's default release
+name). It runs as a Helm `post-install`/`post-upgrade` hook with weight 20,
+after the `helx-ldap` configuration hook (weight 10) when both charts are
+installed together, so the target LDAP is already configured before the
+search is registered.
 
-The default chart values also configure the UNC source, the example OpenLDAP
-target, the `unc-group-x` hook, and the `azurefile` PVC storage class. The
-select the LDAP credential Secret owner with `secret.mode` rather than
-committing bind credentials to `values.yaml`.
+The Job:
+
+1. Waits for the `ldap-sync` Deployment rollout with a `kubectl rollout
+   status` init container, then polls the Service's `/readyz` endpoint until
+   the API answers.
+2. Reconciles the configured search through the REST API: a `GET /search`
+   decides between creating the search (`POST /search`) when it does not
+   exist and updating it (`PUT /search/{id}`) when it does, using the `id`,
+   `filter`, `refresh`, `baseDN`, and `oneShot` values from
+   `searchBootstrap`. Existing searches are updated rather than recreated,
+   so upgrades remain safe and repeatable.
+3. Retries until the search is verified stable, handling the race where
+   another bootstrap Job creates the same search mid-flight and the
+   possibility that a rolling upgrade briefly routes the Service to an old
+   pod after the mutation succeeds.
+
+Without this Job, a fresh installation would have a running `ldap-sync`
+Service but no search configured, so nothing would ever sync into the target
+LDAP directory. The Job is removed after a successful run; set
+`searchBootstrap.enabled: false` to manage searches manually.
+
+The bootstrap search is configured through the `searchBootstrap` values,
+and the LDAP credential Secret owner is selected with `secret.mode` rather
+than committing bind credentials to `values.yaml`.
 
 ### LDAP Credential Secret Modes
 

@@ -354,9 +354,10 @@ help-all-vars:
 	@echo 'Target groups: make help'
 
 ##@ setup Repository setup
-# setup: Add all remotes and missing service subtrees, plus install git hooks.
-# [HOOKS_PATH, *_URL, *_PREFIX, *_BRANCH]
-setup: add-subtrees install-hooks
+# setup: Provision Python tooling, add all remotes and missing service subtrees,
+# plus install git hooks. [PYTHON, VENV, *_URL, *_PREFIX, *_BRANCH
+# (APPSTORE_URL, LDAP_SYNC_BRANCH, etc.), HOOKS_PATH]
+setup: $(PYTHON_READY) add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected
 # URL.

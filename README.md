@@ -12,15 +12,13 @@ view.
 You need `git`, `helm` 3.x, and Python 3 on your PATH. CI pins Helm 3.18.6 and
 Python 3.12; anything close works locally. Docker is only needed to build images.
 
-Python tooling lives in a project virtualenv:
+Python tooling lives in a project virtualenv, which `make setup` ensures is
+provisioned automatically, along with git remotes/service subtrees and git hooks. Run
+`make setup` to set these up. Python tooling happens once and is re-run only
+when `.github/requirements-ci.txt` changes.
 
-```bash
-make ci-pip-install     # creates .venv and installs PyYAML, the only dependency
-```
-
-Every Python target provisions `.venv` automatically the first time, so you can
-skip that step and just run what you need. Provisioning happens once and is
-re-run only when `.github/requirements-ci.txt` changes.
+Other Python targets also provision `.venv` automatically the first time, so you
+can skip the explicit step and just run what you need.
 
 Do not `pip install` into your system Python — most modern installs are
 externally managed (PEP 668) and will refuse. To use your own interpreter
@@ -33,21 +31,15 @@ make PYTHON=/path/to/python ci-tests
 You never need to activate the virtualenv. `make` targets and the scripts in
 `.github/scripts/` invoke `.venv/bin/python` by path, which finds its own
 packages whether or not it is activated. Activation is only a convenience if you
-want to call `python` yourself:
-
-```bash
-source .venv/bin/activate
-```
+want to call `python` yourself.
 
 ### First-time clone
 
 ```bash
-make setup            # add every subtree remote and any missing service subtree
-make install-hooks    # run the pre-push checks automatically (optional)
+make setup            # provision Python tooling, subtrees, remotes, and hooks
 ```
 
-`make help` lists the setup targets and indexes the rest by topic:
-`make help-subtrees`, `make help-ci`, `make help-locks`, and
+`make help` lists the setup targets and indexes the rest by topic, and
 `make help-all-vars` for every variable the targets accept.
 
 Those topics are generated from the Makefile itself by

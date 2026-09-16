@@ -18,7 +18,6 @@ data:
         {{- end }}
       },
       "features": {{ toPrettyJson .Values.config.features | nindent 8 }},
-      "maps": {{ toPrettyJson .Values.config.maps | nindent 8 }},
       "secrets": {{ toPrettyJson $secretNames | nindent 8 }}
     }
 {{- if .Values.config.features.ldap }}

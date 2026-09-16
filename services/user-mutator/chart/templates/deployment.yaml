@@ -70,11 +70,9 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/user-mutator-config
-            {{- range $mapName, $_ := .Values.config.maps }}
-            - name: {{ printf "map-%s" $mapName | replace "_" "-" | lower }}
-              mountPath: {{ printf "/etc/user-mutator-maps/%s" $mapName }}
+            - name: user-profiles
+              mountPath: /etc/user-mutator-maps/user-profiles
               readOnly: true
-            {{- end }}
             {{- range $key, $_ := $secretNames }}
             - name: {{ $key }}-secret
               mountPath: /etc/user-mutator-secrets/{{ $key }}
@@ -84,12 +82,14 @@ spec:
         - name: config
           configMap:
             name: {{ include "user-mutator.fullname" . }}-config
-        {{- range $key, $mapName := .Values.config.maps }}
-        - name: {{ printf "map-%s" $key | replace "_" "-" | lower }}
+        # The application hard-codes this mount path and only ever reads the
+        # user-profiles directory, so the name is fixed rather than a value;
+        # config.userProfiles.enabled renders the ConfigMap under this name.
+        # optional keeps a turnkey install valid with no profiles at all.
+        - name: user-profiles
           configMap:
-            name: {{ $mapName }}
+            name: user-profiles
             optional: true
-        {{- end }}
         {{- range $key, $secretName := $secretNames }}
         - name: {{ $key }}-secret
           secret:

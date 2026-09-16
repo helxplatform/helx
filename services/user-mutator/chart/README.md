@@ -63,6 +63,87 @@ ldap:
       password: replace-me
 ```
 
+## User profiles
+
+The webhook reads user profiles from the ConfigMap mounted at
+`/etc/user-mutator-maps/user-profiles`: `auto.yaml` applies to every mutated
+Deployment, and `<username>.yaml` applies to the Deployment carrying that
+username. `auto.yaml` and the user-specific profile are both applied when both
+exist.
+
+The ConfigMap is always named `user-profiles`. By default the chart expects a
+caller-managed ConfigMap by that name and mounts it (the volume is optional,
+so an install without one is valid). To have the chart render it instead, set
+`config.userProfiles.enabled` and supply profiles as
+`config.userProfiles.entries`, a map of profile name to contents whose keys
+become `<key>.yaml` entries in the ConfigMap. `auto` is the all-users profile;
+any other key must match the username the webhook extracts from the
+Deployment. String values are written verbatim and maps are rendered with
+`toYaml`. Profile contents are never templated by Helm: `{{ .username }}` and
+`{{ index .cap 0 }}` are user-mutator's runtime template syntax.
+
+Enabling `config.userProfiles.enabled` swaps the mounted object from
+caller-managed to chart-rendered under the same name, with no other values to
+keep in sync.
+
+Before enabling it on a deployment that already manages a `user-profiles`
+ConfigMap out of band, delete that ConfigMap: Helm will not take over an
+object it does not own.
+
+```sh
+kubectl -n <namespace> delete configmap user-profiles
+```
+
+Every `helm upgrade` resets the ConfigMap's data to exactly the rendered
+entries, so profiles managed out of band belong in the caller-managed
+ConfigMap instead. The fixed name also means two user-mutator releases cannot
+coexist in one namespace.
+
+```yaml
+config:
+  userProfiles:
+    enabled: true
+    entries:
+      auto: |
+        secretsFrom: []
+        volumes: []
+      eboeth: |
+        volumes:
+          volumeSources:
+            - name: postgres-info
+              source: secret://test-omop-pguser-eboeth
+          volumeMounts:
+            - name: postgres-info
+              mountPath: /var/run/helx/postgres/TEST_OMOP
+```
+
+### Loading profiles from files
+
+`--set-file` reads a file into a value, so each profile can stay a standalone
+YAML file instead of an indented block scalar:
+
+```sh
+helm upgrade helx oci://ghcr.io/helxplatform/helm-charts/helx \
+  --set-file 'user-mutator.config.userProfiles.entries.auto=profiles/auto.yaml' \
+  --set-file 'user-mutator.config.userProfiles.entries.eboeth=profiles/eboeth.yaml'
+```
+
+Argo CD's `helm.fileParameters` is the same mechanism, so a GitOps deployment
+can keep one file per user next to its environment values:
+
+```yaml
+source:
+  helm:
+    fileParameters:
+      - name: user-mutator.config.userProfiles.entries.auto
+        file: $values/argocd/envs/prod/profiles/auto.yaml
+      - name: user-mutator.config.userProfiles.entries.eboeth
+        file: $values/argocd/envs/prod/profiles/eboeth.yaml
+```
+
+Note that `--set-file` and `fileParameters` paths containing dots have to
+escape them (`entries.john\.doe`), since the value path itself is dotted.
+
 ## Webhook TLS and the MutatingWebhookConfiguration
 
 A mutating webhook needs three things beyond the workload: a serving certificate, a `MutatingWebhookConfiguration` carrying the CA that signed it, and a way to select which namespaces are mutated. **As of chart `2.0.0` the chart renders all three by default**, so `helm install` produces a working webhook and no `make` target has to run out of band.
@@ -145,5 +226,26 @@ config:
 | anything else | `config.additionalSecrets` |
 
 `config.secrets` is intentionally absent from `values.yaml`; that absence is what lets the chart tell a caller-supplied map from a chart default, so re-adding it would break the check.
+
+## Removed: `config.maps`
+
+`config.maps` was removed in chart `2.1.0`. The chart rendered each entry as a
+volume mounted at `/etc/user-mutator-maps/<key>`, but the application only
+ever reads the `user-profiles` directory, so every other entry was inert. The
+`user-profiles` mount is now fixed in the chart: it always mounts the
+ConfigMap named `user-profiles`, which `config.userProfiles.enabled`
+renders.
+
+| Old entry | Replacement |
+| --- | --- |
+| `config.maps.user-profiles` | none; the mounted ConfigMap is always named `user-profiles` |
+| anything else | none; the application never read it |
+
+Helm silently ignores values that no longer exist, so a values file that
+still sets `config.maps` produces no error. A deployment that pointed the
+mount at a differently named ConfigMap must rename that ConfigMap to
+`user-profiles` (or move its contents into `config.userProfiles.entries`),
+otherwise the webhook silently reads no profiles: the volume is optional, so
+nothing fails.
 
 The committed `Chart.lock` pins the exact `helx-common` dependency used by this chart.

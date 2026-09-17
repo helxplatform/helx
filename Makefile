@@ -190,6 +190,7 @@ CLUSTER_NAME                    ?=
         pull-ui-chart \
         pull-user-mutator \
         pull-remotes pull-subtree \
+        check-subtree-sync \
         pull-develop \
         sync-locks \
         sync-helx-lock \
@@ -331,6 +332,7 @@ help-all-vars:
 	@echo '  USER_MUTATOR_URL=<url>       user-mutator remote URL.'
 	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
 	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
+	@echo '  RECORD=1                     check-subtree-sync prints MIGRATION.md rows.'
 	@echo
 	@echo 'Target groups: make help'
 
@@ -549,6 +551,68 @@ pull-remotes: pull-appstore \
 	pull-ui \
 	pull-ui-chart \
 	pull-user-mutator
+
+# The subtree map: <prefix>:<remote>:<branch>:<mode>, one record per subtree.
+# mode=merge  pull-<name> merges upstream, so its commits become ancestors and
+#             reachability from HEAD answers whether the prefix is current.
+# mode=squash pull-<name> collapses upstream into a single commit, so no
+#             upstream commit is ever an ancestor. The git-subtree-split
+#             trailer on the newest squash commit is the only record of what
+#             was taken, and reachability would report a permanent false gap.
+SUBTREE_MAP = \
+	services/appstore:appstore:$(APPSTORE_BRANCH):merge \
+	services/appstore/chart:appstore-chart:$(APPSTORE_CHART_BRANCH):merge \
+	services/appstore-prepuller:appstore-prepuller:$(APPSTORE_PREPULLER_BRANCH):merge \
+	services/appstore-sockets:appstore-sockets:$(APPSTORE_SOCKETS_BRANCH):merge \
+	services/appstore-sockets/chart:appstore-sockets-chart:$(APPSTORE_SOCKETS_CHART_BRANCH):merge \
+	services/helx-ldap:helx-ldap:$(HELX_LDAP_BRANCH):merge \
+	services/ldap-sync:ldap-sync:$(LDAP_SYNC_BRANCH):merge \
+	services/ui:ui:$(UI_BRANCH):merge \
+	services/ui/chart:ui-chart:$(UI_CHART_BRANCH):merge \
+	services/user-mutator:user-mutator:$(USER_MUTATOR_BRANCH):squash
+
+# check-subtree-sync: Report whether each subtree still matches the branch it
+# tracks. Read-only: it fetches and compares, and never merges or edits files.
+# Exits non-zero if any subtree is behind, so it can gate the monorepo cutover.
+# RECORD=1 prints MIGRATION.md table rows instead of the status report.
+# [*_BRANCH, RECORD]
+check-subtree-sync: add-remotes
+	@set -euo pipefail; \
+	rc=0; \
+	if test -n "$(RECORD)"; then \
+		printf '| %s | %s | %s | %s | %s |\n' prefix repo branch commit mode; \
+		printf '| %s | %s | %s | %s | %s |\n' --- --- --- --- ---; \
+	else \
+		printf '%-34s %-30s %s\n' PREFIX TRACKS STATUS; \
+	fi; \
+	for rec in $(SUBTREE_MAP); do \
+		prefix=$${rec%%:*}; rest=$${rec#*:}; \
+		remote=$${rest%%:*}; rest=$${rest#*:}; \
+		branch=$${rest%%:*}; mode=$${rest##*:}; \
+		if ! git fetch -q "$$remote" "$$branch" 2>/dev/null; then \
+			printf '%-34s %-30s %s\n' "$$prefix" "$$remote/$$branch" "FETCH FAILED"; \
+			rc=1; continue; \
+		fi; \
+		up=$$(git rev-parse FETCH_HEAD); \
+		if test "$$mode" = squash; then \
+			got=$$(git log --grep="git-subtree-dir: $$prefix\$$" --format='%B' -50 \
+				| sed -n 's/^git-subtree-split: //p' | head -1); \
+			if test "$$got" = "$$up"; then status='in sync'; else status='BEHIND'; fi; \
+		else \
+			n=$$(git rev-list --count --no-merges "HEAD..$$up"); \
+			if test "$$n" = 0; then status='in sync'; else status="BEHIND $$n"; fi; \
+		fi; \
+		if test "$$status" != 'in sync'; then rc=1; fi; \
+		if test -n "$(RECORD)"; then \
+			repo=$$(git config --get "remote.$$remote.url" \
+				| sed -e 's#.*github\.com[:/]##' -e 's#\.git$$##'); \
+			printf '| %s | %s | %s | %s | %s |\n' \
+				"$$prefix" "$$repo" "$$branch" "$$(git rev-parse --short "$$up")" "$$mode"; \
+		else \
+			printf '%-34s %-30s %s\n' "$$prefix" "$$remote/$$branch" "$$status"; \
+		fi; \
+	done; \
+	exit $$rc
 
 # require-pyyaml: fail with an actionable message instead of a raw traceback.
 define require-pyyaml

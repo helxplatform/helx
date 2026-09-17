@@ -36,18 +36,6 @@ UI_CHART_BRANCH                 ?= develop
 USER_MUTATOR_PREFIX             ?= services/user-mutator
 USER_MUTATOR_BRANCH             ?= develop
 
-# Vendored charts. helxplatform/helx-chart keeps several charts as
-# subdirectories, and git subtree cannot map a remote subdirectory to a local
-# prefix, so these are mirrored by content instead of merged. Local edits to a
-# mirrored chart are overwritten on the next pull.
-HELX_CHART_URL                  ?= https://github.com/helxplatform/helx-chart.git
-HELX_CHART_BRANCH               ?= master
-# Destination for each mirrored chart. `ambassador` also lives upstream and can
-# be mirrored by adding a prefix, a pull-ambassador target, and a
-# pull-helx-chart prerequisite.
-RESTY_CHART_PREFIX              ?= services/resty/chart
-POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
-
 # The project virtualenv is the default interpreter. System pip is often
 # externally managed (PEP 668) and refuses to install, so a venv is not just
 # tidiness. Set PYTHON=... to use your own interpreter and skip provisioning.
@@ -201,9 +189,6 @@ CLUSTER_NAME                    ?=
         pull-ui \
         pull-ui-chart \
         pull-user-mutator \
-        pull-helx-chart \
-        pull-resty \
-        pull-pod-reaper \
         pull-remotes pull-subtree \
         pull-develop \
         sync-locks \
@@ -242,7 +227,7 @@ help:
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
 	@echo '  make help-all-vars    Every variable those targets accept'
 
-#help-subtrees: Show subtree pulls and the vendored chart mirrors
+#help-subtrees: Show the subtree pull targets
 help-subtrees:
 	@awk -f $(HELP_AWK) -v topic=subtrees $(THIS_MAKEFILE)
 	@echo
@@ -346,10 +331,6 @@ help-all-vars:
 	@echo '  USER_MUTATOR_URL=<url>       user-mutator remote URL.'
 	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
 	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
-	@echo '  HELX_CHART_URL=<url>         helx-chart remote URL.'
-	@echo '  HELX_CHART_BRANCH=<branch>   helx-chart branch to add or pull.'
-	@echo '  RESTY_CHART_PREFIX=<path>     Local resty chart path.'
-	@echo '  POD_REAPER_CHART_PREFIX=<path> Local pod-reaper chart path.'
 	@echo
 	@echo 'Target groups: make help'
 
@@ -392,7 +373,6 @@ endef
 
 # add-remotes: Add or verify all remotes needed by the service subtrees. [*_URL]
 add-remotes:
-	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
 	$(call ensure-remote,appstore,$(APPSTORE_URL))
 	$(call ensure-remote,appstore-chart,$(APPSTORE_CHART_URL))
 	$(call ensure-remote,appstore-prepuller,$(APPSTORE_PREPULLER_URL))
@@ -568,60 +548,7 @@ pull-remotes: pull-appstore \
 	pull-ldap-sync \
 	pull-ui \
 	pull-ui-chart \
-	pull-user-mutator \
-	pull-helx-chart
-
-# mirror-chart: Replace one local chart with a subdirectory of the fetched tree.
-# git subtree cannot map a remote subdirectory to a local prefix, so the chart
-# is copied by content. Staging is populated and validated before anything local
-# is removed, so a bad chart name leaves the working tree untouched.
-# $(1)=upstream charts/<name>  $(2)=local destination
-define mirror-chart
-	@set -euo pipefail; \
-	if test -z "$(FORCE)" && test -n "$$(git status --porcelain -- "$(2)" 2>/dev/null)"; then \
-		echo "REFUSING to overwrite $(2) -- uncommitted changes present:"; \
-		git status --short -- "$(2)"; \
-		echo "  Commit or stash them, or re-run with FORCE=1."; \
-		exit 1; \
-	fi; \
-	staging=$$(mktemp -d); \
-	trap 'rm -rf "$$staging"' EXIT; \
-	if ! git archive FETCH_HEAD "charts/$(1)" 2>/dev/null | tar -x --strip-components=2 -C "$$staging"; then \
-		echo "REFUSING to mirror -- charts/$(1) is not in helx-chart/$(HELX_CHART_BRANCH)"; \
-		exit 1; \
-	fi; \
-	if ! test -f "$$staging/Chart.yaml"; then \
-		echo "REFUSING to mirror -- charts/$(1)/Chart.yaml is not in helx-chart/$(HELX_CHART_BRANCH)"; \
-		exit 1; \
-	fi; \
-	rm -rf "$(2)"; \
-	mkdir -p "$(2)"; \
-	cp -R "$$staging"/. "$(2)"/; \
-	echo "Mirrored charts/$(1) -> $(2) ($$(sed -n 's/^version: *//p' "$(2)/Chart.yaml" | tr -d '\"'))"
-endef
-
-##@ subtrees Vendored charts (mirrored by content, not git subtree)
-# pull-resty: Mirror the resty chart out of helxplatform/helx-chart. Refuses
-# to clobber uncommitted work; override with FORCE=1. To undo a pull:
-# git checkout HEAD -- <prefix> && git clean -fd <prefix>
-# [HELX_CHART_URL, HELX_CHART_BRANCH, RESTY_CHART_PREFIX,
-#  MAX_SUBTREE_BLOB_BYTES, FORCE]
-pull-resty: add-remotes
-	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
-	$(call mirror-chart,resty,$(RESTY_CHART_PREFIX))
-
-# pull-pod-reaper: Mirror the pod-reaper chart out of helxplatform/helx-chart.
-# [HELX_CHART_URL, HELX_CHART_BRANCH, POD_REAPER_CHART_PREFIX,
-#  MAX_SUBTREE_BLOB_BYTES, FORCE]
-pull-pod-reaper: add-remotes
-	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
-	$(call mirror-chart,pod-reaper,$(POD_REAPER_CHART_PREFIX))
-
-# pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart.
-# [HELX_CHART_URL, HELX_CHART_BRANCH, RESTY_CHART_PREFIX,
-#  POD_REAPER_CHART_PREFIX, MAX_SUBTREE_BLOB_BYTES, FORCE]
-pull-helx-chart: pull-resty pull-pod-reaper
-##> Local edits to these charts are overwritten; FORCE=1 skips the dirty check.
+	pull-user-mutator
 
 # require-pyyaml: fail with an actionable message instead of a raw traceback.
 define require-pyyaml

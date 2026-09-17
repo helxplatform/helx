@@ -164,23 +164,11 @@ make pull-user-mutator      # or pull-appstore, pull-ui, ... ; make help-subtree
 make pull-remotes           # every subtree in sequence
 ```
 
-`ambassador`, `pod-reaper`, and `resty` are different: they are content mirrors
-of subdirectories in `helxplatform/helx-chart`, which `git subtree` cannot map.
-They are copied wholesale, so **local edits to them are destroyed** on the next
-pull:
-
-```bash
-make pull-resty
-make pull-pod-reaper
-make pull-helx-chart        # both of the above
-```
-
-The mirror refuses to clobber uncommitted work; pass `FORCE=1` to override. To
-undo a pull:
-
-```bash
-git checkout HEAD -- services/resty && git clean -fd services/resty
-```
+`ambassador`, `pod-reaper`, and `resty` are not subtrees. Their charts were
+mirrored by content from subdirectories of `helxplatform/helx-chart`, which
+`git subtree` cannot map. That mirror was retired ahead of the monorepo
+cutover: these charts are maintained here now and have no upstream to pull
+from.
 
 After any upstream pull, run `validate-config`. An upstream chart version bump
 leaves the umbrella pin stale, which is a failure this will catch.

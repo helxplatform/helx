@@ -16,9 +16,9 @@ USER_MUTATOR_URL                ?= https://github.com/helxplatform/user-mutator.
 
 # Branches and prefixes used when the subtrees are added or pulled.
 APPSTORE_PREFIX                 ?= services/appstore
-APPSTORE_BRANCH                 ?= develop
+APPSTORE_BRANCH                 ?= master
 APPSTORE_CHART_PREFIX           ?= services/appstore/chart
-APPSTORE_CHART_BRANCH           ?= main
+APPSTORE_CHART_BRANCH           ?= develop
 APPSTORE_PREPULLER_PREFIX       ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH       ?= main
 APPSTORE_SOCKETS_PREFIX         ?= services/appstore-sockets
@@ -32,21 +32,9 @@ LDAP_SYNC_BRANCH                ?= master
 UI_PREFIX                       ?= services/ui
 UI_BRANCH                       ?= develop
 UI_CHART_PREFIX                 ?= services/ui/chart
-UI_CHART_BRANCH                 ?= master
+UI_CHART_BRANCH                 ?= develop
 USER_MUTATOR_PREFIX             ?= services/user-mutator
 USER_MUTATOR_BRANCH             ?= develop
-
-# Vendored charts. helxplatform/helx-chart keeps several charts as
-# subdirectories, and git subtree cannot map a remote subdirectory to a local
-# prefix, so these are mirrored by content instead of merged. Local edits to a
-# mirrored chart are overwritten on the next pull.
-HELX_CHART_URL                  ?= https://github.com/helxplatform/helx-chart.git
-HELX_CHART_BRANCH               ?= master
-# Destination for each mirrored chart. `ambassador` also lives upstream and can
-# be mirrored by adding a prefix, a pull-ambassador target, and a
-# pull-helx-chart prerequisite.
-RESTY_CHART_PREFIX              ?= services/resty/chart
-POD_REAPER_CHART_PREFIX         ?= services/pod-reaper/chart
 
 # The project virtualenv is the default interpreter. System pip is often
 # externally managed (PEP 668) and refuses to install, so a venv is not just
@@ -201,10 +189,8 @@ CLUSTER_NAME                    ?=
         pull-ui \
         pull-ui-chart \
         pull-user-mutator \
-        pull-helx-chart \
-        pull-resty \
-        pull-pod-reaper \
         pull-remotes pull-subtree \
+        check-subtree-sync \
         pull-develop \
         sync-locks \
         sync-helx-lock \
@@ -242,7 +228,7 @@ help:
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
 	@echo '  make help-all-vars    Every variable those targets accept'
 
-#help-subtrees: Show subtree pulls and the vendored chart mirrors
+#help-subtrees: Show the subtree pull targets
 help-subtrees:
 	@awk -f $(HELP_AWK) -v topic=subtrees $(THIS_MAKEFILE)
 	@echo
@@ -346,10 +332,7 @@ help-all-vars:
 	@echo '  USER_MUTATOR_URL=<url>       user-mutator remote URL.'
 	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
 	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
-	@echo '  HELX_CHART_URL=<url>         helx-chart remote URL.'
-	@echo '  HELX_CHART_BRANCH=<branch>   helx-chart branch to add or pull.'
-	@echo '  RESTY_CHART_PREFIX=<path>     Local resty chart path.'
-	@echo '  POD_REAPER_CHART_PREFIX=<path> Local pod-reaper chart path.'
+	@echo '  RECORD=1                     check-subtree-sync prints MIGRATION.md rows.'
 	@echo
 	@echo 'Target groups: make help'
 
@@ -392,7 +375,6 @@ endef
 
 # add-remotes: Add or verify all remotes needed by the service subtrees. [*_URL]
 add-remotes:
-	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
 	$(call ensure-remote,appstore,$(APPSTORE_URL))
 	$(call ensure-remote,appstore-chart,$(APPSTORE_CHART_URL))
 	$(call ensure-remote,appstore-prepuller,$(APPSTORE_PREPULLER_URL))
@@ -568,60 +550,69 @@ pull-remotes: pull-appstore \
 	pull-ldap-sync \
 	pull-ui \
 	pull-ui-chart \
-	pull-user-mutator \
-	pull-helx-chart
+	pull-user-mutator
 
-# mirror-chart: Replace one local chart with a subdirectory of the fetched tree.
-# git subtree cannot map a remote subdirectory to a local prefix, so the chart
-# is copied by content. Staging is populated and validated before anything local
-# is removed, so a bad chart name leaves the working tree untouched.
-# $(1)=upstream charts/<name>  $(2)=local destination
-define mirror-chart
+# The subtree map: <prefix>:<remote>:<branch>:<mode>, one record per subtree.
+# mode=merge  pull-<name> merges upstream, so its commits become ancestors and
+#             reachability from HEAD answers whether the prefix is current.
+# mode=squash pull-<name> collapses upstream into a single commit, so no
+#             upstream commit is ever an ancestor. The git-subtree-split
+#             trailer on the newest squash commit is the only record of what
+#             was taken, and reachability would report a permanent false gap.
+SUBTREE_MAP = \
+	services/appstore:appstore:$(APPSTORE_BRANCH):merge \
+	services/appstore/chart:appstore-chart:$(APPSTORE_CHART_BRANCH):merge \
+	services/appstore-prepuller:appstore-prepuller:$(APPSTORE_PREPULLER_BRANCH):merge \
+	services/appstore-sockets:appstore-sockets:$(APPSTORE_SOCKETS_BRANCH):merge \
+	services/appstore-sockets/chart:appstore-sockets-chart:$(APPSTORE_SOCKETS_CHART_BRANCH):merge \
+	services/helx-ldap:helx-ldap:$(HELX_LDAP_BRANCH):merge \
+	services/ldap-sync:ldap-sync:$(LDAP_SYNC_BRANCH):merge \
+	services/ui:ui:$(UI_BRANCH):merge \
+	services/ui/chart:ui-chart:$(UI_CHART_BRANCH):merge \
+	services/user-mutator:user-mutator:$(USER_MUTATOR_BRANCH):squash
+
+# check-subtree-sync: Report whether each subtree still matches the branch it
+# tracks. Read-only: it fetches and compares, and never merges or edits files.
+# Exits non-zero if any subtree is behind, so it can gate the monorepo cutover.
+# RECORD=1 prints MIGRATION.md table rows instead of the status report.
+# [*_BRANCH, RECORD]
+check-subtree-sync: add-remotes
 	@set -euo pipefail; \
-	if test -z "$(FORCE)" && test -n "$$(git status --porcelain -- "$(2)" 2>/dev/null)"; then \
-		echo "REFUSING to overwrite $(2) -- uncommitted changes present:"; \
-		git status --short -- "$(2)"; \
-		echo "  Commit or stash them, or re-run with FORCE=1."; \
-		exit 1; \
+	rc=0; \
+	if test -n "$(RECORD)"; then \
+		printf '| %s | %s | %s | %s | %s |\n' prefix repo branch commit mode; \
+		printf '| %s | %s | %s | %s | %s |\n' --- --- --- --- ---; \
+	else \
+		printf '%-34s %-30s %s\n' PREFIX TRACKS STATUS; \
 	fi; \
-	staging=$$(mktemp -d); \
-	trap 'rm -rf "$$staging"' EXIT; \
-	if ! git archive FETCH_HEAD "charts/$(1)" 2>/dev/null | tar -x --strip-components=2 -C "$$staging"; then \
-		echo "REFUSING to mirror -- charts/$(1) is not in helx-chart/$(HELX_CHART_BRANCH)"; \
-		exit 1; \
-	fi; \
-	if ! test -f "$$staging/Chart.yaml"; then \
-		echo "REFUSING to mirror -- charts/$(1)/Chart.yaml is not in helx-chart/$(HELX_CHART_BRANCH)"; \
-		exit 1; \
-	fi; \
-	rm -rf "$(2)"; \
-	mkdir -p "$(2)"; \
-	cp -R "$$staging"/. "$(2)"/; \
-	echo "Mirrored charts/$(1) -> $(2) ($$(sed -n 's/^version: *//p' "$(2)/Chart.yaml" | tr -d '\"'))"
-endef
-
-##@ subtrees Vendored charts (mirrored by content, not git subtree)
-# pull-resty: Mirror the resty chart out of helxplatform/helx-chart. Refuses
-# to clobber uncommitted work; override with FORCE=1. To undo a pull:
-# git checkout HEAD -- <prefix> && git clean -fd <prefix>
-# [HELX_CHART_URL, HELX_CHART_BRANCH, RESTY_CHART_PREFIX,
-#  MAX_SUBTREE_BLOB_BYTES, FORCE]
-pull-resty: add-remotes
-	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
-	$(call mirror-chart,resty,$(RESTY_CHART_PREFIX))
-
-# pull-pod-reaper: Mirror the pod-reaper chart out of helxplatform/helx-chart.
-# [HELX_CHART_URL, HELX_CHART_BRANCH, POD_REAPER_CHART_PREFIX,
-#  MAX_SUBTREE_BLOB_BYTES, FORCE]
-pull-pod-reaper: add-remotes
-	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
-	$(call mirror-chart,pod-reaper,$(POD_REAPER_CHART_PREFIX))
-
-# pull-helx-chart: Mirror every chart vendored from helxplatform/helx-chart.
-# [HELX_CHART_URL, HELX_CHART_BRANCH, RESTY_CHART_PREFIX,
-#  POD_REAPER_CHART_PREFIX, MAX_SUBTREE_BLOB_BYTES, FORCE]
-pull-helx-chart: pull-resty pull-pod-reaper
-##> Local edits to these charts are overwritten; FORCE=1 skips the dirty check.
+	for rec in $(SUBTREE_MAP); do \
+		prefix=$${rec%%:*}; rest=$${rec#*:}; \
+		remote=$${rest%%:*}; rest=$${rest#*:}; \
+		branch=$${rest%%:*}; mode=$${rest##*:}; \
+		if ! git fetch -q "$$remote" "$$branch" 2>/dev/null; then \
+			printf '%-34s %-30s %s\n' "$$prefix" "$$remote/$$branch" "FETCH FAILED"; \
+			rc=1; continue; \
+		fi; \
+		up=$$(git rev-parse FETCH_HEAD); \
+		if test "$$mode" = squash; then \
+			got=$$(git log --grep="git-subtree-dir: $$prefix\$$" --format='%B' -50 \
+				| sed -n 's/^git-subtree-split: //p' | head -1); \
+			if test "$$got" = "$$up"; then status='in sync'; else status='BEHIND'; fi; \
+		else \
+			n=$$(git rev-list --count --no-merges "HEAD..$$up"); \
+			if test "$$n" = 0; then status='in sync'; else status="BEHIND $$n"; fi; \
+		fi; \
+		if test "$$status" != 'in sync'; then rc=1; fi; \
+		if test -n "$(RECORD)"; then \
+			repo=$$(git config --get "remote.$$remote.url" \
+				| sed -e 's#.*github\.com[:/]##' -e 's#\.git$$##'); \
+			printf '| %s | %s | %s | %s | %s |\n' \
+				"$$prefix" "$$repo" "$$branch" "$$(git rev-parse --short "$$up")" "$$mode"; \
+		else \
+			printf '%-34s %-30s %s\n' "$$prefix" "$$remote/$$branch" "$$status"; \
+		fi; \
+	done; \
+	exit $$rc
 
 # require-pyyaml: fail with an actionable message instead of a raw traceback.
 define require-pyyaml

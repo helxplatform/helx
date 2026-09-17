@@ -45,6 +45,29 @@ ui:
       enabled: "true"
 user-mutator:
   config:
+    userProfiles:
+      enabled: true
+      entries:
+        auto: |
+          secretsFrom:
+            - secretName: foundry-secret
+          configMapsFrom:
+            - configmapName: app-environment-config
+          volumes:
+            volumeSources:
+              - name: postgres-info
+                source: secret://(.*)-pguser-{{ .username }}
+              - name: azure-codex-config
+                source: configmap://azure-codex-config
+              - name: biome-model-config
+                source: configmap://biome-model-config
+            volumeMounts:
+              - name: postgres-info
+                mountPath: /var/run/helx/postgres/{{ index .cap 0 }}
+              - name: azure-codex-config
+                mountPath: /etc/codex
+              - name: biome-model-config
+                mountPath: /etc/bdf-pz
     features:
       ldap:
         host: openldap

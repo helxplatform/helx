@@ -102,6 +102,8 @@ Edit `config.env` to customize:
 - `templates/webhook.yaml` renders the generated Secret and the webhook configuration together on purpose: Helm templates are pure functions, so splitting them would produce a CA bundle that does not match the serving certificate on a fresh install
 - Namespaces are selected by the automatic `kubernetes.io/metadata.name` label, so no namespace has to be labelled and the chart needs no namespace-patching RBAC
 - Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration
+- The `user-profiles` ConfigMap is caller-managed by default; `config.userProfiles.enabled` renders it under the same fixed name from `config.userProfiles.entries` (keys become `<key>.yaml`: `auto` plus one per username). String entry values are written verbatim for `--set-file`/Argo CD `fileParameters`, and contents are never passed through `tpl` because `{{ .username }}` is the application's runtime template syntax
+- `config.maps` was removed in chart 2.1.0: the mount is fixed to the ConfigMap named `user-profiles`, and the `maps` key no longer appears in config.json (the application never read it)
 
 ### Core Workflow
 

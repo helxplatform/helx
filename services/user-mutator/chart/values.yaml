@@ -222,8 +222,51 @@ webhook:
 #     group_base_dn: "ou=groups,dc=example,dc=org"
 config:
   enabled: true
-  maps:
-    user-profiles: user-profiles
+  # -- Render the user-profiles ConfigMap from entries instead of expecting
+  # a caller-managed ConfigMap named user-profiles. The webhook loads
+  # auto.yaml and <username>.yaml from /etc/user-mutator-maps/user-profiles
+  # in both modes. Delete any caller-managed user-profiles ConfigMap before
+  # enabling: Helm will not take over an object it does not own.
+  userProfiles:
+    enabled: false
+    # -- Profile name to profile contents. The key becomes <key>.yaml in the
+    # ConfigMap: auto applies to every mutated Deployment and any other key
+    # must match the username the webhook extracts from it. A string value is
+    # written verbatim (--set-file and Argo CD fileParameters deliver
+    # strings); any other value is rendered with toYaml. Contents are never
+    # passed through tpl: {{ .username }} and {{ index .cap 0 }} are
+    # user-mutator's runtime template syntax, not Helm's. Every helm upgrade
+    # resets the ConfigMap to exactly these entries, so profiles managed out
+    # of band belong in the caller-managed ConfigMap instead.
+    #
+    # Example, profiles inlined as strings (a string is written verbatim,
+    # so its exact indentation and any {{ .username }} templates survive):
+    #   entries:
+    #     auto: |
+    #       secretsFrom: []
+    #       volumes: []
+    #     eboeth: |
+    #       volumes:
+    #         volumeSources:
+    #           - name: postgres-info
+    #             source: secret://test-omop-pguser-eboeth
+    #         volumeMounts:
+    #           - name: postgres-info
+    #             mountPath: /var/run/helx/postgres/TEST_OMOP
+    #
+    # The same entries can stay standalone files instead, one per profile,
+    # loaded at invoke time -- a string from a file is indistinguishable from
+    # an inlined one:
+    #   helm upgrade helx oci://ghcr.io/helxplatform/helm-charts/helx \
+    #     --set-file 'user-mutator.config.userProfiles.entries.auto=profiles/auto.yaml' \
+    #     --set-file 'user-mutator.config.userProfiles.entries.eboeth=profiles/eboeth.yaml'
+    # Argo CD's helm.fileParameters is the same mechanism, per profile:
+    #   fileParameters:
+    #     - name: user-mutator.config.userProfiles.entries.auto
+    #       file: $values/argocd/envs/prod/profiles/auto.yaml
+    #     - name: user-mutator.config.userProfiles.entries.eboeth
+    #       file: $values/argocd/envs/prod/profiles/eboeth.yaml
+    entries: {}
   features: {}
   # -- Unknown, caller-managed Secret contracts to expose to the application.
   # Keys become config.json secret aliases and mount directory names; values are

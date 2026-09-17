@@ -16,9 +16,9 @@ USER_MUTATOR_URL                ?= https://github.com/helxplatform/user-mutator.
 
 # Branches and prefixes used when the subtrees are added or pulled.
 APPSTORE_PREFIX                 ?= services/appstore
-APPSTORE_BRANCH                 ?= develop
+APPSTORE_BRANCH                 ?= master
 APPSTORE_CHART_PREFIX           ?= services/appstore/chart
-APPSTORE_CHART_BRANCH           ?= main
+APPSTORE_CHART_BRANCH           ?= develop
 APPSTORE_PREPULLER_PREFIX       ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH       ?= main
 APPSTORE_SOCKETS_PREFIX         ?= services/appstore-sockets
@@ -32,7 +32,7 @@ LDAP_SYNC_BRANCH                ?= master
 UI_PREFIX                       ?= services/ui
 UI_BRANCH                       ?= develop
 UI_CHART_PREFIX                 ?= services/ui/chart
-UI_CHART_BRANCH                 ?= master
+UI_CHART_BRANCH                 ?= develop
 USER_MUTATOR_PREFIX             ?= services/user-mutator
 USER_MUTATOR_BRANCH             ?= develop
 

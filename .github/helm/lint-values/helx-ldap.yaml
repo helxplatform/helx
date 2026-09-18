@@ -1,0 +1,10 @@
+# CI-only values for the standalone helx-ldap chart lint. Helm lint does not
+# contact a cluster, so these values exercise the caller-managed credentials
+# Secret mode without putting synthetic credentials in rendered manifests.
+secret:
+  mode: existingSecret
+  existingSecret: helx-ldap-lint-credentials
+openldap:
+  global:
+    # The upstream chart and the configuration Job consume the same Secret.
+    existingSecret: helx-ldap-lint-credentials

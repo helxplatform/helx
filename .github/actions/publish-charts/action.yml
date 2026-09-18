@@ -1,0 +1,97 @@
+name: Build and publish Helm chart
+description: Build, lint, package, and optionally publish one HeLx Helm chart
+
+inputs:
+  chart-dir:
+    description: Directory containing Chart.yaml
+    required: true
+  publish:
+    description: Publish or reuse the immutable chart version
+    required: false
+    default: 'false'
+  registry:
+    description: OCI chart registry
+    required: false
+    default: oci://ghcr.io/helxplatform/helm-charts
+  registry-username:
+    description: GHCR username used for dependency pulls and optional publication
+    required: true
+  registry-token:
+    description: GHCR token used for dependency pulls and optional publication
+    required: true
+  channel:
+    description: >-
+      Candidate channel name. When set, the umbrella is built from the local
+      tree and published as a mutable <version>-<channel> prerelease.
+    required: false
+    default: ''
+  channel-commit:
+    description: Commit whose images the candidate pins
+    required: false
+    default: ''
+
+outputs:
+  package:
+    description: Packaged chart archive
+    value: ${{ steps.chart.outputs.package }}
+  published:
+    description: Whether this run pushed a new chart version
+    value: ${{ inputs.channel != '' || steps.preflight.outputs.publish-needed == 'true' }}
+  chart-version:
+    description: Version of the packaged chart, including any channel prerelease
+    value: ${{ steps.chart.outputs.chart-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python 3.12
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      with:
+        python-version: '3.12'
+
+    - name: Install chart tooling requirements
+      shell: bash
+      run: python -m pip install --requirement .github/requirements-ci.txt
+
+    - name: Set up Helm 3.18.6
+      uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      with:
+        version: v3.18.6
+
+    - name: Log in to GHCR for chart dependencies
+      shell: bash
+      env:
+        REGISTRY_TOKEN: ${{ inputs.registry-token }}
+        REGISTRY_USERNAME: ${{ inputs.registry-username }}
+      run: printf '%s' "$REGISTRY_TOKEN" | helm registry login ghcr.io --username "$REGISTRY_USERNAME" --password-stdin
+
+    - name: Build, lint, and package chart
+      id: chart
+      shell: bash
+      env:
+        CHART_DIR: ${{ inputs.chart-dir }}
+        CHART_CHANNEL: ${{ inputs.channel }}
+        CHART_CHANNEL_COMMIT: ${{ inputs.channel-commit }}
+      run: bash .github/scripts/helm-build-chart.sh "$CHART_DIR"
+
+    # Candidate channels are deliberately mutable, so the immutability preflight
+    # only guards released versions.
+    - name: Check immutable chart version
+      id: preflight
+      if: inputs.publish == 'true' && inputs.channel == ''
+      shell: bash
+      env:
+        CHART_DIR: ${{ inputs.chart-dir }}
+        PACKAGE: ${{ steps.chart.outputs.package }}
+        REGISTRY: ${{ inputs.registry }}
+      run: bash .github/scripts/helm-preflight.sh "$REGISTRY" "$CHART_DIR" "$PACKAGE"
+
+    - name: Publish chart
+      if: >-
+        inputs.publish == 'true'
+        && (inputs.channel != '' || steps.preflight.outputs.publish-needed == 'true')
+      shell: bash
+      env:
+        PACKAGE: ${{ steps.chart.outputs.package }}
+        REGISTRY: ${{ inputs.registry }}
+      run: helm push "$PACKAGE" "${REGISTRY%/}"

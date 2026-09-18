@@ -1,0 +1,16 @@
+{{- if and .Values.openldap.persistence.existingClaim (ne (.Values.openldap.replicaCount | int) 1) }}
+  {{- fail "helx-ldap: openldap.persistence.existingClaim requires openldap.replicaCount to be 1" -}}
+{{- end }}
+{{- if .Values.openldap.migration.enabled }}
+{{- if not .Release.IsUpgrade }}
+  {{- fail "helx-ldap: openldap.migration.enabled is only valid during a Helm upgrade" -}}
+{{- end }}
+{{- if not .Values.openldap.persistence.enabled }}
+  {{- fail "helx-ldap: openldap.persistence.enabled must be true during PVC migration" -}}
+{{- end }}
+{{- $legacyPvc := required "helx-ldap: openldap.migration.legacyPvc is required during PVC migration" .Values.openldap.migration.legacyPvc -}}
+{{- $existingClaim := required "helx-ldap: set openldap.persistence.existingClaim during PVC migration" .Values.openldap.persistence.existingClaim -}}
+{{- if ne $existingClaim $legacyPvc }}
+  {{- fail (printf "helx-ldap: openldap.persistence.existingClaim must match openldap.migration.legacyPvc %q, got %q" $legacyPvc $existingClaim) -}}
+{{- end }}
+{{- end }}

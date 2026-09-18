@@ -525,18 +525,22 @@ appstore:
     tag: <branchname>
     pullPolicy: Always
   django:
-    AUTHORIZED_USERS: <a list emails or usernames of authorized users>
-    EMAIL_HOST_USER: "appstore@renci.org"
-    EMAIL_HOST_PASSWORD: <secret>
     DOCKSTORE_APPS_BRANCH: <appstore branch>
-    oauth:
+  secret:
+    values:
+      SECRET_KEY: <Django signing key>
+      APPSTORE_DJANGO_USERNAME: admin
+      APPSTORE_DJANGO_PASSWORD: <admin password>
+      AUTHORIZED_USERS: <a list emails or usernames of authorized users>
+      EMAIL_HOST_USER: "appstore@renci.org"
+      EMAIL_HOST_PASSWORD: <secret>
       OAUTH_PROVIDERS: "github,google,cilogon"
       GITHUB_NAME: <github name>
       GITHUB_CLIENT_ID: <github id>
       GITHUB_SECRET: <github secret>
       GOOGLE_NAME: <google name>
       GOOGLE_CLIENT_ID: <google client id>
-      GOOGLE_SECRET: <CILogon client secret>
+      GOOGLE_SECRET: <Google client secret>
       CILOGON_NAME: <cilogon name>
       CILOGON_CLIENT_ID: <CILogon client id>
       CILOGON_SECRET: <CILogon client secret>

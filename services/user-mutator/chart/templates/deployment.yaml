@@ -1,3 +1,16 @@
+{{- $secretNames := include "user-mutator.effectiveSecretNames" . | fromYaml }}
+{{/*
+Roll the Pod when the webhook TLS material changes. The server reads its
+certificate once at startup via http.ListenAndServeTLS, so a rotated Secret is
+otherwise ignored until something restarts the process, and because
+webhook.failurePolicy defaults to Ignore that stale cert fails every handshake
+silently rather than surfacing an error.
+*/}}
+{{- $tlsChecksum := "" }}
+{{- $persistedTls := lookup "v1" "Secret" .Release.Namespace (get $secretNames "cert") }}
+{{- if $persistedTls }}
+  {{- $tlsChecksum = default (dict) $persistedTls.data | toYaml | sha256sum }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,9 +26,14 @@ spec:
       {{- include "user-mutator.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
+      {{- if or .Values.podAnnotations $tlsChecksum }}
       annotations:
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with $tlsChecksum }}
+        checksum/webhook-tls: {{ . }}
+        {{- end }}
       {{- end }}
       labels:
         {{- include "user-mutator.selectorLabels" . | nindent 8 }}
@@ -52,12 +70,10 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/user-mutator-config
-            {{- range $mapName, $_ := .Values.config.maps }}
-            - name: {{ printf "map-%s" $mapName | replace "_" "-" | lower }}
-              mountPath: {{ printf "/etc/user-mutator-maps/%s" $mapName }}
+            - name: user-profiles
+              mountPath: /etc/user-mutator-maps/user-profiles
               readOnly: true
-            {{- end }}
-            {{- range $key, $value := .Values.config.secrets }}
+            {{- range $key, $_ := $secretNames }}
             - name: {{ $key }}-secret
               mountPath: /etc/user-mutator-secrets/{{ $key }}
               readOnly: true
@@ -66,16 +82,18 @@ spec:
         - name: config
           configMap:
             name: {{ include "user-mutator.fullname" . }}-config
-        {{- range $key, $mapName := .Values.config.maps }}
-        - name: {{ printf "map-%s" $key | replace "_" "-" | lower }}
+        # The application hard-codes this mount path and only ever reads the
+        # user-profiles directory, so the name is fixed rather than a value;
+        # config.userProfiles.enabled renders the ConfigMap under this name.
+        # optional keeps a turnkey install valid with no profiles at all.
+        - name: user-profiles
           configMap:
-            name: {{ $mapName }}
+            name: user-profiles
             optional: true
-        {{- end }}
-        {{- range $key, $value := .Values.config.secrets }}
+        {{- range $key, $secretName := $secretNames }}
         - name: {{ $key }}-secret
           secret:
-            secretName: {{ $value }}
+            secretName: {{ $secretName }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

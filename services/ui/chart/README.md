@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 1.5.0](https://img.shields.io/badge/Version-1.5.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 6.3.0](https://img.shields.io/badge/AppVersion-6.3.0-informational?style=flat-square)
+![Version: 1.6.1](https://img.shields.io/badge/Version-1.6.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 6.4.2](https://img.shields.io/badge/AppVersion-6.4.2-informational?style=flat-square)
 
 ## About HELX-UI
 
@@ -51,7 +51,7 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | config.workspaces.enabled | string | `"true"` | Allow Workspaces. |
 | fullnameOverride | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
-| image.repository | string | `"helxplatform/helx-ui"` |  |
+| image.repository | string | `"containers.renci.org/helxplatform/helx-ui"` |  |
 | image.tag | string | `""` | Overrides the image tag whose default is the appVersion supplied in umbrella chart. |
 | imagePullSecrets | list | `[]` |  |
 | ingress.annotations | object | `{}` |  |

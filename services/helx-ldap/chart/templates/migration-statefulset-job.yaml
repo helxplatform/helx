@@ -1,0 +1,156 @@
+{{- if .Values.openldap.migration.enabled }}
+{{- $migrationName := include "helx-ldap.migrationName" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "helx-ldap.migrationJobName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "helx-ldap.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migration
+  annotations:
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-20"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.openldap.migration.job.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.openldap.migration.job.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "helx-ldap.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      serviceAccountName: {{ $migrationName }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: migrate-statefulset
+          image: "{{ .Values.openldap.migration.image.repository }}:{{ .Values.openldap.migration.image.tag }}"
+          imagePullPolicy: {{ .Values.openldap.migration.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - |-
+              set -eu
+
+              : "${NAMESPACE:?NAMESPACE is required}"
+              : "${RELEASE_NAME:?RELEASE_NAME is required}"
+              : "${LEGACY_PVC:?LEGACY_PVC is required}"
+              : "${POD_TERMINATION_TIMEOUT_SECONDS:?POD_TERMINATION_TIMEOUT_SECONDS is required}"
+
+              case "${POD_TERMINATION_TIMEOUT_SECONDS}" in
+                ''|*[!0-9]*|0)
+                  echo "POD_TERMINATION_TIMEOUT_SECONDS must be a positive integer" >&2
+                  exit 1
+                  ;;
+              esac
+
+              echo "Checking the HeLx LDAP PVC ${LEGACY_PVC}..."
+              if ! pvc_phase="$(kubectl get pvc "${LEGACY_PVC}" -n "${NAMESPACE}" -o jsonpath='{.status.phase}')"; then
+                echo "HeLx LDAP PVC ${LEGACY_PVC} was not found" >&2
+                exit 1
+              fi
+              if [ "${pvc_phase}" != "Bound" ]; then
+                echo "HeLx LDAP PVC ${LEGACY_PVC} is not Bound (phase: ${pvc_phase:-unknown})" >&2
+                exit 1
+              fi
+
+              selector="app.kubernetes.io/instance=${RELEASE_NAME},app.kubernetes.io/name=openldap"
+              if [ -n "${LEGACY_STATEFULSET}" ]; then
+                candidates="${LEGACY_STATEFULSET}"
+              else
+                candidates="$(kubectl get statefulsets -n "${NAMESPACE}" -l "${selector}" -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
+                if [ -z "${candidates}" ]; then
+                  echo "No prior HeLx LDAP StatefulSet matched ${selector}" >&2
+                  exit 1
+                fi
+                set -- ${candidates}
+                if [ "$#" -ne 1 ]; then
+                  echo "Multiple prior HeLx LDAP StatefulSets matched ${selector}; set openldap.migration.legacyStatefulSet explicitly" >&2
+                  exit 1
+                fi
+              fi
+
+              for statefulset in ${candidates}; do
+                if ! kubectl get statefulset "${statefulset}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+                  echo "Prior HeLx LDAP StatefulSet ${statefulset} was not found" >&2
+                  exit 1
+                fi
+
+                data_claim="$(kubectl get statefulset "${statefulset}" -n "${NAMESPACE}" -o jsonpath='{.spec.template.spec.volumes[?(@.name=="data")].persistentVolumeClaim.claimName}')"
+                if [ -n "${data_claim}" ]; then
+                  if [ "${data_claim}" != "${LEGACY_PVC}" ]; then
+                    echo "Prior HeLx LDAP StatefulSet ${statefulset} mounts PVC ${data_claim}, not ${LEGACY_PVC}" >&2
+                    exit 1
+                  fi
+                else
+                  claim_template="$(kubectl get statefulset "${statefulset}" -n "${NAMESPACE}" -o jsonpath='{.spec.volumeClaimTemplates[?(@.metadata.name=="data")].metadata.name}')"
+                  expected_claim="${claim_template}-${statefulset}-0"
+                  if [ -z "${claim_template}" ] || [ "${expected_claim}" != "${LEGACY_PVC}" ]; then
+                    echo "Prior HeLx LDAP StatefulSet ${statefulset} does not resolve to PVC ${LEGACY_PVC}" >&2
+                    exit 1
+                  fi
+                fi
+
+                replicas="$(kubectl get statefulset "${statefulset}" -n "${NAMESPACE}" -o jsonpath='{.spec.replicas}')"
+                case "${replicas}" in
+                  ''|*[!0-9]*)
+                    echo "Could not determine the replica count for StatefulSet ${statefulset}" >&2
+                    exit 1
+                    ;;
+                esac
+
+                echo "Scaling prior HeLx LDAP StatefulSet ${statefulset} from ${replicas} to zero..."
+                if [ "${replicas}" -gt 0 ]; then
+                  kubectl scale statefulset "${statefulset}" -n "${NAMESPACE}" --replicas=0
+                fi
+
+                waited=0
+                pod_found=1
+                while [ "${waited}" -le "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; do
+                  pod_found=0
+                  index=0
+                  while [ "${index}" -lt "${replicas}" ]; do
+                    if kubectl get pod "${statefulset}-${index}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+                      pod_found=1
+                      break
+                    fi
+                    index=$((index + 1))
+                  done
+                  if [ "${pod_found}" -eq 0 ]; then
+                    break
+                  fi
+                  if [ "${waited}" -ge "${POD_TERMINATION_TIMEOUT_SECONDS}" ]; then
+                    break
+                  fi
+                  sleep 5
+                  waited=$((waited + 5))
+                done
+
+                if [ "${pod_found}" -ne 0 ]; then
+                  echo "Pods for StatefulSet ${statefulset} did not terminate within ${POD_TERMINATION_TIMEOUT_SECONDS} seconds" >&2
+                  exit 1
+                fi
+
+                echo "Deleting StatefulSet ${statefulset} while orphaning dependents and preserving the PVC..."
+                kubectl delete statefulset "${statefulset}" -n "${NAMESPACE}" --cascade=orphan --wait=true
+              done
+
+              echo "Prior HeLx LDAP StatefulSet migration completed"
+          env:
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RELEASE_NAME
+              value: {{ .Release.Name | quote }}
+            - name: LEGACY_PVC
+              value: {{ .Values.openldap.migration.legacyPvc | quote }}
+            - name: LEGACY_STATEFULSET
+              value: {{ .Values.openldap.migration.legacyStatefulSet | quote }}
+            - name: POD_TERMINATION_TIMEOUT_SECONDS
+              value: {{ .Values.openldap.migration.job.activeDeadlineSeconds | int | quote }}
+{{- end }}

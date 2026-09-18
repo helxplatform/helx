@@ -1,0 +1,20 @@
+{{- if .Values.config.userProfiles.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-profiles
+  labels:
+    {{- include "user-mutator.labels" . | nindent 4 }}
+data:
+{{- if not .Values.config.userProfiles.entries }}
+  {}
+{{- end }}
+  {{- range $name, $content := .Values.config.userProfiles.entries }}
+  {{ $name }}.yaml: |-
+{{- if kindIs "string" $content }}
+{{ $content | indent 4 }}
+{{- else }}
+{{ toYaml $content | indent 4 }}
+{{- end }}
+  {{- end }}
+{{- end }}

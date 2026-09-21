@@ -115,9 +115,33 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   chart file is invisible to it.
 - Prefer fixing the ignore file over adding a CI exception. If a file never
   reaches an image, add it to that service's `.dockerignore`.
-- `ambassador`, `pod-reaper`, and `resty` are content mirrors of
-  helxplatform/helx-chart, so local edits to them are destroyed by the next
-  `make pull-*`. Do not require patterns they lack upstream.
+- `ambassador`, `pod-reaper`, and `resty` were vendored from subdirectories of
+  helxplatform/helx-chart (`charts/<name>`), not from a repo root, so they are
+  **not** subtrees: they have no merge base, they are absent from
+  `SUBTREE_MAP`, and the `pull-<name>` subtree targets do not touch them. They
+  have their own targets, below. `resty` in particular is deliberately ahead of
+  upstream (helx-common secrets contract, caller-managed TLS, Harbor image), so
+  it must never be overwritten wholesale from upstream.
+- Each of those charts records the upstream commit it has incorporated in
+  `services/<name>/UPSTREAM_COMMIT`. `make check-vendored-sync` reports how far
+  behind each one is, and `make pull-vendored-chart NAME=<name>` replays only
+  the commits since that record onto `services/<name>/chart`, then restamps the
+  file. `pull-vendored` does all three. They are the vendored counterparts of
+  `check-subtree-sync` and `pull-<name>`, and they never touch the repo root.
+- A replay is a three-way apply, so it preserves local divergence and leaves a
+  genuine clash as conflict markers instead of discarding it. On conflict the
+  record keeps its old `upstream:` and gains a `pending:` line naming the commit
+  being replayed, so the chart still reads as un-synced and nobody has to
+  remember a sha. `check-vendored-sync` reports it as `REPLAY UNFINISHED`.
+  Resolve the markers, then `make update-vendored-chart-stamp NAME=<name>`. That
+  target is bookkeeping only: it rewrites `upstream:` in the record and edits no
+  chart file, because the replay already happened in full during the pull. It
+  refuses while the chart still has unmerged entries or markers. `COMMIT=<sha>`
+  is only for stamping by hand.
+- `git apply -3` skips hunks already present and stages what it applies, so a
+  clean run is not proof anything changed. Review `git diff --cached` before
+  committing, and trust `check-vendored-sync` (which compares trees) over the
+  apply's exit status when deciding whether a chart is really in sync.
 - `helx-chart` dependencies use the GHCR OCI registry, not the old GitHub Pages
   repository. OCI consumers need GHCR registry authentication.
 - Chart-only changes should not trigger an image build; image workflows exclude

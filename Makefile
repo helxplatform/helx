@@ -36,6 +36,13 @@ UI_CHART_BRANCH                 ?= develop
 USER_MUTATOR_PREFIX             ?= services/user-mutator
 USER_MUTATOR_BRANCH             ?= develop
 
+# The vendored charts are NOT subtrees: they come from subdirectories of one
+# repo, so there is no prefix a `git subtree pull` could map. See the "Vendored
+# chart updates" section below.
+HELX_CHART_URL                  ?= https://github.com/helxplatform/helx-chart.git
+HELX_CHART_BRANCH               ?= master
+VENDORED_CHARTS                 ?= ambassador pod-reaper resty
+
 # The project virtualenv is the default interpreter. System pip is often
 # externally managed (PEP 668) and refuses to install, so a venv is not just
 # tidiness. Set PYTHON=... to use your own interpreter and skip provisioning.
@@ -191,6 +198,11 @@ CLUSTER_NAME                    ?=
         pull-user-mutator \
         pull-remotes pull-subtree \
         check-subtree-sync \
+        add-vendored-remote \
+        check-vendored-sync \
+        pull-vendored-chart \
+        pull-vendored \
+        update-vendored-chart-stamp \
         pull-develop \
         sync-locks \
         sync-helx-lock \
@@ -333,6 +345,13 @@ help-all-vars:
 	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
 	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
 	@echo '  RECORD=1                     check-subtree-sync prints MIGRATION.md rows.'
+	@echo
+	@echo 'Vendored chart configuration (ambassador, pod-reaper, resty):'
+	@echo '  HELX_CHART_URL=<url>      helx-chart remote URL.'
+	@echo '  HELX_CHART_BRANCH=<b>     helx-chart branch. Default: master.'
+	@echo '  VENDORED_CHARTS=<names>   Charts vendored from helx-chart subdirectories.'
+	@echo '  NAME=<chart>              Required by the single-chart targets.'
+	@echo '  COMMIT=<sha>              Optional override for update-vendored-chart-stamp.'
 	@echo
 	@echo 'Target groups: make help'
 
@@ -613,6 +632,181 @@ check-subtree-sync: add-remotes
 		fi; \
 	done; \
 	exit $$rc
+
+##@ subtrees Vendored chart updates
+# ambassador, pod-reaper, and resty come from SUBDIRECTORIES of the helx-chart
+# repo (charts/<name>), not from a repo root. `git subtree pull` maps a remote
+# root onto a prefix, so it cannot track them and they are absent from
+# SUBTREE_MAP. They are vendored instead: services/<name>/UPSTREAM_COMMIT
+# records the upstream commit whose changes are already incorporated, and a
+# pull replays only the range since that commit. That is what keeps local
+# divergence alive -- resty is deliberately ahead of upstream and must never be
+# overwritten wholesale.
+
+# require-vendored: the per-chart targets need NAME=<name>.
+define require-vendored
+	@if test -z "$(NAME)"; then \
+		echo "NAME is required, for example: make $@ NAME=ambassador"; \
+		echo "Vendored charts:"; for n in $(VENDORED_CHARTS); do echo "  $$n"; done; \
+		exit 1; \
+	fi; \
+	case " $(VENDORED_CHARTS) " in \
+		*" $(NAME) "*) ;; \
+		*) echo "$(NAME) is not vendored from helx-chart. Vendored charts:"; \
+		   for n in $(VENDORED_CHARTS); do echo "  $$n"; done; exit 1;; \
+	esac; \
+	if test ! -f "services/$(NAME)/UPSTREAM_COMMIT"; then \
+		echo "services/$(NAME)/UPSTREAM_COMMIT is missing; it records the commit to replay from."; \
+		exit 1; \
+	fi
+endef
+
+# add-vendored-remote: Add or verify the remote the vendored charts come from.
+# [HELX_CHART_URL]
+add-vendored-remote:
+	$(call ensure-remote,helx-chart,$(HELX_CHART_URL))
+
+# check-vendored-sync: Report whether each vendored chart still matches the
+# upstream subdirectory it was taken from. Read-only: it fetches and compares,
+# and never merges or edits files. Exits non-zero if any chart is behind.
+# "local edits" means the chart also differs from upstream at its recorded
+# commit, so a pull may conflict; it is the expected state for resty.
+# Like check-versions, this compares committed content, so an uncommitted or
+# staged chart edit is invisible to it.
+# [HELX_CHART_URL, HELX_CHART_BRANCH, VENDORED_CHARTS]
+check-vendored-sync: add-vendored-remote
+	@set -euo pipefail; \
+	rc=0; \
+	git fetch -q helx-chart "$(HELX_CHART_BRANCH)"; \
+	up=$$(git rev-parse FETCH_HEAD); \
+	printf '%-34s %-36s %s\n' PREFIX TRACKS STATUS; \
+	for name in $(VENDORED_CHARTS); do \
+		prefix="services/$$name/chart"; \
+		record="services/$$name/UPSTREAM_COMMIT"; \
+		tracks="helx-chart/$(HELX_CHART_BRANCH):charts/$$name"; \
+		if test ! -f "$$record"; then \
+			printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" 'NO RECORD'; \
+			rc=1; continue; \
+		fi; \
+		old=$$(sed -n 's/^upstream:[[:space:]]*//p' "$$record" | head -1); \
+		if grep -q '^pending:' "$$record"; then \
+			printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" 'REPLAY UNFINISHED'; \
+			rc=1; continue; \
+		fi; \
+		if test -z "$$old"; then \
+			printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" 'NO COMMIT RECORDED'; \
+			rc=1; continue; \
+		fi; \
+		n=$$(git rev-list --count "$$old..$$up" -- "charts/$$name"); \
+		if test "$$n" = 0; then status='in sync'; else status="BEHIND $$n"; rc=1; fi; \
+		if ! git diff --quiet "$$old:charts/$$name" "HEAD:$$prefix"; then \
+			status="$$status (local edits)"; \
+		fi; \
+		printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" "$$status"; \
+	done; \
+	exit $$rc
+
+# pull-vendored-chart: Replay the upstream changes to charts/<NAME> onto
+# services/<NAME>/chart and stamp the new commit into its UPSTREAM_COMMIT.
+# The replay is three-way, so a hunk already present is skipped and a genuine
+# clash is left as conflict markers rather than silently discarding local work.
+# [NAME, HELX_CHART_URL, HELX_CHART_BRANCH, MAX_SUBTREE_BLOB_BYTES, FORCE]
+pull-vendored-chart: add-vendored-remote
+	$(call require-vendored)
+	$(call check-incoming,helx-chart,$(HELX_CHART_BRANCH))
+	@set -uo pipefail; \
+	name="$(NAME)"; prefix="services/$$name/chart"; record="services/$$name/UPSTREAM_COMMIT"; \
+	if test -z "$(FORCE)" && ! git diff --quiet -- "$$prefix" "$$record"; then \
+		echo "REFUSING to replay into $$prefix -- it has uncommitted changes."; \
+		echo "  A conflicted replay would be indistinguishable from your own edits."; \
+		echo "  Commit or stash them, or rerun with FORCE=1."; \
+		exit 1; \
+	fi; \
+	old=$$(sed -n 's/^upstream:[[:space:]]*//p' "$$record" | head -1); \
+	up=$$(git rev-parse FETCH_HEAD); \
+	n=$$(git rev-list --count "$$old..$$up" -- "charts/$$name"); \
+	if test "$$n" = 0; then \
+		echo "$$prefix already has every upstream change through $$(git rev-parse --short $$up); nothing to replay."; \
+		exit 0; \
+	fi; \
+	echo "Replaying $$n upstream commit(s) on charts/$$name onto $$prefix:"; \
+	git log --oneline "$$old..$$up" -- "charts/$$name" | sed 's/^/  /'; \
+	git diff --src-prefix=a/ --dst-prefix=b/ "$$old" "$$up" -- "charts/$$name" \
+		| git apply -3 -p3 --directory="$$prefix"; \
+	status=$$?; \
+	if test $$status -ne 0; then \
+		tmp=$$(mktemp); \
+		grep -v '^pending:' "$$record" \
+			| awk -v c="$$up" '{print} /^upstream:/ && !d {print "pending:   " c; d=1}' > "$$tmp"; \
+		mv "$$tmp" "$$record"; \
+		echo; \
+		echo "The replay left conflicts. $$record now carries a pending: line naming"; \
+		echo "the commit being replayed, so you do not have to track it yourself."; \
+		echo "Resolve the markers in $$prefix, then:"; \
+		echo "    make update-vendored-chart-stamp NAME=$$name"; \
+		exit 1; \
+	fi; \
+	$(MAKE) --no-print-directory update-vendored-chart-stamp NAME="$$name" COMMIT="$$up" RESOLVED=1; \
+	echo "Replayed cleanly. A three-way apply stages what it applies, and it also"; \
+	echo "skips hunks already present, so a clean run is not proof anything changed."; \
+	echo "Review before committing:"; \
+	echo "    git diff --cached -- $$prefix"
+
+# pull-vendored: Replay upstream into every vendored chart in sequence.
+# [VENDORED_CHARTS, HELX_CHART_URL, HELX_CHART_BRANCH, FORCE]
+pull-vendored:
+	@set -euo pipefail; \
+	for name in $(VENDORED_CHARTS); do \
+		$(MAKE) --no-print-directory pull-vendored-chart NAME="$$name"; \
+	done
+
+# Why this target does no git work. pull-vendored-chart runs a single
+# `git apply -3`, and that one pass writes the cleanly merged hunks AND the
+# conflict markers to disk -- it does not stop at the first clash and leave the
+# rest pending. You then fix the markers by hand, which finishes the chart
+# content. Nothing remains to re-apply. The only thing still stale is the
+# record: `upstream:` names the commit from before the replay, so the chart
+# keeps reporting as behind. Rewriting that line is this target's whole job.
+
+# update-vendored-chart-stamp: Update services/<NAME>/UPSTREAM_COMMIT to say the
+# chart now carries every upstream change through the replayed commit. Edits
+# that file and nothing else. A conflicted pull leaves the commit in it as
+# `pending:`, so the usual call needs no sha. Refuses while the chart still has
+# unmerged index entries or conflict markers. COMMIT=<sha> overrides `pending:`,
+# for stamping a commit by hand.
+# [NAME, COMMIT]
+update-vendored-chart-stamp:
+	$(call require-vendored)
+	@set -euo pipefail; \
+	prefix="services/$(NAME)/chart"; record="services/$(NAME)/UPSTREAM_COMMIT"; \
+	pending=$$(sed -n 's/^pending:[[:space:]]*//p' "$$record" | head -1); \
+	want="$(COMMIT)"; \
+	if test -z "$$want"; then want="$$pending"; fi; \
+	if test -z "$$want"; then \
+		echo "Nothing to stamp: $$record has no pending: line and no COMMIT was given."; \
+		echo "  A conflicted 'make pull-vendored-chart NAME=$(NAME)' writes that line."; \
+		echo "  To stamp an upstream commit by hand: make $@ NAME=$(NAME) COMMIT=<sha>"; \
+		exit 1; \
+	fi; \
+	if test -z "$(RESOLVED)"; then \
+		unmerged=$$(git diff --name-only --diff-filter=U -- "$$prefix"); \
+		markers=$$(grep -rl '^<<<<<<< ' "$$prefix" 2>/dev/null || true); \
+		if test -n "$$unmerged$$markers"; then \
+			echo "REFUSING to stamp $$record -- the replay is not resolved yet:"; \
+			for f in $$unmerged $$markers; do echo "    $$f"; done | sort -u; \
+			echo "  Resolve them, then rerun."; \
+			exit 1; \
+		fi; \
+	fi; \
+	full=$$(git rev-parse "$$want^{commit}"); \
+	today=$$(date -u +%Y-%m-%d); \
+	tmp=$$(mktemp); \
+	grep -v '^pending:' "$$record" \
+		| sed -e "s/^upstream:.*/upstream:  $$full/" \
+		      -e "s/^verified:.*/verified:  $$today/" > "$$tmp"; \
+	mv "$$tmp" "$$record"; \
+	echo "Stamped $$record -> $$full ($$today)"
+
 
 # require-pyyaml: fail with an actionable message instead of a raw traceback.
 define require-pyyaml

@@ -1,0 +1,16 @@
+# Provenance for services/ambassador/chart.
+#
+# This chart was vendored from a SUBDIRECTORY of an upstream repo, so it is not
+# a git subtree: it has no merge base and it is absent from SUBTREE_MAP.
+# Sync it with:  make pull-vendored-chart NAME=ambassador
+# Check it with: make check-vendored-sync
+repo:      https://github.com/helxplatform/helx-chart
+branch:    master
+path:      charts/ambassador
+# All upstream changes through this commit are incorporated here.
+upstream:  186d667934ef55f9c7c7d5c6d679073ddaf5e109
+verified:  2026-09-20
+# Byte-identical to upstream at that commit; no local divergence.
+#
+# `make check-vendored-sync` reports live whether this is behind upstream;
+# that answer is not duplicated here, where it would go stale.

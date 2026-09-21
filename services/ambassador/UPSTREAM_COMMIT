@@ -8,8 +8,8 @@ repo:      https://github.com/helxplatform/helx-chart
 branch:    master
 path:      charts/ambassador
 # All upstream changes through this commit are incorporated here.
-upstream:  186d667934ef55f9c7c7d5c6d679073ddaf5e109
-verified:  2026-09-20
+upstream:  264c8412f9991e9f0b86737c08a1f5b901196948
+verified:  2026-09-21
 # Byte-identical to upstream at that commit; no local divergence.
 #
 # `make check-vendored-sync` reports live whether this is behind upstream;

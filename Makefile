@@ -352,6 +352,8 @@ help-all-vars:
 	@echo '  VENDORED_CHARTS=<names>   Charts vendored from helx-chart subdirectories.'
 	@echo '  NAME=<chart>              Required by the single-chart targets.'
 	@echo '  COMMIT=<sha>              Optional override for update-vendored-chart-stamp.'
+	@echo '  STRICT=1                  Make check-vendored-sync exit non-zero when'
+	@echo '                            anything is behind. For CI; off by default.'
 	@echo
 	@echo 'Target groups: make help'
 
@@ -668,15 +670,16 @@ add-vendored-remote:
 
 # check-vendored-sync: Report whether each vendored chart still matches the
 # upstream subdirectory it was taken from. Read-only: it fetches and compares,
-# and never merges or edits files. Exits non-zero if any chart is behind.
-# "local edits" means the chart also differs from upstream at its recorded
-# commit, so a pull may conflict; it is the expected state for resty.
-# Like check-versions, this compares committed content, so an uncommitted or
-# staged chart edit is invisible to it.
-# [HELX_CHART_URL, HELX_CHART_BRANCH, VENDORED_CHARTS]
+# and never merges or edits files. Succeeds even when a chart is behind, so it
+# reads as the status report it is; STRICT=1 exits non-zero instead, which is
+# how CI gates on it. "local edits" means the chart also differs from upstream
+# at its recorded commit, so a pull may conflict; it is the expected state for
+# resty. Like check-versions, this compares committed content, so an
+# uncommitted or staged chart edit is invisible to it.
+# [HELX_CHART_URL, HELX_CHART_BRANCH, VENDORED_CHARTS, STRICT]
 check-vendored-sync: add-vendored-remote
 	@set -euo pipefail; \
-	rc=0; \
+	rc=0; behind=''; unfinished=''; broken=''; \
 	git fetch -q helx-chart "$(HELX_CHART_BRANCH)"; \
 	up=$$(git rev-parse FETCH_HEAD); \
 	printf '%-34s %-36s %s\n' PREFIX TRACKS STATUS; \
@@ -686,25 +689,46 @@ check-vendored-sync: add-vendored-remote
 		tracks="helx-chart/$(HELX_CHART_BRANCH):charts/$$name"; \
 		if test ! -f "$$record"; then \
 			printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" 'NO RECORD'; \
-			rc=1; continue; \
+			rc=1; broken="$$broken $$name"; continue; \
 		fi; \
 		old=$$(sed -n 's/^upstream:[[:space:]]*//p' "$$record" | head -1); \
 		if grep -q '^pending:' "$$record"; then \
 			printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" 'REPLAY UNFINISHED'; \
-			rc=1; continue; \
+			rc=1; unfinished="$$unfinished $$name"; continue; \
 		fi; \
 		if test -z "$$old"; then \
 			printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" 'NO COMMIT RECORDED'; \
-			rc=1; continue; \
+			rc=1; broken="$$broken $$name"; continue; \
 		fi; \
 		n=$$(git rev-list --count "$$old..$$up" -- "charts/$$name"); \
-		if test "$$n" = 0; then status='in sync'; else status="BEHIND $$n"; rc=1; fi; \
+		if test "$$n" = 0; then status='in sync'; \
+		else status="BEHIND $$n"; rc=1; behind="$$behind $$name"; fi; \
 		if ! git diff --quiet "$$old:charts/$$name" "HEAD:$$prefix"; then \
 			status="$$status (local edits)"; \
 		fi; \
 		printf '%-34s %-36s %s\n' "$$prefix" "$$tracks" "$$status"; \
 	done; \
-	exit $$rc
+	if test "$$rc" -ne 0; then \
+		echo; \
+		echo "Not everything is current:"; \
+		for name in $$behind; do \
+			echo "  $$name is behind:  make pull-vendored-chart NAME=$$name"; \
+		done; \
+		for name in $$unfinished; do \
+			echo "  $$name has a replay to finish: resolve the markers in"; \
+			echo "      services/$$name/chart, then make update-vendored-chart-stamp NAME=$$name"; \
+		done; \
+		for name in $$broken; do \
+			echo "  $$name has an unusable services/$$name/UPSTREAM_COMMIT; fix it by hand"; \
+		done; \
+		if test -n "$(STRICT)"; then \
+			echo; \
+			echo "STRICT=1, so this exits non-zero and make prints \"Error 1\"."; \
+			echo "That is the report's verdict, not a failure to run it."; \
+			exit $$rc; \
+		fi; \
+	fi; \
+	exit 0
 
 # pull-vendored-chart: Replay the upstream changes to charts/<NAME> onto
 # services/<NAME>/chart and stamp the new commit into its UPSTREAM_COMMIT.

@@ -124,7 +124,10 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   it must never be overwritten wholesale from upstream.
 - Each of those charts records the upstream commit it has incorporated in
   `services/<name>/UPSTREAM_COMMIT`. `make check-vendored-sync` reports how far
-  behind each one is, and `make pull-vendored-chart NAME=<name>` replays only
+  behind each one is and lists what to run for each; it succeeds even when a
+  chart is behind, since being behind an archived upstream is not a build
+  failure. `STRICT=1` makes it exit non-zero instead, which is how CI gates on
+  it (`check-subtree-sync` gates unconditionally; this one does not) and `make pull-vendored-chart NAME=<name>` replays only
   the commits since that record onto `services/<name>/chart`, then restamps the
   file. `pull-vendored` does all three. They are the vendored counterparts of
   `check-subtree-sync` and `pull-<name>`, and they never touch the repo root.

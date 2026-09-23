@@ -1,7 +1,7 @@
 dependencies:
 - name: appstore
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 6.0.1
+  version: 6.0.2
 - name: appstore-sockets
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.1.5
@@ -19,12 +19,12 @@ dependencies:
   version: 0.2.5
 - name: resty
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.0.2
+  version: 2.0.3
 - name: ui
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 1.6.1
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.1.0
-digest: sha256:d97b199c7239034e0167793266ce894c696ebc0d9e3a8cc17e2c31f2da85ec46
-generated: '2026-09-16T18:19:40.926106+00:00'
+digest: sha256:aa3be1fa3eb0b613e0b5659aa104c51b096818a55f57d70cfd586bbf0edc2f79
+generated: '2026-09-21T22:20:31.845070+00:00'

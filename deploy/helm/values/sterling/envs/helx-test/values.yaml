@@ -1,0 +1,54 @@
+appstore:
+  DEBUG: "true"
+  logLevel: DEBUG
+  saml:
+    ASSERTION_URL: https://helx-test.apps.renci.org
+    ENTITY_ID: https://helx-test.apps.renci.org
+  tycho:
+    externalAppRegistryBranch: helx-ai-sandbox-test-azure
+appstore-prepuller:
+  appRegistry:
+    branch: helx-ai-sandbox-azure-NS
+    brand: ai_sandbox
+resty:
+  SSL:
+    nginxTLSSecret: helx-test-apps-renci-org-tls
+  service:
+    serverName: helx-test.apps.renci.org
+ui:
+  config:
+    appstore_asset_base_url: https:\/\/raw.githubusercontent.com\/helxplatform\/appstore
+    appstore_asset_branch: develop
+    brand_description:
+      html: |
+        <a href="https://helxplatform.github.io/">HeLx</a> empowers researchers in
+        domains from plant genomics to neuroscience to work with their preferred
+        tools and apps in the cloud at scale without installation or other infrastructure concerns,
+        which has broad reaching benefits and can be applied in many domains.
+        <br />&nbsp;<br />
+        The AI Sandbox is a deployment of HeLx and has been stood up for researchers and students to use
+        and explore the capabilities of HeLx. This is the test deployment of the AI Sandbox.
+    brand_name: ai_sandbox
+    default_space: workspaces
+    hidden_result_tabs: cdes
+    login_title: RENCI AI Sandbox Test Workspaces
+    meta:
+      title: RENCI AI Sandbox Test
+    search:
+      enabled: "false"
+      url: ""
+    support:
+      faqs_url: ""
+      help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9
+      user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
+    workspaces:
+      enabled: "true"
+user-mutator:
+  config:
+    features:
+      ldap:
+        host: openldap
+        port: 389
+        username: "cn=admin,dc=example,dc=org"
+        user_base_dn: "ou=users,dc=example,dc=org"
+        group_base_dn: "ou=groups,dc=example,dc=org"

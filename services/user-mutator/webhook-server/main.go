@@ -143,13 +143,17 @@ type Config struct {
 
 // Struct for LDAP configuration
 type LDAPConfig struct {
-	Host                    string `json:"host"`
-	Port                    int    `json:"port"`
-	Username                string `json:"username"`
-	Password                string `json:"-"`
-	UserBaseDN              string `json:"user_base_dn"`
-	GroupBaseDN             string `json:"group_base_dn"`
-	LibNSSLDAPConfigMapName string `json:"libnssLdapConfigMapName"`
+	Host        string `json:"host"`
+	Port        int    `json:"port"`
+	Username    string `json:"username"`
+	Password    string `json:"-"`
+	UserBaseDN  string `json:"user_base_dn"`
+	GroupBaseDN string `json:"group_base_dn"`
+	// NSLCDConfigMapName is the ConfigMap holding nslcd.conf + nsswitch.conf
+	// (nss-pam-ldapd, the maintained successor to the EOL libnss-ldap).
+	NSLCDConfigMapName string `json:"nslcdConfigMapName"`
+	// SidecarImage is the image for the injected nslcd daemon sidecar.
+	SidecarImage string `json:"nslcdSidecarImage"`
 }
 
 // AppConfig struct holds paths and loaded configuration
@@ -171,6 +175,10 @@ type ProfileResources struct {
 	Env                []corev1.EnvVar
 	PodSecurityContext *corev1.PodSecurityContext
 	SecurityContext    *corev1.SecurityContext
+	// Containers are appended to the pod's container list as-is (e.g. the
+	// nslcd sidecar). They are NOT run through applyResourcesToContainers, so
+	// they do not inherit the app's volume mounts / security context.
+	Containers []corev1.Container
 }
 
 // Global variable to hold application configuration
@@ -193,7 +201,7 @@ func loadConfig(path string) (*Config, error) {
 
 // Custom String method to avoid printing the password
 func (l LDAPConfig) String() string {
-	return fmt.Sprintf("LDAPConfig{Host: %s, Port: %d, Username: %s, UserBaseDN: %s, GroupBaseDN %s, ConfigMapName: %s}", l.Host, l.Port, l.Username, l.UserBaseDN, l.GroupBaseDN, l.LibNSSLDAPConfigMapName)
+	return fmt.Sprintf("LDAPConfig{Host: %s, Port: %d, Username: %s, UserBaseDN: %s, GroupBaseDN %s, NSLCDConfigMapName: %s, SidecarImage: %s}", l.Host, l.Port, l.Username, l.UserBaseDN, l.GroupBaseDN, l.NSLCDConfigMapName, l.SidecarImage)
 }
 
 func MergeEmpty[T any](dst, src *T) {
@@ -238,9 +246,11 @@ func processFeatures(appConfig *AppConfig) error {
 			if appConfig.LDAPConfig.Port == 0 {
 				appConfig.LDAPConfig.Port = 389
 			}
-			libNSLDAPConfigMapName, nssConfigmapfound := config.Meta["libnss_ldap_config_map_name"]
-			if nssConfigmapfound {
-				appConfig.LDAPConfig.LibNSSLDAPConfigMapName = libNSLDAPConfigMapName
+			if nslcdConfigMapName, found := config.Meta["nslcd_config_map_name"]; found {
+				appConfig.LDAPConfig.NSLCDConfigMapName = nslcdConfigMapName
+			}
+			if sidecarImage, found := config.Meta["nslcd_sidecar_image"]; found {
+				appConfig.LDAPConfig.SidecarImage = sidecarImage
 			}
 
 			// Proceed with LDAP initialization if needed
@@ -907,7 +917,7 @@ func GetK8sVolumeMounts(cfg VolumeConfig, vmap VolumeContextMap) ([]corev1.Volum
 	}
 
 	if len(errs) > 0 {
-		return result, fmt.Errorf(strings.Join(errs, "\n"))
+		return result, fmt.Errorf("%s", strings.Join(errs, "\n"))
 	}
 	return result, nil
 }
@@ -1160,39 +1170,68 @@ func getVolumesAndMountsForUserGroups(clientset *kubernetes.Clientset, user *Use
 	return volumes, volumeMounts, nil
 }
 
-func getLDAPConfigVolumesAndMounts(configMapName string) ([]corev1.Volume, []corev1.VolumeMount) {
+// nslcd socket directory shared between the injected nslcd sidecar (which
+// creates the socket) and the app containers (whose libnss-ldapd module
+// connects to it). nss-pam-ldapd's compiled-in socket path is
+// /var/run/nslcd/socket, so both ends mount the shared dir there.
+const (
+	nslcdSocketDir = "/var/run/nslcd"
+	nslcdConfigVol = "nslcd-config"
+	nslcdSocketVol = "nslcd-socket"
+	// mutatedAnnotation marks a pod template the webhook has already mutated.
+	// The webhook fires on Deployment CREATE and UPDATE; without this marker a
+	// re-admission (e.g. an app "update/restart") would inject the volumes,
+	// mounts, and nslcd sidecar a second time, producing duplicate names that
+	// the API server rejects. When present, the webhook no-ops.
+	mutatedAnnotation = "helx.renci.org/user-mutator-injected"
+)
+
+// getNSLCDVolumesMountsAndSidecar returns, for the nss-pam-ldapd migration:
+//   - the pod-level volumes (nslcd.conf/nsswitch.conf ConfigMap + shared socket emptyDir),
+//   - the volume mounts to apply to the app containers (nsswitch + socket),
+//   - the nslcd sidecar container that reads nslcd.conf and serves the socket.
+//
+// This replaces the retired libnss-ldap approach (which mounted
+// /etc/libnss-ldap.conf and relied on the EOL in-process NSS module in the
+// app image). The app image now only needs the thin libnss-ldapd client.
+func getNSLCDVolumesMountsAndSidecar(configMapName, sidecarImage string) ([]corev1.Volume, []corev1.VolumeMount, corev1.Container) {
 	volumes := []corev1.Volume{
 		{
-			Name: "ldap-config",
+			Name: nslcdConfigVol,
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: configMapName,
-					},
+					LocalObjectReference: corev1.LocalObjectReference{Name: configMapName},
 				},
+			},
+		},
+		{
+			Name: nslcdSocketVol,
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		},
 	}
 
-	volumeMounts := []corev1.VolumeMount{
-		{
-			Name:      "ldap-config",
-			MountPath: "/etc/libnss-ldap.conf",
-			SubPath:   "libnss-ldap.conf",
+	// Applied to the app containers: point NSS at ldap (nsswitch) and give
+	// them the shared socket the sidecar's nslcd listens on.
+	appMounts := []corev1.VolumeMount{
+		{Name: nslcdConfigVol, MountPath: "/etc/nsswitch.conf", SubPath: "nsswitch.conf"},
+		{Name: nslcdSocketVol, MountPath: nslcdSocketDir},
+	}
+
+	sidecar := corev1.Container{
+		Name:  "nslcd",
+		Image: sidecarImage,
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: nslcdConfigVol, MountPath: "/etc/nslcd.conf", SubPath: "nslcd.conf"},
+			{Name: nslcdSocketVol, MountPath: nslcdSocketDir},
 		},
-		{
-			Name:      "ldap-config",
-			MountPath: "/etc/ldap.conf",
-			SubPath:   "libnss-ldap.conf",
-		},
-		{
-			Name:      "ldap-config",
-			MountPath: "/etc/nsswitch.conf",
-			SubPath:   "nsswitch.conf",
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: boolPtr(false),
 		},
 	}
 
-	return volumes, volumeMounts
+	return volumes, appMounts, sidecar
 }
 
 // printVolumes logs the details of each Volume in the provided slice.
@@ -1331,6 +1370,13 @@ func calculatePatch(admissionReview *admissionv1.AdmissionReview, resources Prof
 	// Apply modifications to the Deployment by starting with a copy
 	modifiedDeployment := originalDeployment.DeepCopy()
 
+	// Stamp the idempotency marker so a later Deployment update (re-admission)
+	// is a no-op instead of injecting everything a second time.
+	if modifiedDeployment.Spec.Template.ObjectMeta.Annotations == nil {
+		modifiedDeployment.Spec.Template.ObjectMeta.Annotations = map[string]string{}
+	}
+	modifiedDeployment.Spec.Template.ObjectMeta.Annotations[mutatedAnnotation] = "true"
+
 	// Add volumes
 	modifiedDeployment.Spec.Template.Spec.Volumes = append(modifiedDeployment.Spec.Template.Spec.Volumes, resources.Volumes...)
 
@@ -1339,6 +1385,10 @@ func calculatePatch(admissionReview *admissionv1.AdmissionReview, resources Prof
 
 	// Apply modifications to the InitContainers
 	applyResourcesToContainers(modifiedDeployment.Spec.Template.Spec.InitContainers, resources, identityExemptContainers)
+
+	// Append injected sidecars (e.g. nslcd) AFTER applying app resources, so
+	// they don't inherit the app containers' mounts/security context.
+	modifiedDeployment.Spec.Template.Spec.Containers = append(modifiedDeployment.Spec.Template.Spec.Containers, resources.Containers...)
 
 	// Apply PodSecurityContext
 	if resources.PodSecurityContext != nil {
@@ -1442,10 +1492,11 @@ func addGroupsToProfile(clientset *kubernetes.Clientset, user *User, namespace s
 	return resources, nil
 }
 
-func addLibNSSLDAPConfigToProfile(configMapName string, resources ProfileResources) ProfileResources {
-	volumes, volumeMounts := getLDAPConfigVolumesAndMounts(configMapName)
+func addNSLCDConfigToProfile(configMapName, sidecarImage string, resources ProfileResources) ProfileResources {
+	volumes, volumeMounts, sidecar := getNSLCDVolumesMountsAndSidecar(configMapName, sidecarImage)
 	resources.Volumes = append(resources.Volumes, volumes...)
 	resources.VolumeMounts = append(resources.VolumeMounts, volumeMounts...)
+	resources.Containers = append(resources.Containers, sidecar)
 	return resources
 }
 
@@ -1459,6 +1510,15 @@ func processAdmissionReview(admissionReview admissionv1.AdmissionReview) *admiss
 	if err := json.Unmarshal(admissionReview.Request.Object.Raw, &deployment); err != nil {
 		slog.Error("failed to unmarshall deployment", "err", err)
 		return &admissionv1.AdmissionResponse{Allowed: true}
+	}
+
+	// Idempotency: if this pod template was already mutated (e.g. this is a
+	// Deployment update / re-admission), do not inject again -- that would
+	// duplicate volumes, mounts, and the nslcd sidecar and be rejected.
+	if deployment.Spec.Template.ObjectMeta.Annotations[mutatedAnnotation] == "true" {
+		slog.Info("deployment already mutated; skipping re-injection",
+			"namespace", admissionReview.Request.Namespace, "deployment", admissionReview.Request.Name)
+		return &admissionv1.AdmissionResponse{UID: admissionReview.Request.UID, Allowed: true}
 	}
 
 	identityExemptAnnotation := deployment.Spec.Template.ObjectMeta.Annotations["helx.renci.org/identity-exempt-containers"]
@@ -1504,8 +1564,8 @@ func processAdmissionReview(admissionReview admissionv1.AdmissionReview) *admiss
 			if resources, err = addGroupsToProfile(appConfig.K8sClient, user, admissionReview.Request.Namespace, resources); err != nil {
 				slog.Error("failed to add group volumes", "err", err)
 			}
-			if appConfig.LDAPConfig.LibNSSLDAPConfigMapName != "" {
-				resources = addLibNSSLDAPConfigToProfile(appConfig.LDAPConfig.LibNSSLDAPConfigMapName, resources)
+			if appConfig.LDAPConfig.NSLCDConfigMapName != "" {
+				resources = addNSLCDConfigToProfile(appConfig.LDAPConfig.NSLCDConfigMapName, appConfig.LDAPConfig.SidecarImage, resources)
 			}
 			resources = setEnvVars(user, resources)
 		}

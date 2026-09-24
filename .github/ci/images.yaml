@@ -36,4 +36,22 @@ services:
   ldap-sync: {}
   ui:
     repository: helx-ui
-  user-mutator: {}
+  user-mutator:
+    images:
+      # The webhook itself. Keep the historical name/repository (variant
+      # defaults would be user-mutator-server / user-mutator/server). Exclude
+      # the chart and the nslcd-sidecar/ tree so neither rebuilds/rebumps the
+      # webhook image.
+      server:
+        name: user-mutator
+        repository: user-mutator
+        excludes: [chart, nslcd-sidecar]
+      # The nslcd (nss-pam-ldapd) sidecar the webhook injects into app pods.
+      # Build context is nslcd-sidecar/ (parent files can't reach it); its tag
+      # lands in the user-mutator chart's ldap.sidecar.image block.
+      nslcd-sidecar:
+        repository: nslcd-sidecar
+        context: nslcd-sidecar
+        dockerfile: nslcd-sidecar/Dockerfile
+        sources: [nslcd-sidecar]
+        tag_path: ldap.sidecar.image.tag

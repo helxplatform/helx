@@ -128,7 +128,11 @@ ldap:
   # libnss-ldapd client; this sidecar runs the nslcd daemon and serves the
   # shared /var/run/nslcd/socket.
   sidecar:
-    image: containers.renci.org/helxplatform/nslcd-sidecar:latest
+    # Split repository/tag so CI can inject the built tag via the images.yaml
+    # tag_path (ldap.sidecar.image.tag); tag defaults to the chart appVersion.
+    image:
+      repository: containers.renci.org/helxplatform/nslcd-sidecar
+      tag: ""
   secret:
     # -- Which owner writes the LDAP password Secret: `values` for a chart-
     # managed Secret built from ldap.secret.values, `existingSecret` for a
@@ -227,6 +231,17 @@ webhook:
 #     username: "cn=admin,dc=example,dc=org"
 #     user_base_dn: "ou=users,dc=example,dc=org"
 #     group_base_dn: "ou=groups,dc=example,dc=org"
+#     # Optional TLS for the injected nslcd sidecar -> LDAP connection.
+#     # mode: off (default) | starttls | ldaps
+#     # reqcert: demand (default) | allow | never  (used when mode != off)
+#     tls:
+#       mode: starttls
+#       reqcert: allow
+#       # caCertFile: path inside the sidecar to a trusted CA. NOTE: the CA is
+#       # not mounted yet -- set this only when the CA is already trusted by the
+#       # sidecar (system store) or once the mount lands with UNCDSR-187 (real
+#       # openldap cert). Until then use reqcert: allow (encrypts, no verify).
+#       # caCertFile: /etc/nslcd/ca.crt
 config:
   enabled: true
   # -- Render the user-profiles ConfigMap from entries instead of expecting

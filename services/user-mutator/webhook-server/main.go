@@ -27,6 +27,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -175,10 +176,11 @@ type ProfileResources struct {
 	Env                []corev1.EnvVar
 	PodSecurityContext *corev1.PodSecurityContext
 	SecurityContext    *corev1.SecurityContext
-	// Containers are appended to the pod's container list as-is (e.g. the
-	// nslcd sidecar). They are NOT run through applyResourcesToContainers, so
-	// they do not inherit the app's volume mounts / security context.
-	Containers []corev1.Container
+	// InitContainers are appended to the pod's initContainers as-is (e.g. the
+	// nslcd native sidecar, which carries restartPolicy=Always). They are NOT
+	// run through applyResourcesToContainers, so they keep their own resources
+	// and security context and do not inherit the app's.
+	InitContainers []corev1.Container
 }
 
 // Global variable to hold application configuration
@@ -1219,15 +1221,48 @@ func getNSLCDVolumesMountsAndSidecar(configMapName, sidecarImage string) ([]core
 		{Name: nslcdSocketVol, MountPath: nslcdSocketDir},
 	}
 
+	// nslcd runs as a NATIVE SIDECAR: an initContainer with restartPolicy=Always
+	// (k8s >= 1.29; cluster is 1.34). This guarantees it starts before the app
+	// container, and the startupProbe gates the app on the socket existing --
+	// so an app entrypoint that runs `id`/`getent` at startup never sees
+	// "I have no name!". It also keeps nslcd out of the pod's `containers`
+	// list, so Tycho's resize patch (which rewrites
+	// spec.template.spec.containers[*].resources) never bloats it, and the
+	// appstore-sockets monitor doesn't count it as an app container.
+	alwaysRestart := corev1.ContainerRestartPolicyAlways
 	sidecar := corev1.Container{
-		Name:  "nslcd",
-		Image: sidecarImage,
+		Name:          "nslcd",
+		Image:         sidecarImage,
+		RestartPolicy: &alwaysRestart,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: nslcdConfigVol, MountPath: "/etc/nslcd.conf", SubPath: "nslcd.conf"},
 			{Name: nslcdSocketVol, MountPath: nslcdSocketDir},
 		},
+		StartupProbe: &corev1.Probe{
+			ProbeHandler: corev1.ProbeHandler{
+				Exec: &corev1.ExecAction{Command: []string{"sh", "-c", "test -S " + nslcdSocketDir + "/socket"}},
+			},
+			PeriodSeconds:    1,
+			FailureThreshold: 60,
+		},
+		// Modest footprint; without requests a namespace ResourceQuota (no
+		// LimitRange) would reject the pod.
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("32Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("64Mi"),
+			},
+		},
+		// Satisfy the restricted Pod Security Standard.
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
+			RunAsNonRoot:             boolPtr(true),
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 	}
 
@@ -1386,9 +1421,10 @@ func calculatePatch(admissionReview *admissionv1.AdmissionReview, resources Prof
 	// Apply modifications to the InitContainers
 	applyResourcesToContainers(modifiedDeployment.Spec.Template.Spec.InitContainers, resources, identityExemptContainers)
 
-	// Append injected sidecars (e.g. nslcd) AFTER applying app resources, so
-	// they don't inherit the app containers' mounts/security context.
-	modifiedDeployment.Spec.Template.Spec.Containers = append(modifiedDeployment.Spec.Template.Spec.Containers, resources.Containers...)
+	// Append injected native sidecars (e.g. nslcd) to initContainers AFTER
+	// applyResourcesToContainers has run, so they keep their own resources /
+	// security context and are not touched by Tycho's per-container resize.
+	modifiedDeployment.Spec.Template.Spec.InitContainers = append(modifiedDeployment.Spec.Template.Spec.InitContainers, resources.InitContainers...)
 
 	// Apply PodSecurityContext
 	if resources.PodSecurityContext != nil {
@@ -1493,10 +1529,17 @@ func addGroupsToProfile(clientset *kubernetes.Clientset, user *User, namespace s
 }
 
 func addNSLCDConfigToProfile(configMapName, sidecarImage string, resources ProfileResources) ProfileResources {
+	// Guard: without a sidecar image we would inject a container with image:""
+	// and pod creation would fail. Also skip the nsswitch/socket wiring, since
+	// there would be no nslcd to serve the socket.
+	if sidecarImage == "" {
+		slog.Error("nslcd sidecar image is empty; skipping LDAP NSS injection (set config.meta.nslcd_sidecar_image)")
+		return resources
+	}
 	volumes, volumeMounts, sidecar := getNSLCDVolumesMountsAndSidecar(configMapName, sidecarImage)
 	resources.Volumes = append(resources.Volumes, volumes...)
 	resources.VolumeMounts = append(resources.VolumeMounts, volumeMounts...)
-	resources.Containers = append(resources.Containers, sidecar)
+	resources.InitContainers = append(resources.InitContainers, sidecar)
 	return resources
 }
 

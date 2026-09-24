@@ -15,7 +15,7 @@ data:
       "meta": {
         {{- if .Values.config.features.ldap }}
         "nslcd_config_map_name": "{{ include "user-mutator.fullname" . }}-nslcd-config",
-        "nslcd_sidecar_image": "{{ .Values.ldap.sidecar.image }}"
+        "nslcd_sidecar_image": "{{ .Values.ldap.sidecar.image.repository }}:{{ .Values.ldap.sidecar.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
         {{- end }}
       },
       "features": {{ toPrettyJson .Values.config.features | nindent 8 }},

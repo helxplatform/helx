@@ -77,8 +77,40 @@ func TestGetNSLCDVolumesMountsAndSidecar(t *testing.T) {
 	if m := findMount(sidecar.VolumeMounts, "/etc/nsswitch.conf"); m != nil {
 		t.Errorf("sidecar must not receive the app nsswitch mount, got %+v", m)
 	}
-	if sidecar.SecurityContext == nil || sidecar.SecurityContext.AllowPrivilegeEscalation == nil || *sidecar.SecurityContext.AllowPrivilegeEscalation {
+	// --- native sidecar: restartPolicy=Always + startupProbe on the socket ---
+	if sidecar.RestartPolicy == nil || *sidecar.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Errorf("sidecar must be a native sidecar (restartPolicy=Always), got %v", sidecar.RestartPolicy)
+	}
+	if sidecar.StartupProbe == nil || sidecar.StartupProbe.Exec == nil {
+		t.Errorf("sidecar should gate app start with a startupProbe on the socket")
+	}
+	// --- resources set (avoids ResourceQuota rejection) ---
+	if sidecar.Resources.Requests.Cpu().IsZero() || sidecar.Resources.Requests.Memory().IsZero() {
+		t.Errorf("sidecar should set cpu/memory requests, got %+v", sidecar.Resources.Requests)
+	}
+	// --- restricted PSS hardening ---
+	sc := sidecar.SecurityContext
+	if sc == nil || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
 		t.Errorf("sidecar should set allowPrivilegeEscalation=false")
+	}
+	if sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Errorf("sidecar should set runAsNonRoot=true")
+	}
+	if sc == nil || sc.Capabilities == nil || len(sc.Capabilities.Drop) == 0 || sc.Capabilities.Drop[0] != "ALL" {
+		t.Errorf("sidecar should drop ALL capabilities")
+	}
+	if sc == nil || sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Errorf("sidecar should set seccompProfile=RuntimeDefault")
+	}
+}
+
+// TestAddNSLCDConfigToProfileEmptyImageGuard: with no sidecar image the webhook
+// must NOT inject (an image:"" container would fail pod creation).
+func TestAddNSLCDConfigToProfileEmptyImageGuard(t *testing.T) {
+	out := addNSLCDConfigToProfile("um-nslcd-config", "", ProfileResources{})
+	if len(out.InitContainers) != 0 || len(out.Volumes) != 0 || len(out.VolumeMounts) != 0 {
+		t.Errorf("empty sidecar image must skip injection, got initContainers=%d volumes=%d mounts=%d",
+			len(out.InitContainers), len(out.Volumes), len(out.VolumeMounts))
 	}
 }
 
@@ -133,10 +165,17 @@ func TestCalculatePatchInjectsNSLCDSidecar(t *testing.T) {
 		t.Errorf("app container should have nsswitch + socket mounts, got %+v", app.VolumeMounts)
 	}
 
-	// nslcd sidecar injected, and it did NOT inherit the app nsswitch mount
-	side := findContainer(spec.Containers, "nslcd")
+	// nslcd native sidecar injected into initContainers (NOT app containers),
+	// and it did NOT inherit the app nsswitch mount
+	if findContainer(spec.Containers, "nslcd") != nil {
+		t.Error("nslcd must be a native sidecar in initContainers, not a regular container")
+	}
+	side := findContainer(spec.InitContainers, "nslcd")
 	if side == nil {
-		t.Fatal("nslcd sidecar was not injected")
+		t.Fatal("nslcd native sidecar was not injected into initContainers")
+	}
+	if side.RestartPolicy == nil || *side.RestartPolicy != corev1.ContainerRestartPolicyAlways {
+		t.Error("injected nslcd must have restartPolicy=Always (native sidecar)")
 	}
 	if findMount(side.VolumeMounts, "/etc/nsswitch.conf") != nil {
 		t.Errorf("sidecar must not inherit app nsswitch mount")

@@ -1257,12 +1257,14 @@ func getNSLCDVolumesMountsAndSidecar(configMapName, sidecarImage string) ([]core
 				corev1.ResourceMemory: resource.MustParse("64Mi"),
 			},
 		},
-		// Satisfy the restricted Pod Security Standard.
+		// Mirror exactly what app containers get (allowPrivilegeEscalation=false
+		// only). HeLx admits pods under a custom OpenShift SCC
+		// (custom-scc-1025-524288) that assigns the uid/gid/seccomp itself;
+		// setting runAsNonRoot / capabilities / seccompProfile explicitly here
+		// disqualifies the pod from that SCC and it gets rejected. The SCC (or a
+		// namespace's PodSecurity defaults) supplies the rest.
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
-			RunAsNonRoot:             boolPtr(true),
-			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-			SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
 	}
 

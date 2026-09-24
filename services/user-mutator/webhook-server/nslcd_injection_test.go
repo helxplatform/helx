@@ -88,19 +88,15 @@ func TestGetNSLCDVolumesMountsAndSidecar(t *testing.T) {
 	if sidecar.Resources.Requests.Cpu().IsZero() || sidecar.Resources.Requests.Memory().IsZero() {
 		t.Errorf("sidecar should set cpu/memory requests, got %+v", sidecar.Resources.Requests)
 	}
-	// --- restricted PSS hardening ---
+	// --- securityContext mirrors app containers (allowPrivilegeEscalation=false
+	// only). HeLx's custom OpenShift SCC assigns uid/seccomp/caps; setting them
+	// explicitly here would disqualify the pod from that SCC. ---
 	sc := sidecar.SecurityContext
 	if sc == nil || sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
 		t.Errorf("sidecar should set allowPrivilegeEscalation=false")
 	}
-	if sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
-		t.Errorf("sidecar should set runAsNonRoot=true")
-	}
-	if sc == nil || sc.Capabilities == nil || len(sc.Capabilities.Drop) == 0 || sc.Capabilities.Drop[0] != "ALL" {
-		t.Errorf("sidecar should drop ALL capabilities")
-	}
-	if sc == nil || sc.SeccompProfile == nil || sc.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
-		t.Errorf("sidecar should set seccompProfile=RuntimeDefault")
+	if sc.RunAsNonRoot != nil || sc.Capabilities != nil || sc.SeccompProfile != nil {
+		t.Errorf("sidecar must not set runAsNonRoot/capabilities/seccompProfile (breaks HeLx custom SCC), got %+v", sc)
 	}
 }
 

@@ -12,9 +12,10 @@ metadata:
 data:
   config.json: |
     {
-      "meta": { 
+      "meta": {
         {{- if .Values.config.features.ldap }}
-        "libnss_ldap_config_map_name": "{{ include "user-mutator.fullname" . }}-libnss-ldap-config"
+        "nslcd_config_map_name": "{{ include "user-mutator.fullname" . }}-nslcd-config",
+        "nslcd_sidecar_image": "{{ .Values.ldap.sidecar.image.repository }}:{{ .Values.ldap.sidecar.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
         {{- end }}
       },
       "features": {{ toPrettyJson .Values.config.features | nindent 8 }},
@@ -25,22 +26,41 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "user-mutator.fullname" . }}-libnss-ldap-config
+  name: {{ include "user-mutator.fullname" . }}-nslcd-config
   labels:
     app: {{ include "user-mutator.name" . }}
     chart: {{ include "user-mutator.chart" . }}
     release: "{{ .Release.Name }}"
     heritage: "{{ .Release.Service }}"
 data:
-  libnss-ldap.conf: |
-    uri ldap://{{ .Values.config.features.ldap.host }}{{if .Values.config.features.ldap.port }}:{{ .Values.config.features.ldap.port }}{{ end }}
-    base {{ .Values.config.features.ldap.user_base_dn }}
-    nss_base_group {{ .Values.config.features.ldap.group_base_dn }}
+  # nslcd.conf is consumed by the injected nslcd sidecar (nss-pam-ldapd),
+  # the maintained successor to the EOL libnss-ldap. The app container talks
+  # to this daemon over the shared /var/run/nslcd/socket via libnss-ldapd.
+  # Bind is anonymous (as the retired libnss-ldap.conf was); POSIX attributes
+  # are read without credentials, so no LDAP secret is injected into app pods.
+  nslcd.conf: |
+    {{- $ldap := .Values.config.features.ldap }}
+    {{- $tls := $ldap.tls | default dict }}
+    {{- $mode := $tls.mode | default "off" }}
+    uri {{ if eq $mode "ldaps" }}ldaps{{ else }}ldap{{ end }}://{{ $ldap.host }}{{ if $ldap.port }}:{{ $ldap.port }}{{ end }}
     ldap_version 3
+    base {{ $ldap.user_base_dn }}
+    base group {{ $ldap.group_base_dn }}
+    {{- if eq $mode "starttls" }}
+    ssl start_tls
+    {{- else if eq $mode "ldaps" }}
+    ssl on
+    {{- else }}
     ssl off
-    pam_password md5
+    {{- end }}
+    {{- if ne $mode "off" }}
+    tls_reqcert {{ $tls.reqcert | default "demand" }}
+    {{- if $tls.caCertFile }}
+    tls_cacertfile {{ $tls.caCertFile }}
+    {{- end }}
+    {{- end }}
   nsswitch.conf: |
-    passwd:         ldap files
-    group:          ldap files
+    passwd:         files ldap
+    group:          files ldap
 {{- end }}
 {{- end }}

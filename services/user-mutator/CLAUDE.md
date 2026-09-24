@@ -120,7 +120,7 @@ Edit `config.env` to customize:
    - **Security Contexts**: Sets runAsUser, runAsGroup, fsGroup, supplementalGroups
    - **Env Variables**: Injects environment variables from user profiles and LDAP
    - **Group Volumes**: Auto-mounts PVCs labeled with user's group names
-   - **LDAP Config**: Mounts ConfigMap with libnss-ldap.conf for user/group resolution
+   - **LDAP Config**: Injects an `nslcd` (nss-pam-ldapd) native sidecar plus a shared `/var/run/nslcd` socket and an `nsswitch.conf` mount, so app containers resolve users/groups via `libnss-ldapd` over the socket. Replaces the retired EOL `libnss-ldap` in-process module.
 6. **Patch Calculation**: Creates JSONPatch to modify the original Deployment
 7. **Response**: Returns AdmissionResponse with patch to Kubernetes API
 
@@ -217,7 +217,7 @@ When LDAP is configured:
 - Searches for posixGroups where user is a `memberUid`
 - Supports user aliases via `userAlias` attribute (merges attributes from alias user)
 - Sets security contexts based on LDAP numeric IDs
-- Mounts libnss-ldap configuration for runtime user/group resolution
+- Injects an `nslcd` (nss-pam-ldapd) native sidecar + shared socket + `nsswitch.conf` for runtime user/group resolution (successor to the EOL `libnss-ldap`). TLS is configurable via `config.features.ldap.tls`.
 
 ### Testing and Debugging
 

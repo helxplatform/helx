@@ -3,7 +3,7 @@ appstore:
   logLevel: DEBUG
   saml:
     ASSERTION_URL: https://helx-test.apps.renci.org
-    ENTITY_ID: https://helx-test.apps.renci.org
+    ENTITY_ID: https://helx-test.apps.renci.org/saml2_auth/acs/
   tycho:
     externalAppRegistryBranch: helx-ai-sandbox-test-azure
 appstore-prepuller:

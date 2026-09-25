@@ -5,6 +5,7 @@ from collections.abc import Iterator
 import importlib.util
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -34,6 +35,32 @@ assert SPEC and SPEC.loader
 ci = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = ci
 SPEC.loader.exec_module(ci)
+
+_GIT_ENVIRONMENT = patch.dict(os.environ)
+
+
+def setUpModule() -> None:
+    """Keep every git call inside the temporary repositories the tests create.
+
+    Git runs hooks with GIT_DIR and similar variables pointing at the real
+    repository, and every git process inherits them, including those ci.py
+    starts. Under the pre-push hook, "git init" in a temporary directory then
+    reinitialises the real repository as bare. Clear the variables git
+    itself clears before running a command in another repository.
+    """
+    local_variables = subprocess.run(
+        ["git", "rev-parse", "--local-env-vars"],
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.split()
+    _GIT_ENVIRONMENT.start()
+    for name in local_variables:
+        os.environ.pop(name, None)
+
+
+def tearDownModule() -> None:
+    _GIT_ENVIRONMENT.stop()
 
 
 class TempTreeTest(unittest.TestCase):

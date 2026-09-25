@@ -127,10 +127,26 @@ configuration:
   baseDN: ""
   adminDN: ""
 
-  # Apply the develop branch's anonymous-read ACL. This exposes userPassword
-  # hashes to anonymous readers and should be disabled if that behavior is not
-  # required. Set openldap.env.LDAP_ALLOW_ANON_BINDING to "no" as well when
-  # disabling anonymous access.
+  # Choose which ACL set the configuration Job writes to the database's
+  # olcAccess. On every install and upgrade the Job compares the live
+  # olcAccess with the chosen set and replaces it if they differ. Any
+  # hand-edited ACLs on that database are overwritten.
+  #
+  # In both sets, userPassword and shadowLastChange are never readable
+  # anonymously. Anonymous clients may only use userPassword to authenticate
+  # a simple bind. Users can change their own password, and the admin DN
+  # can write everything.
+  #
+  # enabled: true also lets anonymous clients read the entries under
+  # ou=users and ou=groups. The user-mutator nslcd sidecar needs this
+  # because it binds anonymously.
+  #
+  # enabled: false lets authenticated clients read those entries instead of
+  # anonymous ones. It also replaces anonymous ACLs that an earlier upgrade
+  # applied. The user-mutator LDAP config has no bind DN, so user and group
+  # lookups in user app pods stop working. Set
+  # openldap.env.LDAP_ALLOW_ANON_BINDING to "no" as well to refuse
+  # anonymous binds outright.
   anonymousAccess:
     enabled: true
 

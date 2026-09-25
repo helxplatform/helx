@@ -1027,7 +1027,7 @@ helm-deploy:
 		fi; \
 	fi; \
 	helm upgrade --install "$(RELEASE)" "$$package" \
-		--namespace "$$namespace" --create-namespace \
+		--namespace "$$namespace" \
 		$${values_args[@]+"$${values_args[@]}"} \
 		$(foreach values_file,$(VALUES),--values "$(values_file)") \
 		$(HELM_FLAGS)

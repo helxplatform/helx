@@ -4,6 +4,11 @@ appstore:
   django:
     ALLOW_SAML_LOGIN: "true"
     EMAIL_HOST_USER: appstore@renci.org
+    PRODUCT_LINKS:
+      - name: Gitea
+        url: https://ordrd-staging-git.campusapps.ashe-k8s.renci.unc.edu
+      - name: Bookstack
+        url: https://bookstack-ordrd-staging.campusapps.ashe-k8s.renci.unc.edu
   gunicorn:
     workers: 5
   fetcherImage:
@@ -19,7 +24,20 @@ appstore:
       registry: containers.renci.org
       repository: helxplatform/third-party/bitnami-postgresql
       tag: 17.5.0-debian-12-r18
+      shmVolume:
+        chmod:
+          enabled: false
+    securityContext:
+      enabled: false
+      runAsUser: # CHANGEME
     primary:
+      containerSecurityContext:
+        enabled: false
+        runAsUser: # CHANGEME
+      podSecurityContext:
+        enabled: false
+        fsGroup: null
+        runAsUser: # CHANGEME
       resources:
         limits:
           cpu: 500m
@@ -28,19 +46,7 @@ appstore:
           cpu: 250m
           memory: 1Gi
     volumePermissions:
-      image:
-        registry: docker.io
-        repository: helxplatform/os-shell
-        tag: 12-debian-12-r50
-      resources:
-        limits:
-          cpu: 150m
-          memory: 192Mi
-          ephemeral-storage: 256Mi
-        requests:
-          cpu: 100m
-          memory: 128Mi
-          ephemeral-storage: 50Mi
+      enabled: false
   replicaCount: 1
   resources:
     limits:
@@ -60,19 +66,38 @@ appstore:
       FETCH_INTERVAL: 3600000
       enabled: true
       storageSize: 50M
+  securityContext:
+    fsGroup: null
+    runAsGroup: null
+    runAsUser: # CHANGEME
   tycho:
+    enableInitContainer: true
+    enableTrashCli: true
+    appRoutingMode: proxy
     externalAppRegistryBranch: # CHANGEME
     externalAppRegistryEnabled: true
-    fsGroup: 0
-    initRunAsUser: 1001
-    runAsUser: 1001
+    externalAppRegistryRepo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    init:
+      resources:
+        cpus: 250m
+        memory: 250Mi
+    initImageRepository: containers.renci.org/helxplatform/third-party/busybox
+    initImageTag: latest
+    initRunAsNobodyGroup: # CHANGEME
+    initRunAsNobodyUser: # CHANGEME
   userStorage:
     createPVC: true
+  security:
+    isolatedApps: true
+    appEgressAllowedPods:
+      - app.kubernetes.io/name: openldap-stack-ha
+    dnsPodSelector:
+      dns.operator.openshift.io/daemonset-dns: default
 appstore-prepuller:
   appRegistry:
-    repo: https://github.com/helxplatform/helx-apps/raw
-    branch: # CHANGEME
-    brand: # CHANGEME
+    repo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    branch: ordrd-staging
+    brand: ordrd
   controller:
     resources:
       limits:
@@ -83,7 +108,15 @@ appstore-prepuller:
         memory: 64Mi
 appstore-sockets:
   securityContext:
-    runAsUser: 1001
+    runAsUser: # CHANGEME
+helx-ldap:
+  configuration:
+    job:
+      securityContext:
+        runAsUser: # CHANGEME
+        runAsGroup: # CHANGEME
+      podSecurityContext:
+        fsGroup: null
 global:
   imagePullSecrets:
   - renci-registry-creds
@@ -100,33 +133,33 @@ resty:
   SSL:
     nginxTLSSecret: # CHANGEME
   enabled: true
-  dnsResolver: 10.0.0.10
+  artifactCache:
+    enabled: true
+  dnsResolver: 172.30.0.10
   ingress:
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt
       nginx.ingress.kubernetes.io/proxy-body-size: 100m
       nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     create: true
-    ingressClassName: nginx
+    ingressClassName: openshift-default-ingress-controller
   replicaCount: 1
   resources:
-    limits:
-      cpu: 2
-      memory: 2Gi
     requests:
       cpu: 1
-      memory: 1Gi
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 512Mi
   service:
     serverName: # CHANGEME
 ui:
   config:
-    appstore_asset_base_url: https:\/\/raw.githubusercontent.com\/helxplatform\/appstore
+    appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
     appstore_asset_branch: develop
     brand_description:
       html: # CHANGEME
     brand_name: # CHANGEME
-    default_space: workspaces
-    hidden_result_tabs: cdes
     login_title: # CHANGEME
     meta:
       title: # CHANGEME
@@ -139,6 +172,9 @@ ui:
       user_guide_url: # CHANGEME
     workspaces:
       enabled: "true"
+    search:
+      enabled: "false"
+      url: null
   resources:
     limits:
       cpu: 1
@@ -146,6 +182,10 @@ ui:
     requests:
       cpu: 0.5
       memory: 1Gi
+  securityContext:
+    fsGroup: null
+    runAsGroup: 0
+    runAsUser: # CHANGEME
   service:
     annotations:
       getambassador.io/config: |
@@ -181,8 +221,8 @@ ldap-sync:
   config:
     hooks:
       - args:
-          - --baseGid=1025
-          - --baseGroup=helx-users
+        - --baseGid=1025
+        - --baseGroup=helx-users
         image:
           repository: containers.renci.org/helxplatform/unc-group-x
           tag: v2.3.2

@@ -28,8 +28,10 @@ spec:
     spec:
       automountServiceAccountToken: false
       restartPolicy: OnFailure
+      {{- if .Values.configuration.job.podSecurityContext.enabled }}
       securityContext:
-        {{- toYaml .Values.configuration.job.podSecurityContext | nindent 8 }}
+        {{- omit .Values.configuration.job.podSecurityContext "enabled" | toYaml | nindent 8 }}
+      {{- end }}
       containers:
         - name: configure
           image: "{{ $imageRepository }}:{{ $imageTag }}"
@@ -52,8 +54,10 @@ spec:
               value: {{ .Values.configuration.anonymousAccess.enabled | quote }}
             - name: LDAP_PASSWORD_FILE
               value: /run/secrets/ldap/config-password
+          {{- if .Values.configuration.job.securityContext.enabled }}
           securityContext:
-            {{- toYaml .Values.configuration.job.securityContext | nindent 12 }}
+            {{- omit .Values.configuration.job.securityContext "enabled" | toYaml | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: configure-script
               mountPath: /usr/local/bin/configure.sh

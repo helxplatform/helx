@@ -69,9 +69,11 @@ openldap:
       cpu: "1"
       memory: 500M
 
-  # On OpenShift, set podSecurityContext.enabled to false so the SCC can
-  # allocate the pod security context. This is the wrapper equivalent of the
-  # develop branch's generated fsGroup: null value.
+  # On OpenShift, set podSecurityContext.enabled and
+  # containerSecurityContext.enabled to false so the SCC can allocate IDs from
+  # the namespace's range. This is the wrapper equivalent of the develop
+  # branch's generated fsGroup: null value, which a parent chart cannot pass
+  # through to this dependency.
 
   persistence:
     enabled: true
@@ -151,7 +153,13 @@ configuration:
     backoffLimit: 6
     activeDeadlineSeconds: 300
     ttlSecondsAfterFinished: 300
+    # On OpenShift, set securityContext.enabled and podSecurityContext.enabled
+    # to false so the SCC can allocate IDs from the namespace's range. A null
+    # from a parent chart does not remove these defaults.
     securityContext:
+      # -- Render the configuration container's securityContext. The remaining
+      # keys are passed through as the container securityContext.
+      enabled: true
       runAsUser: 1001
       runAsGroup: 1001
       runAsNonRoot: true
@@ -162,6 +170,9 @@ configuration:
       seccompProfile:
         type: RuntimeDefault
     podSecurityContext:
+      # -- Render the configuration pod's securityContext. The remaining keys
+      # are passed through as the pod securityContext.
+      enabled: true
       fsGroup: 1001
       seccompProfile:
         type: RuntimeDefault

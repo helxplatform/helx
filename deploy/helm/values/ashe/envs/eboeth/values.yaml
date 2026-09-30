@@ -18,22 +18,17 @@ appstore:
     externalAppRegistryBranch: ordrd-staging
     initRunAsNobodyGroup: 524288
     initRunAsNobodyUser: 524288
+    initRunAsUser: 524288
+    runAsUser: 1002160002
+    fsGroup: 1025
 appstore-prepuller:
   appRegistry:
     branch: ordrd-staging
     brand: ordrd
 appstore-sockets:
   securityContext:
-    runAsUser: 1002160002
-helx-ldap:
-  configuration:
-    job:
-      securityContext:
-        runAsUser: 1002160003
-        runAsGroup: 1002160003
+    runAsUser: 1002160003
 resty:
-  SSL:
-    nginxTLSSecret: eboeth-apps-ashe-k8s-renci-unc-edu-tls-glbzv
   service:
     serverName: eboeth.apps.ashe-k8s.renci.unc.edu
 ui:

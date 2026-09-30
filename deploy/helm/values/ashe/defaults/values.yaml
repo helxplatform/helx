@@ -10,7 +10,7 @@ appstore:
       - name: Bookstack
         url: https://bookstack-ordrd-staging.campusapps.ashe-k8s.renci.unc.edu
   gunicorn:
-    workers: 5
+    workers: 2
   fetcherImage:
     repository: containers.renci.org/helxplatform/url-fetch
   imagePostgresql:
@@ -40,21 +40,21 @@ appstore:
         runAsUser: # CHANGEME
       resources:
         limits:
-          cpu: 500m
-          memory: 2Gi
+          cpu: 2
+          memory: 1Gi
         requests:
           cpu: 250m
-          memory: 1Gi
+          memory: 256Mi
     volumePermissions:
       enabled: false
   replicaCount: 1
   resources:
     limits:
-      cpu: 2
-      memory: 4Gi
+      cpu: 500m
+      memory: 1.5Gi
     requests:
-      cpu: 1
-      memory: 2Gi
+      cpu: 250m
+      memory: 512Mi
   saml:
     ASSERTION_URL:  # CHANGEME
     ENTITY_ID:      # CHANGEME
@@ -73,7 +73,6 @@ appstore:
   tycho:
     enableInitContainer: true
     enableTrashCli: true
-    appRoutingMode: proxy
     externalAppRegistryBranch: # CHANGEME
     externalAppRegistryEnabled: true
     externalAppRegistryRepo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
@@ -85,6 +84,8 @@ appstore:
     initImageTag: latest
     initRunAsNobodyGroup: # CHANGEME
     initRunAsNobodyUser: # CHANGEME
+    initRunAsUser: # CHANGEME
+    fsGroup: null
   userStorage:
     createPVC: true
   security:
@@ -109,115 +110,40 @@ appstore-prepuller:
 appstore-sockets:
   securityContext:
     runAsUser: # CHANGEME
-helx-ldap:
-  configuration:
-    job:
-      securityContext:
-        runAsUser: # CHANGEME
-        runAsGroup: # CHANGEME
-      podSecurityContext:
-        fsGroup: null
 global:
   imagePullSecrets:
   - renci-registry-creds
   imageRegistry: ""
-pod-reaper:
-  reapers:
-    long-running-apps:
-      max_duration: 8h
-      require_label_values: jupyter-ai-notebook
-    short-running-apps:
-      max_duration: 3h
-      require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
-resty:
-  SSL:
-    nginxTLSSecret: # CHANGEME
-  enabled: true
-  artifactCache:
-    enabled: true
-  dnsResolver: 172.30.0.10
-  ingress:
-    annotations:
-      cert-manager.io/cluster-issuer: letsencrypt
-      nginx.ingress.kubernetes.io/proxy-body-size: 100m
-      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
-    create: true
-    ingressClassName: openshift-default-ingress-controller
-  replicaCount: 1
-  resources:
-    requests:
-      cpu: 1
-      memory: 512Mi
-    limits:
-      cpu: 1
-      memory: 512Mi
-  service:
-    serverName: # CHANGEME
-ui:
-  config:
-    appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
-    appstore_asset_branch: develop
-    brand_description:
-      html: # CHANGEME
-    brand_name: # CHANGEME
-    login_title: # CHANGEME
-    meta:
-      title: # CHANGEME
-    search:
-      enabled: "false"
-      url: ""
-    support:
-      faqs_url: ""
-      help_portal_url: # CHANGEME
-      user_guide_url: # CHANGEME
-    workspaces:
-      enabled: "true"
-    search:
-      enabled: "false"
-      url: null
-  resources:
-    limits:
-      cpu: 1
-      memory: 2Gi
-    requests:
-      cpu: 0.5
-      memory: 1Gi
-  securityContext:
-    fsGroup: null
-    runAsGroup: 0
-    runAsUser: # CHANGEME
-  service:
-    annotations:
-      getambassador.io/config: |
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: helx-ui
-        prefix: /helx
-        service: helx-ui:80
-        rewrite: /helx
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: ui-static
-        prefix: /static/frontend
-        service: helx-ui:80
-        rewrite: /static/frontend
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
+helx-ldap:
+  # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+  openldap:
+    podSecurityContext:
+      enabled: false
+    containerSecurityContext:
+      enabled: false
+  configuration:
+    job:
+      podSecurityContext:
+        enabled: false
+      securityContext:
+        enabled: false
 ldap-sync:
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
   searchBootstrap:
     id: get-groups
     filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:internal:*))'
     baseDN: ou=groups,dc=unc,dc=edu
+    job:
+      # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+      podSecurityContext:
+        enabled: false
+      securityContext:
+        enabled: false
   config:
     hooks:
       - args:
@@ -249,6 +175,94 @@ ldap-sync:
         size: 10Gi
         accessModes:
           - ReadWriteMany
+pod-reaper:
+  reapers:
+    long-running-apps:
+      max_duration: 8h
+      require_label_values: jupyter-ai-notebook
+    short-running-apps:
+      max_duration: 3h
+      require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
+resty:
+  enabled: true
+  SSL: {}
+  # artifactCache:
+  #   enabled: true
+  dnsResolver: 172.30.0.10
+  ingress:
+    # With no TLS Secret the chart renders `tls: - {}`; OpenShift only turns
+    # that into a Route using the router's default certificate when this is set.
+    annotations:
+      route.openshift.io/termination: edge
+    create: true
+    ingressClassName: openshift-campusapps-ingress-controller
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    serverName: # CHANGEME
+ui:
+  config:
+    appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
+    appstore_asset_branch: develop
+    brand_description:
+      html: # CHANGEME
+    brand_name: # CHANGEME
+    login_title: # CHANGEME
+    meta:
+      title: # CHANGEME
+    support:
+      faqs_url: ""
+      help_portal_url: # CHANGEME
+      user_guide_url: # CHANGEME
+    workspaces:
+      enabled: "true"
+    search:
+      enabled: "false"
+      url: null
+  resources:
+    limits:
+      cpu: 1
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  securityContext:
+    fsGroup: null
+    runAsGroup: 0
+    runAsUser: # CHANGEME
+  service:
+    annotations:
+      getambassador.io/config: |
+        ---
+        apiVersion: ambassador/v1
+        kind: Mapping
+        name: helx-ui
+        prefix: /helx
+        service: helx-ui:80
+        rewrite: /helx
+        cors:
+          origins: "*"
+          methods: POST, OPTIONS
+          headers:
+          - Content-Type
+        ---
+        apiVersion: ambassador/v1
+        kind: Mapping
+        name: ui-static
+        prefix: /static/frontend
+        service: helx-ui:80
+        rewrite: /static/frontend
+        cors:
+          origins: "*"
+          methods: POST, OPTIONS
+          headers:
+          - Content-Type
 user-mutator:
   webhook:
     enabled: false

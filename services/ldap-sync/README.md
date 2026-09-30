@@ -228,7 +228,7 @@ make push
 `ldap-sync` is registered in the monorepo CI image inventory. Pull requests build
 its Docker image when files under `services/ldap-sync` change, excluding Helm
 chart-only changes. The `ldap-sync` image can also be selected from the manual
-`CI` workflow dispatch. See the [HeLx CI/CD documentation](../../.github/README.md)
+`CI` workflow dispatch. See the [HeLx CI/CD documentation](../../.github/CI.md)
 for the image and chart validation workflow.
 
 ## Configuration

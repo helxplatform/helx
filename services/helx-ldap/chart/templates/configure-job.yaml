@@ -175,20 +175,60 @@ data:
       echo "memberof overlay is already installed"
     fi
 
+    # Print each olcAccess value of an LDIF stream on its own line, in order,
+    # so the live ACLs can be compared with the intended ones. Folded lines
+    # are joined, whitespace runs collapse to one space, and case is folded.
+    # slapd returns each rule in its own canonical form, which writes a
+    # plain dn="..." as dn.base="..."; that is mapped back as well. A
+    # base64 value (olcAccess::) is never matched, so it only forces a
+    # reapply. Any difference this misses in slapd's formatting makes the
+    # comparison fail and reapplies the same rules; it cannot skip a change.
+    normalize_acl() {
+      awk '
+        function flush() {
+          if (value != "") {
+            gsub(/[ \t]+/, " ", value)
+            sub(/ $/, "", value)
+            value = tolower(value)
+            gsub(/dn\.(base|exact)="/, "dn=\"", value)
+            print value
+          }
+          value = ""
+        }
+        /^ / {
+          if (value != "") value = value substr($0, 2)
+          next
+        }
+        { flush() }
+        /^olcAccess: / { value = substr($0, 12) }
+        END { flush() }
+      '
+    }
+
     if [ "$LDAP_ANONYMOUS_ACCESS_ENABLED" = "true" ]; then
-      if ! ldap_search -b "$database_dn" -s base olcAccess \
-        | grep -Fq "by anonymous read"; then
-        echo "Applying anonymous-access ACLs (userPassword hashes will be readable anonymously)..."
-        sed \
-          -e "s#olcDatabase={2}mdb,cn=config#${database_dn}#g" \
-          -e "s#cn=admin,dc=example,dc=org#${LDAP_ADMIN_DN}#g" \
-          -e "s#dc=example,dc=org#${LDAP_BASE_DN}#g" \
-          /ldif/anonymous-access.ldif | ldap_modify
-      else
-        echo "anonymous-access ACLs are already installed"
-      fi
+      acl_name="anonymous-access"
     else
-      echo "Anonymous-access ACLs are disabled"
+      acl_name="authenticated-access"
+    fi
+    acl_ldif="$(sed \
+      -e "s#olcDatabase={2}mdb,cn=config#${database_dn}#g" \
+      -e "s#cn=admin,dc=example,dc=org#${LDAP_ADMIN_DN}#g" \
+      -e "s#dc=example,dc=org#${LDAP_BASE_DN}#g" \
+      "/ldif/${acl_name}.ldif")"
+    live_acl_entry="$(ldap_search -b "$database_dn" -s base olcAccess 2>&1)" || {
+      echo "LDAP olcAccess query failed:" >&2
+      printf '%s\n' "$live_acl_entry" >&2
+      exit 1
+    }
+    # Compare the whole rule set rather than looking for a telltale string,
+    # so a corrected or switched rule set replaces whatever an earlier
+    # chart version, or the other anonymousAccess setting, installed.
+    if [ "$(printf '%s\n' "$live_acl_entry" | normalize_acl)" \
+      != "$(printf '%s\n' "$acl_ldif" | normalize_acl)" ]; then
+      echo "Applying ${acl_name} ACLs..."
+      printf '%s\n' "$acl_ldif" | ldap_modify
+    else
+      echo "${acl_name} ACLs are already installed"
     fi
 
     # The develop schema uses the helxUser object class and has the same OID

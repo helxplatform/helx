@@ -1,0 +1,20 @@
+# Provenance for services/resty/chart.
+#
+# This chart was vendored from a SUBDIRECTORY of an upstream repo, so it is not
+# a git subtree: it has no merge base and it is absent from SUBTREE_MAP.
+# Sync it with:  make pull-vendored-chart NAME=resty
+# Check it with: make check-vendored-sync
+repo:      https://github.com/helxplatform/helx-chart
+branch:    master
+path:      charts/resty
+# All upstream changes through this commit are incorporated here.
+upstream:  264c8412f9991e9f0b86737c08a1f5b901196948
+verified:  2026-09-20
+# The local copy is deliberately AHEAD of upstream and must not be overwritten
+# wholesale by a future pull. Intentional divergence:
+#   - Chart.yaml: apiVersion v2, version 2.0.2, helx-common dependency
+#   - templates/_helpers.tpl, templates/nginx-secrets.yaml, values.yaml:
+#     basic-auth Secret managed through the shared helx-common contract
+#   - templates/ingress.yaml: TLS Secret stays caller-managed; a missing SSL
+#     block fails to render instead of dereferencing nil
+#   - values.yaml: Harbor image repository; no default basic-auth credentials

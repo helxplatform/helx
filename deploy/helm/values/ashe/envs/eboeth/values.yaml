@@ -1,6 +1,7 @@
 appstore:
   DEBUG: "true"
   logLevel: DEBUG
+  djangoSettings: ordrd
   postgresql:
     securityContext:
       runAsUser: 1002160001
@@ -15,6 +16,7 @@ appstore:
   securityContext:
     runAsUser: 1002160000
   tycho:
+    externalAppRegistryRepo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
     externalAppRegistryBranch: ordrd-staging
     initRunAsNobodyGroup: 524288
     initRunAsNobodyUser: 524288
@@ -23,6 +25,7 @@ appstore:
     fsGroup: 1025
 appstore-prepuller:
   appRegistry:
+    repo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
     branch: ordrd-staging
     brand: ordrd
 appstore-sockets:
@@ -33,6 +36,7 @@ resty:
     serverName: eboeth.apps.ashe-k8s.renci.unc.edu
 ui:
   config:
+    appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
     brand_description:
       html: |
         <div style="display:flex;flex-direction:column;align-items:center;"> <h4 style="max-width:450px;">

@@ -1,14 +1,9 @@
 appstore:
   ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
-  djangoSettings: ordrd
+  djangoSettings: # CHANGEME
   django:
     ALLOW_SAML_LOGIN: "true"
     EMAIL_HOST_USER: appstore@renci.org
-    PRODUCT_LINKS:
-      - name: Gitea
-        url: https://ordrd-staging-git.campusapps.ashe-k8s.renci.unc.edu
-      - name: Bookstack
-        url: https://bookstack-ordrd-staging.campusapps.ashe-k8s.renci.unc.edu
   gunicorn:
     workers: 2
   fetcherImage:
@@ -73,9 +68,9 @@ appstore:
   tycho:
     enableInitContainer: true
     enableTrashCli: true
-    externalAppRegistryBranch: # CHANGEME
     externalAppRegistryEnabled: true
-    externalAppRegistryRepo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    externalAppRegistryRepo: # CHANGEME
+    externalAppRegistryBranch: # CHANGEME
     init:
       resources:
         cpus: 250m
@@ -85,7 +80,8 @@ appstore:
     initRunAsNobodyGroup: # CHANGEME
     initRunAsNobodyUser: # CHANGEME
     initRunAsUser: # CHANGEME
-    fsGroup: null
+    runAsUser: # CHANGEME
+    fsGroup: # CHANGEME
   userStorage:
     createPVC: true
   security:
@@ -96,9 +92,9 @@ appstore:
       dns.operator.openshift.io/daemonset-dns: default
 appstore-prepuller:
   appRegistry:
-    repo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
-    branch: ordrd-staging
-    brand: ordrd
+    repo: # CHANGEME
+    branch: # CHANGEME
+    brand: # CHANGEME
   controller:
     resources:
       limits:
@@ -116,6 +112,7 @@ global:
   imageRegistry: ""
 helx-ldap:
   # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+  # We can do the same thing in other services if we take the time to implement it similarly.
   openldap:
     podSecurityContext:
       enabled: false
@@ -208,7 +205,7 @@ resty:
     serverName: # CHANGEME
 ui:
   config:
-    appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
+    appstore_asset_base_url: # CHANGEME
     appstore_asset_branch: develop
     brand_description:
       html: # CHANGEME

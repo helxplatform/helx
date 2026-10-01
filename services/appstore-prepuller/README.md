@@ -57,7 +57,8 @@ helm install appstore-prepuller ./chart \
 | `controller.image.tag` | Controller image tag | `latest` |
 | `controller.schedule` | CronJob schedule | `*/5 * * * *` |
 | `controller.resources` | Controller resource requests/limits | 50m-200m CPU, 64Mi-128Mi mem |
-| `daemonset.nodeSelector` | Node selector for prepuller pods | `kubernetes.azure.com/mode: user` |
+| `daemonset.nodeSelector` | Node selector for prepuller pods | `{}` (all nodes) |
+| `daemonset.affinity` | Affinity for prepuller pods | `{}` |
 | `daemonset.tolerations` | Tolerations for prepuller pods | Tolerate all |
 | `daemonset.pauseImage` | Pause image for the main container | `registry.k8s.io/pause:3.9` |
 | `daemonset.resources` | DaemonSet resource requests/limits | 10m-50m CPU, 10Mi-20Mi mem |

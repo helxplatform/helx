@@ -103,6 +103,15 @@ appstore-prepuller:
       requests:
         cpu: 50m
         memory: 64Mi
+  daemonset:
+    # ASHE nodes carry no worker label, so exclude the control plane instead.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
 appstore-sockets:
   securityContext:
     runAsUser: # CHANGEME

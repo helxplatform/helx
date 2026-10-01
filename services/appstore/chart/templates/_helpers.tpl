@@ -84,6 +84,21 @@ Name of the Secret consumed by the appstore Deployment.
 {{- end -}}
 
 {{/*
+Print a numeric ID as an integer. Helm reads numbers in values files as
+float64, which print in scientific notation from 1e6 up, so 1002160002 would
+become 1.002160002e+09. Anything that is not a float (unset, a string, an
+integer from --set) prints unchanged, because Tycho treats "" and "0"
+differently.
+*/}}
+{{- define "appstore.intValue" -}}
+{{- if kindIs "float64" . -}}
+{{- int64 . -}}
+{{- else -}}
+{{- . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Name of the primary Secret created by the legacy chart.
 */}}
 {{- define "appstore.legacySecretName" -}}

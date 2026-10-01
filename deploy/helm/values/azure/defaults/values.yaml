@@ -73,6 +73,9 @@ appstore-prepuller:
       requests:
         cpu: 50m
         memory: 64Mi
+  daemonset:
+    nodeSelector:
+      kubernetes.azure.com/mode: user
 appstore-sockets:
   securityContext:
     runAsUser: 1001

@@ -127,7 +127,8 @@ The Job:
 2. Loads the `memberOf` module and installs the `memberOf` overlay on the
    discovered database, so OpenLDAP maintains reverse `memberOf` attributes
    and group membership can be queried from the user side.
-3. Applies the configured anonymous-access ACL when enabled.
+3. Writes the ACL set selected by `configuration.anonymousAccess.enabled` to
+   the database's `olcAccess`, replacing it if it differs.
 4. Installs the `helxUser` schema, including:
    - `runAsUser`
    - `runAsGroup`
@@ -161,9 +162,23 @@ configuration:
     enabled: true
 ```
 
-This is security-sensitive: the bundled anonymous ACL permits anonymous reads
-of `userPassword` hashes. Treat that as a compatibility default, not a
-production security baseline. For a fresh hardened deployment, use:
+With `anonymousAccess.enabled: true`, anonymous clients can read the POSIX
+user and group entries under `ou=users` and `ou=groups`. The user-mutator
+nslcd sidecar depends on this because it binds anonymously. Anonymous clients
+can never read `userPassword` or `shadowLastChange`. They may only use
+`userPassword` to authenticate a simple bind. With
+`anonymousAccess.enabled: false`, only authenticated clients can read those
+entries.
+
+On every install and upgrade, the Job compares the database's live
+`olcAccess` with the selected rule set and replaces it if they differ. So an
+upgrade fixes installations that got the earlier ACL, which let anonymous
+clients read password hashes. Switching the setting also takes effect on
+existing installations. Hand-edited ACLs on that database are overwritten.
+
+To refuse anonymous access entirely, use the setting below. The user-mutator
+LDAP configuration has no bind DN, so user and group lookups in user app pods
+stop working with it:
 
 ```yaml
 helx-ldap:
@@ -174,10 +189,6 @@ helx-ldap:
     anonymousAccess:
       enabled: false
 ```
-
-Disabling the setting after the permissive ACL has already been applied does
-not currently remove that ACL; existing installations require an explicit ACL
-migration.
 
 For custom HeLx LDAP naming contexts, configure `openldap.global.ldapDomain`, or
 set `configuration.baseDN` and `configuration.adminDN` explicitly. The

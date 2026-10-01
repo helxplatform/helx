@@ -8,6 +8,10 @@
 # Helm chart
 chart/
 
+# nslcd sidecar builds as its own image (see .github/ci/images.yaml); keep it
+# out of the webhook build context so sidecar changes don't alter this image.
+nslcd-sidecar/
+
 # Code that's not needed by the production build
 tools/
 tls-and-mwc/

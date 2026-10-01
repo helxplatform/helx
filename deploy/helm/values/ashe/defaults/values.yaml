@@ -112,6 +112,8 @@ appstore-prepuller:
             - matchExpressions:
                 - key: node-role.kubernetes.io/control-plane
                   operator: DoesNotExist
+    # Let the SCC assign the init containers' UID; it rejects root.
+    initRunAsUser: ""
 appstore-sockets:
   securityContext:
     runAsUser: # CHANGEME

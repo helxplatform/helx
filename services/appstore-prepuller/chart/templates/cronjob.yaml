@@ -36,5 +36,7 @@ spec:
                   value: {{ .Values.appRegistry.branch | quote }}
                 - name: APP_REGISTRY_BRAND
                   value: {{ .Values.appRegistry.brand | quote }}
+                - name: PREPULLER_INIT_RUN_AS_USER
+                  value: "{{- include "appstore-prepuller.intValue" .Values.daemonset.initRunAsUser }}"
               resources:
                 {{- toYaml .Values.controller.resources | nindent 16 }}

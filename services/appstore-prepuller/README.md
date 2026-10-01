@@ -59,6 +59,7 @@ helm install appstore-prepuller ./chart \
 | `controller.resources` | Controller resource requests/limits | 50m-200m CPU, 64Mi-128Mi mem |
 | `daemonset.nodeSelector` | Node selector for prepuller pods | `{}` (all nodes) |
 | `daemonset.affinity` | Affinity for prepuller pods | `{}` |
+| `daemonset.initRunAsUser` | UID for the pull init containers; `""` lets the platform assign one (needed on OpenShift) | `0` |
 | `daemonset.tolerations` | Tolerations for prepuller pods | Tolerate all |
 | `daemonset.pauseImage` | Pause image for the main container | `registry.k8s.io/pause:3.9` |
 | `daemonset.resources` | DaemonSet resource requests/limits | 10m-50m CPU, 10Mi-20Mi mem |
@@ -96,6 +97,7 @@ python controller/prepuller.py
 | `APP_REGISTRY_BRAND` | App registry brand | (required) |
 | `PREPULLER_DAEMONSET_NAME` | Name of the DaemonSet to patch | `app-image-prepuller` |
 | `PREPULLER_NAMESPACE` | Namespace of the DaemonSet | `default` |
+| `PREPULLER_INIT_RUN_AS_USER` | UID for the pull init containers; empty leaves it unset so the platform assigns one | `0` |
 
 ## Project Structure
 

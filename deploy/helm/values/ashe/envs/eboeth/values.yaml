@@ -1,0 +1,62 @@
+appstore:
+  DEBUG: "true"
+  logLevel: DEBUG
+  djangoSettings: ordrd
+  postgresql:
+    securityContext:
+      runAsUser: 1002160001
+    primary:
+      containerSecurityContext:
+        runAsUser: 1002160001
+      podSecurityContext:
+        runAsUser: 1002160001
+  saml:
+    ASSERTION_URL: https://eboeth.apps.ashe-k8s.renci.unc.edu
+    ENTITY_ID: https://eboeth.apps.ashe-k8s.renci.unc.edu
+  securityContext:
+    runAsUser: 1002160000
+  tycho:
+    externalAppRegistryRepo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    externalAppRegistryBranch: ordrd-staging
+    initRunAsNobodyGroup: 524288
+    initRunAsNobodyUser: 524288
+    initRunAsUser: 524288
+    runAsUser: 1002160002
+    fsGroup: 1025
+appstore-prepuller:
+  appRegistry:
+    repo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    branch: ordrd-staging
+    brand: ordrd
+appstore-sockets:
+  securityContext:
+    runAsUser: 1002160003
+resty:
+  service:
+    serverName: eboeth.apps.ashe-k8s.renci.unc.edu
+ui:
+  config:
+    appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
+    brand_description:
+      html: |
+        <div style="display:flex;flex-direction:column;align-items:center;"> <h4 style="max-width:450px;">
+          A platform for analysis of clinical data records
+        </h4> <p style="max-width:450px;">
+          The de-identified OMOP Research Data Repository, ORDR(D) for short,
+          is a joint effort between NC TraCS and RENCI focused on building
+          new health research-focused data warehousing at UNC.
+        </p> </div>
+    brand_name: ordrd
+    default_space: workspaces
+    hidden_result_tabs: cdes
+    login_title: RENCI AI Sandbox Test Workspaces
+    meta:
+      title: ORDR(D)-Staging
+      description: Clinical data research platform
+    support:
+      help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9
+      user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
+    securityContext:
+      runAsUser: 1002160004
+    workspaces:
+      enabled: "true"

@@ -141,10 +141,21 @@ searchBootstrap:
       repository: registry.k8s.io/kubectl
       tag: v1.31.0
       pullPolicy: IfNotPresent
+    # On OpenShift, set podSecurityContext.enabled and securityContext.enabled
+    # to false so the SCC can allocate IDs from the namespace's range. A null
+    # from a parent chart does not remove these defaults.
     podSecurityContext:
+      # -- Render the search bootstrap pod's securityContext. The remaining
+      # keys are passed through as the pod securityContext.
+      enabled: true
       seccompProfile:
         type: RuntimeDefault
     securityContext:
+      # -- Render the search-bootstrap container's securityContext. The
+      # remaining keys are passed through as the container securityContext.
+      enabled: true
+      # curlimages/curl names its user (curl_user) rather than giving a UID, so
+      # runAsNonRoot needs an explicit numeric UID outside OpenShift.
       runAsUser: 100
       runAsNonRoot: true
       allowPrivilegeEscalation: false

@@ -1,6 +1,6 @@
 # helx-ldap
 
-![Version: 0.1.6](https://img.shields.io/badge/Version-0.1.6-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.6.9](https://img.shields.io/badge/AppVersion-2.6.9-informational?style=flat-square)
+![Version: 0.2.1](https://img.shields.io/badge/Version-0.2.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 2.6.9](https://img.shields.io/badge/AppVersion-2.6.9-informational?style=flat-square)
 
 HeLx LDAP deployment and configuration
 
@@ -25,10 +25,12 @@ HeLx LDAP deployment and configuration
 | configuration.image.tag | string | `""` |  |
 | configuration.job.activeDeadlineSeconds | int | `300` |  |
 | configuration.job.backoffLimit | int | `6` |  |
+| configuration.job.podSecurityContext.enabled | bool | `true` | Render the configuration pod's securityContext. The remaining keys are passed through as the pod securityContext. |
 | configuration.job.podSecurityContext.fsGroup | int | `1001` |  |
 | configuration.job.podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | configuration.job.securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | configuration.job.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
+| configuration.job.securityContext.enabled | bool | `true` | Render the configuration container's securityContext. The remaining keys are passed through as the container securityContext. |
 | configuration.job.securityContext.runAsGroup | int | `1001` |  |
 | configuration.job.securityContext.runAsNonRoot | bool | `true` |  |
 | configuration.job.securityContext.runAsUser | int | `1001` |  |
@@ -39,7 +41,7 @@ HeLx LDAP deployment and configuration
 | openldap.env.LDAP_ALLOW_ANON_BINDING | string | `"yes"` |  |
 | openldap.fullnameOverride | string | `"openldap"` |  |
 | openldap.global.existingSecret | string | `"openldap-credentials"` | Secret name consumed by the upstream OpenLDAP chart. This is the fixed target name for each credentials ownership mode. In existingSecret mode it must match secret.existingSecret; in externalSecret mode it must match secret.externalSecret.targetName when that value is set. |
-| openldap.global.ldapDomain | string | `"openldap"` |  |
+| openldap.global.ldapDomain | string | `"example.org"` |  |
 | openldap.ltb-passwd.enabled | bool | `false` |  |
 | openldap.migration.enabled | bool | `false` | Enable the one-time existing HeLx LDAP PVC migration during a Helm upgrade. The migration hook stops and replaces the old StatefulSet controller; it does not copy or delete the PVC. |
 | openldap.migration.image.pullPolicy | string | `"IfNotPresent"` | Image pull policy for the migration hook. |

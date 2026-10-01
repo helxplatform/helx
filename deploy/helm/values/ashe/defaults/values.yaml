@@ -1,0 +1,273 @@
+appstore:
+  ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
+  djangoSettings: # CHANGEME
+  django:
+    ALLOW_SAML_LOGIN: "true"
+    EMAIL_HOST_USER: appstore@renci.org
+  gunicorn:
+    workers: 2
+  fetcherImage:
+    repository: containers.renci.org/helxplatform/url-fetch
+  imagePostgresql:
+    registry: containers.renci.org
+    repository: helxplatform/bitnami-postgresql
+    tag: 17.5.0-debian-12-r18
+  ldap:
+    enabled: true
+  postgresql:
+    image:
+      registry: containers.renci.org
+      repository: helxplatform/third-party/bitnami-postgresql
+      tag: 17.5.0-debian-12-r18
+      shmVolume:
+        chmod:
+          enabled: false
+    securityContext:
+      enabled: false
+      runAsUser: # CHANGEME
+    primary:
+      containerSecurityContext:
+        enabled: false
+        runAsUser: # CHANGEME
+      podSecurityContext:
+        enabled: false
+        fsGroup: null
+        runAsUser: # CHANGEME
+      resources:
+        limits:
+          cpu: 2
+          memory: 1Gi
+        requests:
+          cpu: 250m
+          memory: 256Mi
+    volumePermissions:
+      enabled: false
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 1.5Gi
+    requests:
+      cpu: 250m
+      memory: 512Mi
+  saml:
+    ASSERTION_URL:  # CHANGEME
+    ENTITY_ID:      # CHANGEME
+    AUTHORITY_URL: https://sso.unc.edu/metadata/unc
+    IDP_ENTITY_ID: https://sso.unc.edu/idp
+    PROVIDER_NAME: UNC Chapel Hill Single Sign-On
+    PROVIDER_SLUG: unc
+    cache:
+      FETCH_INTERVAL: 3600000
+      enabled: true
+      storageSize: 50M
+  securityContext:
+    fsGroup: null
+    runAsGroup: null
+    runAsUser: # CHANGEME
+  tycho:
+    enableInitContainer: true
+    enableTrashCli: true
+    externalAppRegistryEnabled: true
+    externalAppRegistryRepo: # CHANGEME
+    externalAppRegistryBranch: # CHANGEME
+    init:
+      resources:
+        cpus: 250m
+        memory: 250Mi
+    initImageRepository: containers.renci.org/helxplatform/third-party/busybox
+    initImageTag: latest
+    initRunAsNobodyGroup: # CHANGEME
+    initRunAsNobodyUser: # CHANGEME
+    initRunAsUser: # CHANGEME
+    runAsUser: # CHANGEME
+    fsGroup: # CHANGEME
+  userStorage:
+    createPVC: true
+  security:
+    isolatedApps: true
+    appEgressAllowedPods:
+      - app.kubernetes.io/name: openldap-stack-ha
+    dnsPodSelector:
+      dns.operator.openshift.io/daemonset-dns: default
+appstore-prepuller:
+  appRegistry:
+    repo: # CHANGEME
+    branch: # CHANGEME
+    brand: # CHANGEME
+  controller:
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+appstore-sockets:
+  securityContext:
+    runAsUser: # CHANGEME
+global:
+  imagePullSecrets:
+  - renci-registry-creds
+  imageRegistry: ""
+helx-ldap:
+  # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+  # We can do the same thing in other services if we take the time to implement it similarly.
+  openldap:
+    podSecurityContext:
+      enabled: false
+    containerSecurityContext:
+      enabled: false
+  configuration:
+    job:
+      podSecurityContext:
+        enabled: false
+      securityContext:
+        enabled: false
+ldap-sync:
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  searchBootstrap:
+    id: get-groups
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:internal:*))'
+    baseDN: ou=groups,dc=unc,dc=edu
+    job:
+      # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+      podSecurityContext:
+        enabled: false
+      securityContext:
+        enabled: false
+  config:
+    hooks:
+      - args:
+        - --baseGid=1025
+        - --baseGroup=helx-users
+        image:
+          repository: containers.renci.org/helxplatform/unc-group-x
+          tag: v2.3.2
+        name: unc-group-x
+        url: http://localhost:5001/hook
+    source:
+      url: "ldap://ldap.unc.edu/"
+      bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
+      # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
+      bindPassword: ""
+      baseDN: "dc=unc,dc=edu"
+    target:
+      url: "ldap://openldap/"
+      bindDN: "cn=admin,dc=example,dc=org"
+      # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
+      bindPassword: ""
+      baseDN: "dc=example,dc=org"
+    plugins:
+      # Creates a PVC in the release namespace for every synced group
+      # entry. When enabled, the chart also installs a Role/RoleBinding
+      # granting the service account get/list/create on PVCs.
+      pvcGroup:
+        enabled: true
+        size: 10Gi
+        accessModes:
+          - ReadWriteMany
+pod-reaper:
+  reapers:
+    long-running-apps:
+      max_duration: 8h
+      require_label_values: jupyter-ai-notebook
+    short-running-apps:
+      max_duration: 3h
+      require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
+resty:
+  enabled: true
+  SSL: {}
+  # artifactCache:
+  #   enabled: true
+  dnsResolver: 172.30.0.10
+  ingress:
+    # With no TLS Secret the chart renders `tls: - {}`; OpenShift only turns
+    # that into a Route using the router's default certificate when this is set.
+    annotations:
+      route.openshift.io/termination: edge
+    create: true
+    ingressClassName: openshift-campusapps-ingress-controller
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  service:
+    serverName: # CHANGEME
+ui:
+  config:
+    appstore_asset_base_url: # CHANGEME
+    appstore_asset_branch: develop
+    brand_description:
+      html: # CHANGEME
+    brand_name: # CHANGEME
+    login_title: # CHANGEME
+    meta:
+      title: # CHANGEME
+    support:
+      faqs_url: ""
+      help_portal_url: # CHANGEME
+      user_guide_url: # CHANGEME
+    workspaces:
+      enabled: "true"
+    search:
+      enabled: "false"
+      url: null
+  resources:
+    limits:
+      cpu: 1
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  securityContext:
+    fsGroup: null
+    runAsGroup: 0
+    runAsUser: # CHANGEME
+  service:
+    annotations:
+      getambassador.io/config: |
+        ---
+        apiVersion: ambassador/v1
+        kind: Mapping
+        name: helx-ui
+        prefix: /helx
+        service: helx-ui:80
+        rewrite: /helx
+        cors:
+          origins: "*"
+          methods: POST, OPTIONS
+          headers:
+          - Content-Type
+        ---
+        apiVersion: ambassador/v1
+        kind: Mapping
+        name: ui-static
+        prefix: /static/frontend
+        service: helx-ui:80
+        rewrite: /static/frontend
+        cors:
+          origins: "*"
+          methods: POST, OPTIONS
+          headers:
+          - Content-Type
+user-mutator:
+  webhook:
+    enabled: false
+  config:
+    features:
+      ldap:
+        host: openldap
+        port: 389
+        username: "cn=admin,dc=example,dc=org"
+        user_base_dn: "ou=users,dc=example,dc=org"
+        group_base_dn: "ou=groups,dc=example,dc=org"

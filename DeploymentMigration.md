@@ -205,10 +205,11 @@ replaced with a new random value. Keep `pgadmin-env` in the namespace and verify
 that `PGADMIN_DEFAULT_PASSWORD` exists before upgrading. The password is the
 only preserved key; all other pgAdmin environment settings, including
 `PGADMIN_DEFAULT_EMAIL`, `HELX_DB_HOSTNAME`, and `PGADMIN_LISTEN_PORT`, come
-from `appstore.pgadmin.secret.values` on every upgrade. The optional
-`PGADMIN_CONFIG_SERVER_MODE` and `PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED`
-settings default to `"False"` in chart-managed mode and can be overridden in
-the same values block.
+from `appstore.pgadmin.secret.values` on every upgrade. In chart-managed mode,
+any of these left unset take chart defaults: `PGADMIN_DEFAULT_EMAIL` is
+`user@domain.com`, `HELX_DB_HOSTNAME` is empty, `PGADMIN_DISABLE_POSTFIX` is
+`"true"`, `PGADMIN_LISTEN_PORT` is `"80"`, and `PGADMIN_CONFIG_SERVER_MODE` and
+`PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED` are `"False"`.
 
 This behavior is independent of `appstore.secret.migration.enabled`; the
 `pgadmin-env` lookup is handled by its own template. The generated password is

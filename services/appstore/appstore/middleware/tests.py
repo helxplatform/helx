@@ -183,6 +183,34 @@ class LdapGroupMemberRetryTests(SimpleTestCase):
             self.assertTrue(AllowWhiteListedUserOnly._ldap_group_member(self.user))
         self.assertEqual(factory.call_count, 1)
 
+    def test_multiple_matches_are_denied_without_retry(self):
+        # e.g. the user's email is another entry's mail attribute.
+        conn = self._live_conn()
+        conn.entries = [
+            Mock(entry_dn="uid=tcheek9,ou=users,dc=example,dc=org"),
+            Mock(entry_dn="uid=other,ou=users,dc=example,dc=org"),
+        ]
+        result, connects = self._check([conn])
+        self.assertFalse(result)
+        self.assertEqual(connects, 1)
+        conn.compare.assert_not_called()
+
+    def _filter_for(self, username, email):
+        self.user = Mock(username=username, email=email)
+        conn = self._live_conn()
+        self._check([conn])
+        return conn.search.call_args.args[1]
+
+    def test_filter_for_normal_user(self):
+        self.assertEqual(self._filter_for("tcheek9", "tcheek9@example.org"),
+                         "(|(mail=tcheek9@example.org)(uid=tcheek9))")
+
+    def test_filter_escapes_special_characters(self):
+        # Unescaped, "*" would give (uid=*) and match every user, and ")("
+        # would add clauses of its own.
+        self.assertEqual(self._filter_for("*", "x)(uid=*"),
+                         "(|(mail=x\\29\\28uid=\\2a)(uid=\\2a))")
+
     @patch.dict(os.environ, {"LDAP_URI": ""})
     def test_ldap_disabled_does_not_retry(self):
         result, connects = self._check([])

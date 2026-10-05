@@ -11,6 +11,7 @@ from django.core.mail import send_mail
 from smtplib import SMTPSenderRefused, SMTPResponseException
 
 from ldap3 import Server, Connection, SUBTREE  # NEW
+from ldap3.utils.conv import escape_filter_chars
 from core.models import AuthorizedUser
 
 
@@ -70,7 +71,10 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
             return False
 
         base   = os.getenv("LDAP_SEARCH_BASE", group_dn.split(",", 1)[1])
-        flt    = f"(|(mail={user.email})(uid={user.username}))"
+        # Escape so that values like "*" or ")(" match literally instead of
+        # changing the filter, e.g. (uid=*) would match every user.
+        flt    = (f"(|(mail={escape_filter_chars(user.email)})"
+                  f"(uid={escape_filter_chars(user.username)}))")
 
         conn = None
         for attempt in range(cls.LDAP_RETRIES + 1):
@@ -91,6 +95,13 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
                 ok = conn.search(base, flt, SUBTREE, attributes=[])
                 logger.debug("[LDAP] Search ok=%s; hits=%s", ok, len(conn.entries))
                 if not ok or not conn.entries:
+                    return False
+                # mail and uid can match different entries; checking whichever
+                # came first could authorize the user as someone else.
+                if len(conn.entries) > 1:
+                    logger.warning("[LDAP] %s / %s matched %d entries (%s); denying",
+                                   user.username, user.email, len(conn.entries),
+                                   ", ".join(e.entry_dn for e in conn.entries))
                     return False
                 user_dn = conn.entries[0].entry_dn
                 logger.debug("[LDAP] Resolved user_dn=%s", user_dn)

@@ -24,6 +24,14 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
     # Retries after the first LDAP attempt, each on a fresh connection.
     LDAP_RETRIES = 2
 
+    # Seconds. An attempt stops at its first unanswered step, so the worst case
+    # is about (connect + receive) * (LDAP_RETRIES + 1) = 24s, inside gunicorn's
+    # default 30s worker timeout. Without these, an unreachable server blocks
+    # on the OS TCP timeout (minutes) and gunicorn kills the worker. ldap3
+    # rejects a non-integer receive_timeout.
+    LDAP_CONNECT_TIMEOUT = 3
+    LDAP_RECEIVE_TIMEOUT = 5
+
     @staticmethod
     @lru_cache(maxsize=1)
     def _ldap_conn():
@@ -38,8 +46,10 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
 
         logger.debug("[LDAP] Connecting to %s (bind_dn=%s)", uri, bind_dn or "anonymous")
         try:
-            server = Server(uri, get_info=None)
-            conn   = Connection(server, user=bind_dn, password=bind_pw, auto_bind=True)
+            cls    = AllowWhiteListedUserOnly
+            server = Server(uri, get_info=None, connect_timeout=cls.LDAP_CONNECT_TIMEOUT)
+            conn   = Connection(server, user=bind_dn, password=bind_pw, auto_bind=True,
+                                receive_timeout=cls.LDAP_RECEIVE_TIMEOUT)
             logger.debug("[LDAP] Connection established. Server info: %s", server)
             return conn
         except Exception as exc:                               # noqa: BLE001

@@ -1,4 +1,6 @@
 import os
+import socket
+import time
 
 from django.conf import settings
 from django.contrib.auth.models import User, Group
@@ -186,3 +188,48 @@ class LdapGroupMemberRetryTests(SimpleTestCase):
         result, connects = self._check([])
         self.assertFalse(result)
         self.assertEqual(connects, 0)
+
+
+class LdapTimeoutTests(SimpleTestCase):
+    """ Test that an unresponsive LDAP server cannot hang a request. """
+
+    def setUp(self):
+        AllowWhiteListedUserOnly._ldap_conn.cache_clear()
+        self.user = Mock(username="tcheek9", email="tcheek9@example.org")
+
+    def tearDown(self):
+        AllowWhiteListedUserOnly._ldap_conn.cache_clear()
+
+    @patch.dict(os.environ, {"LDAP_URI": "ldap://openldap"})
+    def test_timeouts_passed_to_ldap3(self):
+        with patch("middleware.filter_whitelist_middleware.Server") as server, \
+                patch("middleware.filter_whitelist_middleware.Connection") as connection:
+            AllowWhiteListedUserOnly._ldap_conn()
+        self.assertEqual(server.call_args.kwargs["connect_timeout"],
+                         AllowWhiteListedUserOnly.LDAP_CONNECT_TIMEOUT)
+        self.assertEqual(connection.call_args.kwargs["receive_timeout"],
+                         AllowWhiteListedUserOnly.LDAP_RECEIVE_TIMEOUT)
+
+    def test_unresponsive_server_gives_up(self):
+        # The kernel completes the TCP handshake for a listening socket even
+        # though nothing ever accepts or answers, like a hung slapd.
+        silent = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(8)
+        self.addCleanup(silent.close)
+        port = silent.getsockname()[1]
+
+        env = {
+            "LDAP_URI": f"ldap://127.0.0.1:{port}",
+            "LDAP_GROUP_DN": "cn=users,ou=groups,dc=example,dc=org",
+        }
+        with patch.dict(os.environ, env), \
+                patch.object(AllowWhiteListedUserOnly, "LDAP_RECEIVE_TIMEOUT", 1):
+            start = time.monotonic()
+            result = AllowWhiteListedUserOnly._ldap_group_member(self.user)
+            elapsed = time.monotonic() - start
+
+        self.assertFalse(result)
+        # Three attempts, each ending on the receive timeout.
+        self.assertGreaterEqual(elapsed, 2.5)
+        self.assertLess(elapsed, 10)

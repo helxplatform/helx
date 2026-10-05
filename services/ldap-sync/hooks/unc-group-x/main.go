@@ -14,9 +14,6 @@ import (
 
 // Global variables for the hook service.
 var (
-	// pidUidMap maintains the mapping from pid to uid
-	pidUidMap = make(map[string]string)
-
 	// baseGid is obtained from a flag and used when processing UNC Users.
 	baseGid string
 
@@ -231,14 +228,13 @@ func processORDRDGroup(req HookRequest) HookResponse {
 //   - Use baseGid (obtained from flag) for all gidNumber values.
 //   - Populate the transformed content and create a derived search based
 //     on uidNumber.
-//   - Update the global pidUidMap using the user's pid and uid.
+//   - Publish the user's pid-to-uid mapping as a pidUidMap binding.
 func processUNCUser(req HookRequest) HookResponse {
 	uid, ok := req.Content["uid"].(string)
 	pid, _ := req.Content["pid"].(string)
 	if !ok || uid == "" {
 		if pid != "" {
 			log.Printf("UNC User: uid not found or invalid; binding marked null for pid %s", pid)
-			delete(pidUidMap, pid)
 		} else {
 			log.Println("UNC User: uid not found or invalid; pid missing")
 		}
@@ -269,9 +265,11 @@ func processUNCUser(req HookRequest) HookResponse {
 		"uid":           uid,
 		"uidNumber":     req.Content["uidNumber"],
 	}
-	// Only include groups when the destination schema has helxUser loaded.
+	// Only include helxUser attributes when the destination schema has it loaded.
+	// user-mutator copies supplementalGroups into the pod security context.
 	if hasHelxUser() {
 		newContent["groups"] = []interface{}{baseGroup}
+		newContent["supplementalGroups"] = []interface{}{"0"}
 	}
 
 	transformed := map[string]interface{}{
@@ -309,10 +307,9 @@ func processUNCUser(req HookRequest) HookResponse {
 		transformedEntries = append(transformedEntries, baseGroupEntry)
 	}
 
-	// Update the pidUidMap based on the user's pid.
+	// Publish the pid-to-uid mapping for ldap-sync to resolve $pidUidMap templates.
 	bindings := map[string]*string{}
 	if pid != "" {
-		pidUidMap[pid] = uid
 		bindings[fmt.Sprintf("pidUidMap.%s", pid)] = &uid
 	}
 

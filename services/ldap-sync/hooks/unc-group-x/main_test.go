@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -15,7 +17,6 @@ import (
 // ---------------------------------------------------------------------------
 
 func resetHookState() {
-	pidUidMap = make(map[string]string)
 	baseGid = "200"
 	baseGroup = "users"
 }
@@ -134,11 +135,70 @@ func TestProcessUNCUser_Basic(t *testing.T) {
 	if resp.Bindings["pidUidMap.p1"] == nil || *resp.Bindings["pidUidMap.p1"] != "alice" {
 		t.Errorf("binding pidUidMap.p1 not set correctly")
 	}
+}
 
-	// pidUidMap should be updated
-	if pidUidMap["p1"] != "alice" {
-		t.Errorf("pidUidMap not updated; got %q", pidUidMap["p1"])
+func TestProcessUNCUser_SupplementalGroups(t *testing.T) {
+	resetHookState()
+	saved := userObjectClasses
+	t.Cleanup(func() { userObjectClasses = saved })
+
+	req := HookRequest{
+		DN:      "pid=p1,ou=people,dc=unc,dc=edu",
+		Content: map[string]interface{}{"uid": "alice", "pid": "p1", "uidNumber": "1001"},
 	}
+	userContent := func() map[string]interface{} {
+		resp := processUNCUser(req)
+		content, _ := resp.Transformed[0]["content"].(map[string]interface{})
+		return content
+	}
+
+	userObjectClasses = []string{"top", "inetOrgPerson", "posixAccount", "helxUser"}
+	got, _ := userContent()["supplementalGroups"].([]interface{})
+	if len(got) != 1 || got[0] != "0" {
+		t.Errorf("with helxUser, supplementalGroups = %v; want [0]", got)
+	}
+
+	// supplementalGroups is defined by the helxUser schema, so it must not be
+	// sent to destinations without it.
+	userObjectClasses = []string{"top", "inetOrgPerson", "posixAccount"}
+	if v, ok := userContent()["supplementalGroups"]; ok {
+		t.Errorf("without helxUser, supplementalGroups should be absent; got %v", v)
+	}
+}
+
+// ldap-sync posts every user in a group to the hook at once, so the handler
+// must be safe for concurrent requests. Shared state written per request used
+// to crash the hook with "fatal error: concurrent map writes".
+func TestHookHandler_ConcurrentUsers(t *testing.T) {
+	resetHookState()
+	e := echo.New()
+
+	const users = 50
+	var wg sync.WaitGroup
+	for i := 0; i < users; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			body := fmt.Sprintf(`{"dn":"pid=p%d,ou=people,dc=unc,dc=edu","content":{"pid":"p%d","uid":"user%d","uidNumber":"%d"}}`, i, i, i, 1000+i)
+			req := httptest.NewRequest(http.MethodPost, "/hook", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			if err := hookHandler(e.NewContext(req, rec)); err != nil {
+				t.Errorf("hookHandler error: %v", err)
+				return
+			}
+			var resp HookResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Errorf("decode response: %v", err)
+				return
+			}
+			key := fmt.Sprintf("pidUidMap.p%d", i)
+			if got := resp.Bindings[key]; got == nil || *got != fmt.Sprintf("user%d", i) {
+				t.Errorf("binding %s = %v; want user%d", key, got, i)
+			}
+		}(i)
+	}
+	wg.Wait()
 }
 
 func TestProcessUNCUser_MissingUID(t *testing.T) {

@@ -49,9 +49,9 @@ ui:
     brand_name: ordrd
     default_space: workspaces
     hidden_result_tabs: cdes
-    login_title: RENCI AI Sandbox Test Workspaces
+    login_title: RENCI eboeth Test Workspaces
     meta:
-      title: ORDR(D)-Staging
+      title: eboeth
       description: Clinical data research platform
     support:
       help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9

@@ -10,6 +10,17 @@ appstore-prepuller:
   appRegistry:
     branch: ordrd-staging
     brand: ordrd
+ldap-sync:
+  config:
+    hooks:
+      - args:
+          - --baseGid=1025
+          - --baseGroup=helx-users
+        image:
+          repository: containers.renci.org/helxplatform/unc-group-x
+          tag: sterling-ldapfix-1
+        name: unc-group-x
+        url: http://localhost:5001/hook
 resty:
   SSL:
     nginxTLSSecret: helx-test-apps-renci-org-tls

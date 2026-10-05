@@ -97,7 +97,6 @@ resty:
   SSL:
     nginxTLSSecret: # CHANGEME
   enabled: true
-  dnsResolver: 10.0.0.10
   ingress:
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt

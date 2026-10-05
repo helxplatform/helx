@@ -21,7 +21,7 @@ appstore:
     initRunAsNobodyGroup: 524288
     initRunAsNobodyUser: 524288
     initRunAsUser: 524288
-    runAsUser: 1002160002
+    runAsUser: 1025
     fsGroup: 1025
 appstore-prepuller:
   appRegistry:

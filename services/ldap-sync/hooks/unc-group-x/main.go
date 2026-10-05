@@ -149,7 +149,6 @@ func processORDRDGroup(req HookRequest) HookResponse {
 	newMembers := []string{}
 	filterParts := []string{}
 	dependencies := []string{}
-	memberPids := []string{} // track pids so we can patch each member's groups attribute
 
 	for _, m := range memberSlice {
 		memberStr, ok := m.(string)
@@ -161,7 +160,6 @@ func processORDRDGroup(req HookRequest) HookResponse {
 			continue
 		}
 		pid := strings.TrimPrefix(parts[0], "pid=")
-		memberPids = append(memberPids, pid)
 		filterParts = append(filterParts, fmt.Sprintf("(pid=%s)", pid))
 		dnTemplate := fmt.Sprintf("uid=$pidUidMap.%s,ou=users,dc=example,dc=org", pid)
 		newMembers = append(newMembers, dnTemplate)
@@ -195,26 +193,11 @@ func processORDRDGroup(req HookRequest) HookResponse {
 		"content": newContent,
 	}
 
-	// Emit one extra transformed entry per member that patches their groups attribute.
-	// Because groups is a merge attribute in the main service, these accumulate correctly
-	// (e.g. a user in both "users" and "eagle" ends up with groups: [users, eagle]).
-	// Only emitted when helxUser is in the objectClass list; otherwise the destination
-	// LDAP schema won't have the groups attribute type defined.
-	transformedEntries := []map[string]interface{}{transformed}
-	if hasHelxUser() {
-		for _, pid := range memberPids {
-			userGroupPatch := map[string]interface{}{
-				"dn": fmt.Sprintf("uid=$pidUidMap.%s,ou=users,dc=example,dc=org", pid),
-				"content": map[string]interface{}{
-					"groups": []interface{}{groupname},
-				},
-			}
-			transformedEntries = append(transformedEntries, userGroupPatch)
-		}
-	}
-
+	// Membership lives in the group's member attribute (and memberOf on the
+	// user). The helxUser schema defines no groups attribute, so the hook does
+	// not write one onto users.
 	return HookResponse{
-		Transformed:  transformedEntries,
+		Transformed:  []map[string]interface{}{transformed},
 		Derived:      derived,
 		Dependencies: dependencies,
 		Bindings:     map[string]*string{},
@@ -268,7 +251,6 @@ func processUNCUser(req HookRequest) HookResponse {
 	// Only include helxUser attributes when the destination schema has it loaded.
 	// user-mutator copies supplementalGroups into the pod security context.
 	if hasHelxUser() {
-		newContent["groups"] = []interface{}{baseGroup}
 		newContent["supplementalGroups"] = []interface{}{"0"}
 	}
 
@@ -402,8 +384,9 @@ func extractCN(dn string) string {
 }
 
 // hasHelxUser reports whether "helxUser" is present in the configured
-// userObjectClasses. The groups attribute is only defined in the helxUser
-// schema extension, so it must not be written to destinations that lack it.
+// userObjectClasses. Attributes such as supplementalGroups are only defined in
+// the helxUser schema extension, so they must not be written to destinations
+// that lack it.
 func hasHelxUser() bool {
 	for _, oc := range userObjectClasses {
 		if oc == "helxUser" {

@@ -17,7 +17,7 @@ version: 6.0.3
 # number should be incremented each time you make changes to the application.
 # 4.4.1 is the released appstore image carrying the Ambassador-removal changes
 # (private_route resolver, APP_ROUTING_MODE, SECURE_PROXY_SSL_HEADER).
-appVersion: 4.4.2
+appVersion: 4.4.3
 dependencies:
   - name: helx-common
     version: "0.2.0"

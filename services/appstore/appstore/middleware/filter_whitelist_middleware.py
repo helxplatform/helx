@@ -21,6 +21,9 @@ logging.basicConfig(format=FORMAT)
 
 class AllowWhiteListedUserOnly(MiddlewareMixin):
 
+    # Retries after the first LDAP attempt, each on a fresh connection.
+    LDAP_RETRIES = 2
+
     @staticmethod
     @lru_cache(maxsize=1)
     def _ldap_conn():
@@ -45,38 +48,67 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
 
     @classmethod
     def _ldap_group_member(cls, user):
-        """Return True when user is in LDAP_GROUP_DN; log every step."""
-        conn     = cls._ldap_conn()
+        """Return True when user is in LDAP_GROUP_DN; log every step.
+
+        The connection is cached per worker, so the server dropping it would
+        otherwise fail every check until the worker restarts. On a failed
+        connect, search, or compare, discard the cached connection and retry.
+        """
         group_dn = os.getenv("LDAP_GROUP_DN")
-        if not conn:
-            logger.debug("[LDAP] No connection – skipping LDAP checks")
-            return False
         if not group_dn:
             logger.debug("[LDAP] LDAP_GROUP_DN unset – skipping LDAP checks")
             return False
 
         base   = os.getenv("LDAP_SEARCH_BASE", group_dn.split(",", 1)[1])
         flt    = f"(|(mail={user.email})(uid={user.username}))"
-        logger.debug("[LDAP] Searching base=%s filter=%s", base, flt)
 
-        try:
-            ok = conn.search(base, flt, SUBTREE, attributes=[])
-            logger.debug("[LDAP] Search ok=%s; hits=%s", ok, len(conn.entries))
-            if not ok or not conn.entries:
-                return False
-            user_dn = conn.entries[0].entry_dn
-            logger.debug("[LDAP] Resolved user_dn=%s", user_dn)
-        except Exception as exc:                               # noqa: BLE001
-            logger.error("[LDAP] Search failed: %s", exc)
-            return False
+        conn = None
+        for attempt in range(cls.LDAP_RETRIES + 1):
+            if attempt:
+                logger.debug("[LDAP] Retrying with a fresh connection (%d of %d)",
+                             attempt, cls.LDAP_RETRIES)
+                cls._ldap_discard_conn(conn)
 
-        try:
-            result = conn.compare(group_dn, "member", user_dn)
-            logger.debug("[LDAP] compare(%s member %s) → %s", group_dn, user_dn, result)
-            return result
-        except Exception as exc:                               # noqa: BLE001
-            logger.error("[LDAP] Compare failed: %s", exc)
-            return False
+            conn = cls._ldap_conn()
+            if not conn:
+                if not os.getenv("LDAP_URI"):
+                    logger.debug("[LDAP] No connection – skipping LDAP checks")
+                    return False
+                continue                                       # connect failed
+
+            logger.debug("[LDAP] Searching base=%s filter=%s", base, flt)
+            try:
+                ok = conn.search(base, flt, SUBTREE, attributes=[])
+                logger.debug("[LDAP] Search ok=%s; hits=%s", ok, len(conn.entries))
+                if not ok or not conn.entries:
+                    return False
+                user_dn = conn.entries[0].entry_dn
+                logger.debug("[LDAP] Resolved user_dn=%s", user_dn)
+            except Exception as exc:                           # noqa: BLE001
+                logger.error("[LDAP] Search failed: %s", exc)
+                continue
+
+            try:
+                result = conn.compare(group_dn, "member", user_dn)
+                logger.debug("[LDAP] compare(%s member %s) → %s", group_dn, user_dn, result)
+                return result
+            except Exception as exc:                           # noqa: BLE001
+                logger.error("[LDAP] Compare failed: %s", exc)
+                continue
+
+        logger.error("[LDAP] Giving up after %d retries", cls.LDAP_RETRIES)
+        cls._ldap_discard_conn(conn)
+        return False
+
+    @classmethod
+    def _ldap_discard_conn(cls, conn):
+        """Close and forget the cached connection so the next call reconnects."""
+        cls._ldap_conn.cache_clear()
+        if conn:
+            try:
+                conn.unbind()
+            except Exception:                                  # noqa: BLE001
+                pass
 
     def _get_response(self, request):
         """

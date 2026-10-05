@@ -345,7 +345,8 @@ pgadmin:
     #  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients; defaults to ""
     #  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container;
     #    defaults to "true"
-    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port; defaults to "80"
+    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port; defaults to "8080", which
+    #    must match the port in the pgAdmin app spec
     #  PGADMIN_CONFIG_SERVER_MODE: -- defaults to "False"
     #  PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: -- defaults to "False"
     #  PGADMIN_DEFAULT_PASSWORD: -- generated on install and preserved during

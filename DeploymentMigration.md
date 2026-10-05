@@ -208,7 +208,7 @@ only preserved key; all other pgAdmin environment settings, including
 from `appstore.pgadmin.secret.values` on every upgrade. In chart-managed mode,
 any of these left unset take chart defaults: `PGADMIN_DEFAULT_EMAIL` is
 `user@domain.com`, `HELX_DB_HOSTNAME` is empty, `PGADMIN_DISABLE_POSTFIX` is
-`"true"`, `PGADMIN_LISTEN_PORT` is `"80"`, and `PGADMIN_CONFIG_SERVER_MODE` and
+`"true"`, `PGADMIN_LISTEN_PORT` is `"8080"`, and `PGADMIN_CONFIG_SERVER_MODE` and
 `PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED` are `"False"`.
 
 This behavior is independent of `appstore.secret.migration.enabled`; the

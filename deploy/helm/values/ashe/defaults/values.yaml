@@ -67,7 +67,6 @@ appstore:
     runAsUser: # CHANGEME
   tycho:
     enableInitContainer: true
-    enableTrashCli: true
     externalAppRegistryEnabled: true
     externalAppRegistryRepo: # CHANGEME
     externalAppRegistryBranch: # CHANGEME
@@ -79,6 +78,8 @@ appstore:
     initImageTag: latest
     initRunAsNobodyGroup: # CHANGEME
     initRunAsNobodyUser: # CHANGEME
+    # Set to the same UID as runAsUser. The init container creates directories
+    # in the user's home (e.g. ~/.local/share) that the app must own.
     initRunAsUser: # CHANGEME
     runAsUser: # CHANGEME
     fsGroup: # CHANGEME

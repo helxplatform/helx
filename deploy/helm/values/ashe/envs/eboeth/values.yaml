@@ -20,7 +20,9 @@ appstore:
     externalAppRegistryBranch: ordrd-staging
     initRunAsNobodyGroup: 524288
     initRunAsNobodyUser: 524288
-    initRunAsUser: 524288
+    # Match runAsUser: the init container creates ~/.local/share, which the
+    # app must own to write in.
+    initRunAsUser: 1025
     runAsUser: 1025
     fsGroup: 1025
 appstore-prepuller:

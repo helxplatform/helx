@@ -154,17 +154,8 @@ ldap-sync:
       securityContext:
         enabled: false
   config:
-    hooks:
-      - args:
-        - --baseGid=1025
-        - --baseGroup=helx-users
-        image:
-          repository: containers.renci.org/helxplatform/unc-group-x
-          tag: v2.3.2
-        name: unc-group-x
-        url: http://localhost:5001/hook
     source:
-      url: "ldap://ldap.unc.edu/"
+      url: "ldaps://ldap.unc.edu/"
       bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
       # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
       bindPassword: ""

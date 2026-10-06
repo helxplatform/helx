@@ -83,6 +83,43 @@ global:
   imagePullSecrets:
   - renci-registry-creds
   - aisandboxrencitgt-creds
+ldap-sync:
+  searchBootstrap:
+    id: get-groups
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+    baseDN: ou=groups,dc=unc,dc=edu
+  config:
+    hooks:
+    - args:
+        - --baseGid=1025
+        - --baseGroup=helx-users
+      image:
+        repository: aisandboxrencitgt.azurecr.io/helxplatform/unc-group-x
+        tag: v2.4.1
+      name: unc-group-x
+      url: http://localhost:5001/hook
+    source:
+      url: "ldaps://ldap.unc.edu/"
+      bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
+      # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
+      bindPassword: ""
+      baseDN: "dc=unc,dc=edu"
+    target:
+      url: "ldap://openldap/"
+      bindDN: "cn=admin,dc=example,dc=org"
+      # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
+      bindPassword: ""
+      baseDN: "dc=example,dc=org"
+    plugins:
+      # Creates a PVC in the release namespace for every synced group
+      # entry. When enabled, the chart also installs a Role/RoleBinding
+      # granting the service account get/list/create on PVCs.
+      pvcGroup:
+        enabled: true
+        storageClass: azurefile
+        size: 10Gi
+        accessModes:
+          - ReadWriteMany
 pod-reaper:
   reapers:
     long-running-apps:
@@ -170,43 +207,6 @@ ui:
           methods: POST, OPTIONS
           headers:
           - Content-Type
-ldap-sync:
-  searchBootstrap:
-    id: get-groups
-    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
-    baseDN: ou=groups,dc=unc,dc=edu
-  config:
-    hooks:
-      - args:
-          - --baseGid=1025
-          - --baseGroup=helx-users
-        image:
-          repository: containers.renci.org/helxplatform/unc-group-x
-          tag: v2.3.2
-        name: unc-group-x
-        url: http://localhost:5001/hook
-    source:
-      url: "ldap://ldap.unc.edu/"
-      bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
-      # -- Deprecated compatibility input. Use secret.values.SOURCE_BIND_PASSWORD.
-      bindPassword: ""
-      baseDN: "dc=unc,dc=edu"
-    target:
-      url: "ldap://openldap/"
-      bindDN: "cn=admin,dc=example,dc=org"
-      # -- Deprecated compatibility input. Use secret.values.TARGET_BIND_PASSWORD.
-      bindPassword: ""
-      baseDN: "dc=example,dc=org"
-    plugins:
-      # Creates a PVC in the release namespace for every synced group
-      # entry. When enabled, the chart also installs a Role/RoleBinding
-      # granting the service account get/list/create on PVCs.
-      pvcGroup:
-        enabled: true
-        storageClass: azurefile
-        size: 10Gi
-        accessModes:
-          - ReadWriteMany
 user-mutator:
   config:
     features:

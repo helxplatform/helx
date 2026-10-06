@@ -172,7 +172,7 @@ config:
         - --baseGroup=helx-users
       image:
         repository: containers.renci.org/helxplatform/unc-group-x
-        tag: v2.3.2
+        tag: v2.4.1
       name: unc-group-x
       url: http://localhost:5001/hook
   hookRetry:

@@ -466,6 +466,59 @@ make helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace> \
   HELM_FLAGS="--dry-run --debug"
 ```
 
+#### Artifact Cache
+
+If deploying to an environment like ASHE, where the Github for `helx-apps` is
+not accessible, you can use the artifact cache to host `helx-apps` within your
+namespace. Get started by cloning the artifact-cache repo, installing the chart,
+and running `make archive`:
+
+```bash
+git clone https://github.com/helxplatform/artifact-cache
+cd artifact-cache
+helm install artifact-cache -n <namespace> ./chart
+set -a && source .env.sample && export NAMESPACE=<namespace>
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Before running the next command, make sure the actual `helx-apps` repo at
+`https://github.com/helxplatform/helx-apps.git` has a branch that contains the 
+context data you want to deploy, with a brand and the apps all the way you
+want them. Once that's the case, run this:
+
+```bash
+make archive
+```
+
+Then, add these lines to your environment's override values file:
+
+```yaml
+resty:
+  artifactCache:    # <------ 
+    enabled: true   # <------ 
+```
+
+and add change your `appstore:tycho:externalAppRegistryRepo:` and 
+`appstore-prepuller:appRegistry:repo:` values to be equal to:
+
+```yaml
+appstore:
+  tycho:
+    externalAppRegistryRepo: <your-app-base-url>/artifact/assets/helx-apps
+appstore-prepuller:
+  appRegistry:
+    repo: <your-app-base-url>/artifact/assets/helx-apps
+```
+
+Once those lines are added, you've deployed, and `make archive` has been run successfully,
+you should see the artifact cache enabled in the `helx` namespace. You might need to bounce
+the `appstore` pod for the changes to take effect. Note that any time you need to make changes
+to your `helx-apps` branch, you will need to run `make archive` again and bounce the `appstore`
+pod.
+
+
 #### Tearing down
 
 ```bash

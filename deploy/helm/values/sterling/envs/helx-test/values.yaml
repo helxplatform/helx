@@ -5,11 +5,11 @@ appstore:
     ASSERTION_URL: https://helx-test.apps.renci.org
     ENTITY_ID: https://helx-test.apps.renci.org/saml2_auth/acs/
   tycho:
-    externalAppRegistryBranch: helx-ai-sandbox-test-azure
+    externalAppRegistryBranch: ordrd-staging
 appstore-prepuller:
   appRegistry:
-    branch: helx-ai-sandbox-azure-NS
-    brand: ai_sandbox
+    branch: ordrd-staging
+    brand: ordrd
 resty:
   SSL:
     nginxTLSSecret: helx-test-apps-renci-org-tls
@@ -21,19 +21,19 @@ ui:
     appstore_asset_branch: develop
     brand_description:
       html: |
-        <a href="https://helxplatform.github.io/">HeLx</a> empowers researchers in
-        domains from plant genomics to neuroscience to work with their preferred
-        tools and apps in the cloud at scale without installation or other infrastructure concerns,
-        which has broad reaching benefits and can be applied in many domains.
-        <br />&nbsp;<br />
-        The AI Sandbox is a deployment of HeLx and has been stood up for researchers and students to use
-        and explore the capabilities of HeLx. This is the test deployment of the AI Sandbox.
-    brand_name: ai_sandbox
+        <div style="display:flex;flex-direction:column;align-items:center;"> <h4 style="max-width:450px;">
+          A platform for analysis of clinical data records
+        </h4> <p style="max-width:450px;">
+          The de-identified OMOP Research Data Repository, ORDR(D) for short,
+          is a joint effort between NC TraCS and RENCI focused on building
+          new health research-focused data warehousing at UNC.
+        </p> </div>
+    brand_name: ordrd
     default_space: workspaces
     hidden_result_tabs: cdes
-    login_title: RENCI AI Sandbox Test Workspaces
+    login_title: RENCI HeLx Test Workspaces
     meta:
-      title: RENCI AI Sandbox Test
+      title: RENCI HeLx Test
     search:
       enabled: "false"
       url: ""

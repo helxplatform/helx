@@ -340,12 +340,13 @@ pgadmin:
     mode: values
     # -- Key/value pairs for `pgadmin-env`; each key becomes an environment
     # variable in the launched pgAdmin application.
-    # Required values for `pgadmin-env`:
-    #  PGADMIN_DEFAULT_EMAIL: -- pgAdmin user email
-    #  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients
-    #  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container
-    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port
-    # Optional values for `pgadmin-env`:
+    # Keys the chart defaults when they are not set here:
+    #  PGADMIN_DEFAULT_EMAIL: -- pgAdmin user email; defaults to "user@domain.com"
+    #  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients; defaults to ""
+    #  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container;
+    #    defaults to "true"
+    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port; defaults to "8080", which
+    #    must match the port in the pgAdmin app spec
     #  PGADMIN_CONFIG_SERVER_MODE: -- defaults to "False"
     #  PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: -- defaults to "False"
     #  PGADMIN_DEFAULT_PASSWORD: -- generated on install and preserved during

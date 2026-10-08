@@ -8,7 +8,7 @@ appstore:
     externalAppRegistryBranch: helx-ai-sandbox-test-azure
 appstore-prepuller:
   appRegistry:
-    branch: helx-ai-sandbox-azure-NS
+    branch: helx-ai-sandbox-test-azure
     brand: ai_sandbox
 resty:
   SSL:
@@ -44,6 +44,8 @@ ui:
     workspaces:
       enabled: "true"
 user-mutator:
+  secret:
+    existingSecret: ""
   config:
     userProfiles:
       enabled: true

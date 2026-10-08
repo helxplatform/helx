@@ -51,3 +51,17 @@ Service-account name used by the controller.
 {{- define "appstore-prepuller.serviceAccountName" -}}
 {{ include "appstore-prepuller.fullname" . }}-controller
 {{- end }}
+
+{{/*
+Print a numeric ID as an integer. Helm reads numbers in values files as
+float64, which print in scientific notation from 1e6 up, so 1002160002 would
+become 1.002160002e+09. Anything that is not a float prints unchanged, so ""
+stays "".
+*/}}
+{{- define "appstore-prepuller.intValue" -}}
+{{- if kindIs "float64" . -}}
+{{- int64 . -}}
+{{- else -}}
+{{- . -}}
+{{- end -}}
+{{- end }}

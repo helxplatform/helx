@@ -694,6 +694,148 @@ func TestHandleEntry_DeterministicRace(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// dependencyState — binding that arrives while an entry is being reprocessed
+//
+// reprocessPending takes every pending entry out of d.pending before calling
+// handleEntry on it. A binding that arrives in that window runs its own
+// reprocessPending, finds nothing pending, and does nothing. If the in-flight
+// handleEntry then parks the entry using its older bindings snapshot, no later
+// binding update will ever reprocess it, and the unresolved template dependency
+// can never be marked synced. This stranded cn=users on a fresh install.
+// ---------------------------------------------------------------------------
+
+func TestHandleEntry_BindingDuringReprocessIsNotLost(t *testing.T) {
+	resetState(t)
+	ms := withMockStore(t)
+
+	alice := "uid=alice,ou=users,dc=example,dc=org"
+	bob := "uid=bob,ou=users,dc=example,dc=org"
+	members := []string{
+		"uid=$pidUidMap.p1,ou=users,dc=example,dc=org",
+		"uid=$pidUidMap.p2,ou=users,dc=example,dc=org",
+	}
+	group := &TransformedEntry{
+		DN: "cn=users,ou=groups,dc=example,dc=org",
+		Content: map[string]interface{}{
+			"member": []interface{}{members[0], members[1]},
+		},
+	}
+
+	// No bindings yet, so the group is parked. Use the global dependencyTracker
+	// because updateBindings reprocesses through it.
+	dependencyTracker.handleEntry(group, members, "get-groups")
+
+	// Stall the first reprocess of the group after it has taken its bindings
+	// snapshot, while the group is out of d.pending.
+	var calls atomic.Int32
+	inWindow := make(chan struct{})
+	release := make(chan struct{})
+	handleEntryWindowHook = func() {
+		if calls.Add(1) == 1 {
+			close(inWindow)
+			<-release
+		}
+	}
+	t.Cleanup(func() { handleEntryWindowHook = nil })
+
+	uid1, uid2 := "alice", "bob"
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		updateBindings(map[string]*string{"pidUidMap.p1": &uid1})
+	}()
+
+	select {
+	case <-inWindow:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the reprocess to enter the window")
+	}
+
+	// The last binding arrives while the group is in flight. Its reprocess
+	// finds nothing pending.
+	updateBindings(map[string]*string{"pidUidMap.p2": &uid2})
+
+	close(release)
+	<-done
+
+	if n := len(ms.entries()); n != 0 {
+		t.Fatalf("expected 0 writes before members are synced; got %d", n)
+	}
+
+	dependencyTracker.markSyncedAndRelease(alice, "", nil, "")
+	dependencyTracker.markSyncedAndRelease(bob, "", nil, "")
+
+	written := ms.entries()
+	if len(written) != 1 {
+		t.Fatalf("expected the group to be written once after its members synced; got %d writes", len(written))
+	}
+	got, _ := written[0].Content["member"].([]interface{})
+	if len(got) != 2 || got[0] != alice || got[1] != bob {
+		t.Errorf("expected members resolved to [%s %s]; got %v", alice, bob, written[0].Content["member"])
+	}
+}
+
+// A binding whose value changes while the entry is in flight strands it the
+// same way: the entry would be parked on a dependency resolved from the old
+// value, which never syncs.
+func TestHandleEntry_BindingChangeDuringReprocessIsNotLost(t *testing.T) {
+	resetState(t)
+	ms := withMockStore(t)
+
+	oldUID, newUID := "alice", "alice2"
+	updateBindings(map[string]*string{"pidUidMap.p1": &oldUID})
+
+	member := "uid=$pidUidMap.p1,ou=users,dc=example,dc=org"
+	group := &TransformedEntry{
+		DN:      "cn=users,ou=groups,dc=example,dc=org",
+		Content: map[string]interface{}{"member": []interface{}{member}},
+	}
+	dependencyTracker.handleEntry(group, []string{member}, "get-groups")
+
+	var calls atomic.Int32
+	inWindow := make(chan struct{})
+	release := make(chan struct{})
+	handleEntryWindowHook = func() {
+		if calls.Add(1) == 1 {
+			close(inWindow)
+			<-release
+		}
+	}
+	t.Cleanup(func() { handleEntryWindowHook = nil })
+
+	// An unrelated binding triggers the reprocess that stalls with p1=alice.
+	other := "bob"
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		updateBindings(map[string]*string{"pidUidMap.p9": &other})
+	}()
+
+	select {
+	case <-inWindow:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the reprocess to enter the window")
+	}
+
+	updateBindings(map[string]*string{"pidUidMap.p1": &newUID})
+
+	close(release)
+	<-done
+
+	newDN := "uid=alice2,ou=users,dc=example,dc=org"
+	dependencyTracker.markSyncedAndRelease(newDN, "", nil, "")
+
+	written := ms.entries()
+	if len(written) != 1 {
+		t.Fatalf("expected the group to be written once after %s synced; got %d writes", newDN, len(written))
+	}
+	got, _ := written[0].Content["member"].([]interface{})
+	if len(got) != 1 || got[0] != newDN {
+		t.Errorf("expected member resolved to %s; got %v", newDN, written[0].Content["member"])
+	}
+}
+
 // groupSlice extracts the groups attribute from a TransformedEntry as []string.
 func groupSlice(t *testing.T, e *TransformedEntry) []string {
 	t.Helper()

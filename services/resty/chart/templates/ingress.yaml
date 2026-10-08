@@ -30,12 +30,14 @@ spec:
 {{- end}}
 {{- if .Values.ingress.tls.enabled }}
   tls:
+  {{- if and .Values.service.serverName $tlsSecret }}
   - hosts:
-      - "{{ .Values.service.serverName }}"
-{{- if $tlsSecret }}
+    - "{{ .Values.service.serverName }}"
     secretName: "{{ $tlsSecret }}"
+  {{- else }}
+  - {}
+  {{- end }}
 {{- end }}
-{{- end}}
   rules:
   - host: "{{ .Values.service.serverName }}"
     http:
@@ -63,12 +65,14 @@ spec:
 {{- end}}
 {{- if .Values.ingress.tls.enabled }}
   tls:
+  {{- if and .Values.service.serverName $tlsSecret }}
   - hosts:
-      - "{{ .Values.service.serverName }}"
-{{- if $tlsSecret }}
+    - "{{ .Values.service.serverName }}"
     secretName: "{{ $tlsSecret }}"
+  {{- else }}
+  - {}
+  {{- end }}
 {{- end }}
-{{- end}}
   rules:
   - host: "{{ .Values.service.serverName }}"
     http:

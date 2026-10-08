@@ -29,6 +29,8 @@ def parse_init_run_as_user(value: str) -> int | None:
 
     An empty string means "let the platform choose", which OpenShift needs
     because its SCCs assign a UID from the namespace's range and reject root.
+    Elsewhere it breaks images whose USER is a name, since nothing supplies
+    the numeric UID that runAsNonRoot needs to verify.
     """
     if value == "":
         return None
@@ -40,7 +42,7 @@ def parse_init_run_as_user(value: str) -> int | None:
         ) from None
 
 
-INIT_RUN_AS_USER = parse_init_run_as_user(os.environ.get("PREPULLER_INIT_RUN_AS_USER", "0"))
+INIT_RUN_AS_USER = parse_init_run_as_user(os.environ.get("PREPULLER_INIT_RUN_AS_USER", "65534"))
 
 
 def fetch_image_list() -> list[dict]:
@@ -76,16 +78,18 @@ def build_init_containers(images: list[dict]) -> list[client.V1Container]:
         image = entry["image"]
         name = entry["name"]
 
-        # Run init containers as root by default to avoid "no users found"
-        # errors from images that define non-standard users (e.g. pgadmin).
-        # This is safe because the containers only execute "exit 0". Where
-        # root is forbidden, INIT_RUN_AS_USER is None and the UID is left
-        # for the platform to assign.
+        # Give init containers a numeric UID to avoid "no users found" errors
+        # from images whose USER is a name (e.g. pgadmin). The UID need not
+        # exist in the image, so it defaults to nobody rather than root.
+        # Where INIT_RUN_AS_USER is None the UID is left for the platform to
+        # assign. The containers only execute "exit 0", so they need no
+        # privileges; root is only allowed when asked for explicitly.
         run_as_user = entry.get("run_as_user", INIT_RUN_AS_USER)
-        security_context = (
-            client.V1SecurityContext(run_as_user=run_as_user)
-            if run_as_user is not None
-            else None
+        security_context = client.V1SecurityContext(
+            run_as_user=run_as_user,
+            run_as_non_root=run_as_user != 0,
+            allow_privilege_escalation=False,
+            capabilities=client.V1Capabilities(drop=["ALL"]),
         )
 
         containers.append(

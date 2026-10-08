@@ -58,7 +58,5 @@ ui:
     support:
       help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9
       user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
-    securityContext:
-      runAsUser: 1002160004
     workspaces:
       enabled: "true"

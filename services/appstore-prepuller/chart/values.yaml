@@ -32,9 +32,11 @@ daemonset:
   affinity: {}
   tolerations:
     - operator: "Exists"
-  # UID for the pull init containers. "" leaves it unset so the platform
-  # assigns one, which OpenShift needs because its SCCs reject root.
-  initRunAsUser: 0
+  # UID for the pull init containers. Any numeric UID avoids "no users found"
+  # errors from images whose USER is a name (e.g. pgadmin), and it need not
+  # exist in the image, so root is unnecessary. "" leaves it unset so the
+  # platform assigns one; only use that on OpenShift, whose SCCs reject root.
+  initRunAsUser: 65534
   pauseImage: registry.k8s.io/pause:3.9
   resources:
     requests:

@@ -54,8 +54,9 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | image.repository | string | `"containers.renci.org/helxplatform/appstore"` | repository where image is located |
 | image.tag | string | `nil` | Overrides the image tag whose default is the chart appVersion. Set to "" before release! |
 | imagePostgresql.pullPolicy | string | `"IfNotPresent"` | pull policy |
-| imagePostgresql.repository | string | `"containers.renci.org/bitnami/postgresql"` | repository where postgresql image is located |
-| imagePostgresql.tag | string | `"17.6.0-debian-12-r0"` | Image tag for postgresql, coordinate this with postgresql dependency. |
+| imagePostgresql.registry | string | `""` | Registry prepended to the repository as `<registry>/<repository>`. Leave empty when the repository already includes the registry host. |
+| imagePostgresql.repository | string | `"containers.renci.org/third-party/bitnami-postgresql"` | repository where postgresql image is located |
+| imagePostgresql.tag | string | `"17.5.0-debian-12-r18"` | Image tag for postgresql, coordinate this with postgresql dependency. |
 | imagePullSecrets | list | `[]` | credentials for a private repo |
 | imagej.enabled | bool | `false` | Disabling will turn off the creation of secrets/configmaps for ImageJ |
 | irods.enabled | bool | `false` | enable branded iRODS support; provide its environment variables through the selected appstore Secret. |

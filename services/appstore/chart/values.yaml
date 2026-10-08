@@ -12,6 +12,9 @@ image:
   tag:
 
 imagePostgresql:
+  # -- Registry prepended to the repository as `<registry>/<repository>`.
+  # Leave empty when the repository already includes the registry host.
+  registry: ""
   # -- repository where postgresql image is located
   repository: containers.renci.org/third-party/bitnami-postgresql
   # -- pull policy

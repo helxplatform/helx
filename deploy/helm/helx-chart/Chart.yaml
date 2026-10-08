@@ -25,7 +25,7 @@ dependencies:
   #   repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore
     condition: appstore.enabled
-    version: "6.0.3"
+    version: "6.0.4"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-sockets
     condition: appstore-sockets.enabled

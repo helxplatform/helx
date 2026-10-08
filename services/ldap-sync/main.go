@@ -163,6 +163,10 @@ var mergeAttributes = map[string]struct{}{
 var dnLocks sync.Map
 var bindings = make(map[string]string)
 var nullBindings = make(map[string]struct{})
+
+// bindingsVersion increases on every bindings update, so handleEntry can tell
+// whether its snapshot went stale before it parked an entry.
+var bindingsVersion uint64
 var bindingsMu sync.RWMutex
 var bindingPattern = regexp.MustCompile(`\$[A-Za-z0-9_.]+`)
 var db *sql.DB
@@ -487,6 +491,12 @@ func getBindingsSnapshot() (map[string]string, map[string]struct{}) {
 	return snapshot, nullSnapshot
 }
 
+func getBindingsVersion() uint64 {
+	bindingsMu.RLock()
+	defer bindingsMu.RUnlock()
+	return bindingsVersion
+}
+
 func updateBindings(newBindings map[string]*string) {
 	if len(newBindings) == 0 {
 		return
@@ -505,6 +515,7 @@ func updateBindings(newBindings map[string]*string) {
 		bindings[k] = *v
 		delete(nullBindings, k)
 	}
+	bindingsVersion++
 	total := len(bindings)
 	totalNull := len(nullBindings)
 	bindingsMu.Unlock()
@@ -706,12 +717,16 @@ func (d *dependencyState) handleEntry(entry *TransformedEntry, deps []string, se
 	}
 	d.mu.Unlock()
 
+	// Read the version before the snapshot: an update landing in between makes
+	// the snapshot newer than the version, which only costs a spurious retry.
+	snapshotVersion := getBindingsVersion()
+	bindingsSnapshot, nullSnapshot := getBindingsSnapshot()
+
 	// Allow tests to stall goroutines here so the two-phase race fires deterministically.
 	if handleEntryWindowHook != nil {
 		handleEntryWindowHook()
 	}
 
-	bindingsSnapshot, nullSnapshot := getBindingsSnapshot()
 	resolvedEntry, entryMissing := resolveEntryTemplates(entry, bindingsSnapshot, nullSnapshot)
 	resolvedDeps, depsMissing := resolveDependencies(rawDeps, bindingsSnapshot, nullSnapshot)
 	logger.Debug(
@@ -760,6 +775,19 @@ func (d *dependencyState) handleEntry(entry *TransformedEntry, deps []string, se
 			return
 		}
 		d.markSyncedAndRelease(resolvedEntry.DN, searchID, resolvedEntry.Content, op)
+		return
+	}
+
+	// A bindings update after our snapshot already ran reprocessPending, which
+	// could not see this entry because it is held here rather than in d.pending.
+	// Parking it with the stale snapshot would strand it, since no later update
+	// would reprocess it, so resolve again instead. This covers a changed or
+	// nulled value as well as a new one. Checking under d.mu means any update
+	// after this point reprocesses the parked entry.
+	if getBindingsVersion() != snapshotVersion {
+		d.mu.Unlock()
+		logger.Debug("Bindings changed while resolving; retrying", "DN", entry.DN)
+		d.handleEntry(entry, rawDeps, searchID)
 		return
 	}
 

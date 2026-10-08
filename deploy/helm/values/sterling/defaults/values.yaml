@@ -3,20 +3,18 @@ appstore:
   djangoSettings: helx
   django:
     ALLOW_SAML_LOGIN: "true"
-  global:
-    imageRegistry: aisandboxrencitgt.azurecr.io
   gunicorn:
     workers: 5
   imagePostgresql:
-    registry: aisandboxrencitgt.azurecr.io
+    registry: containers.renci.org
     repository: helxplatform/bitnami-postgresql
     tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
     image:
-      registry: aisandboxrencitgt.azurecr.io
-      repository: helxplatform/bitnami-postgresql
+      registry: containers.renci.org
+      repository: helxplatform/third-party/bitnami-postgresql
       tag: 17.5.0-debian-12-r18
     primary:
       resources:
@@ -24,13 +22,22 @@ appstore:
           cpu: 500m
           memory: 2Gi
         requests:
-          cpu: 500m
-          memory: 2Gi
+          cpu: 250m
+          memory: 1Gi
     volumePermissions:
       image:
-        registry: aisandboxrencitgt.azurecr.io
+        registry: docker.io
         repository: helxplatform/os-shell
         tag: 12-debian-12-r50
+      resources:
+        limits:
+          cpu: 150m
+          memory: 192Mi
+          ephemeral-storage: 256Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi
+          ephemeral-storage: 50Mi
   replicaCount: 1
   resources:
     limits:
@@ -49,7 +56,6 @@ appstore:
     cache:
       FETCH_INTERVAL: 3600000
       enabled: true
-      storageClass: azurefile
       storageSize: 50M
   tycho:
     externalAppRegistryBranch: # CHANGEME
@@ -59,7 +65,6 @@ appstore:
     runAsUser: 1001
   userStorage:
     createPVC: true
-    storageClass: azurefile-csi-nfs-posix
 appstore-prepuller:
   appRegistry:
     repo: https://github.com/helxplatform/helx-apps/raw
@@ -73,31 +78,19 @@ appstore-prepuller:
       requests:
         cpu: 50m
         memory: 64Mi
-  daemonset:
-    nodeSelector:
-      kubernetes.azure.com/mode: user
 appstore-sockets:
   securityContext:
     runAsUser: 1001
 global:
   imagePullSecrets:
   - renci-registry-creds
-  - aisandboxrencitgt-creds
+  imageRegistry: ""
 ldap-sync:
   searchBootstrap:
     id: get-groups
-    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:internal:*))'
     baseDN: ou=groups,dc=unc,dc=edu
   config:
-    hooks:
-    - args:
-        - --baseGid=1025
-        - --baseGroup=helx-users
-      image:
-        repository: aisandboxrencitgt.azurecr.io/helxplatform/unc-group-x
-        tag: v2.4.1
-      name: unc-group-x
-      url: http://localhost:5001/hook
     source:
       url: "ldaps://ldap.unc.edu/"
       bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
@@ -116,10 +109,9 @@ ldap-sync:
       # granting the service account get/list/create on PVCs.
       pvcGroup:
         enabled: true
-        storageClass: azurefile
         size: 10Gi
         accessModes:
-          - ReadWriteMany
+            - ReadWriteMany
 pod-reaper:
   reapers:
     long-running-apps:
@@ -129,12 +121,9 @@ pod-reaper:
       max_duration: 3h
       require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
 resty:
-  image:
-    repository: aisandboxrencitgt.azurecr.io/helxplatform/openresty
   SSL:
     nginxTLSSecret: # CHANGEME
   enabled: true
-  dnsResolver: 10.0.0.10
   ingress:
     annotations:
       cert-manager.io/cluster-issuer: letsencrypt
@@ -208,6 +197,8 @@ ui:
           headers:
           - Content-Type
 user-mutator:
+  webhook:
+    enabled: false
   config:
     features:
       ldap:

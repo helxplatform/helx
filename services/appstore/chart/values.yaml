@@ -12,12 +12,15 @@ image:
   tag:
 
 imagePostgresql:
+  # -- Registry prepended to the repository as `<registry>/<repository>`.
+  # Leave empty when the repository already includes the registry host.
+  registry: ""
   # -- repository where postgresql image is located
-  repository: containers.renci.org/bitnami/postgresql
+  repository: containers.renci.org/third-party/bitnami-postgresql
   # -- pull policy
   pullPolicy: IfNotPresent
   # -- Image tag for postgresql, coordinate this with postgresql dependency.
-  tag: 17.6.0-debian-12-r0
+  tag: 17.5.0-debian-12-r18
 
 # An empty string equates to false, anything else is true.  If debug is true the logLevel is also set
 # to DEBUG.
@@ -340,12 +343,13 @@ pgadmin:
     mode: values
     # -- Key/value pairs for `pgadmin-env`; each key becomes an environment
     # variable in the launched pgAdmin application.
-    # Required values for `pgadmin-env`:
-    #  PGADMIN_DEFAULT_EMAIL: -- pgAdmin user email
-    #  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients
-    #  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container
-    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port
-    # Optional values for `pgadmin-env`:
+    # Keys the chart defaults when they are not set here:
+    #  PGADMIN_DEFAULT_EMAIL: -- pgAdmin user email; defaults to "user@domain.com"
+    #  HELX_DB_HOSTNAME: -- database hostname for pgAdmin clients; defaults to ""
+    #  PGADMIN_DISABLE_POSTFIX: -- disable postfix in the pgAdmin container;
+    #    defaults to "true"
+    #  PGADMIN_LISTEN_PORT: -- pgAdmin listen port; defaults to "8080", which
+    #    must match the port in the pgAdmin app spec
     #  PGADMIN_CONFIG_SERVER_MODE: -- defaults to "False"
     #  PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: -- defaults to "False"
     #  PGADMIN_DEFAULT_PASSWORD: -- generated on install and preserved during
@@ -497,6 +501,10 @@ db:
 # -- postgresql settings
 postgresql:
   enabled: true
+  image:
+    registry: containers.renci.org
+    repository: helxplatform/third-party/bitnami-postgresql
+    tag: 17.5.0-debian-12-r18
   global:
     # -- postgresql credentials
     postgresql:

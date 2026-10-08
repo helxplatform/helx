@@ -32,7 +32,7 @@ spec:
       initContainers:
       {{- if .Values.postgresql.enabled }}
       - name: wait-for-postgresql
-        image: "{{ .Values.imagePostgresql.repository }}:{{ .Values.imagePostgresql.tag }}"
+        image: "{{ with .Values.imagePostgresql.registry }}{{ . }}/{{ end }}{{ .Values.imagePostgresql.repository }}:{{ .Values.imagePostgresql.tag }}"
         imagePullPolicy: "{{ .Values.imagePostgresql.pullPolicy }}"
         command:
           - sh
@@ -243,15 +243,15 @@ spec:
         - name: TYCHO_APP_GPU_RESOURCE_NAME
           value: "{{- .Values.tycho.GPUResourceName }}"
         - name: TYCHO_APP_RUN_AS_USER
-          value: "{{- .Values.tycho.runAsUser }}"
+          value: "{{- include "appstore.intValue" .Values.tycho.runAsUser }}"
         - name: TYCHO_APP_RUN_AS_GROUP
-          value: "{{- .Values.tycho.runAsGroup }}"
+          value: "{{- include "appstore.intValue" .Values.tycho.runAsGroup }}"
         - name: TYCHO_APP_INIT_NOBODY_UID
           value: "{{- .Values.tycho.initRunAsNobodyUser }}"
         - name: TYCHO_APP_INIT_NOBODY_GID
           value: "{{- .Values.tycho.initRunAsNobodyGroup }}"
         - name: TYCHO_APP_FS_GROUP
-          value: "{{- .Values.tycho.fsGroup }}"
+          value: "{{- include "appstore.intValue" .Values.tycho.fsGroup }}"
         - name: EXTERNAL_TYCHO_APP_REGISTRY_ENABLED
           value: "{{- .Values.tycho.externalAppRegistryEnabled }}"
         - name: EXTERNAL_TYCHO_APP_REGISTRY_REPO

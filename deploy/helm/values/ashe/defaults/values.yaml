@@ -1,44 +1,55 @@
 appstore:
   ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
-  djangoSettings: helx
+  djangoSettings: # CHANGEME
   django:
     ALLOW_SAML_LOGIN: "true"
-  global:
-    imageRegistry: aisandboxrencitgt.azurecr.io
+    EMAIL_HOST_USER: appstore@renci.org
   gunicorn:
-    workers: 5
+    workers: 2
+  fetcherImage:
+    repository: containers.renci.org/helxplatform/url-fetch
   imagePostgresql:
-    registry: aisandboxrencitgt.azurecr.io
+    registry: containers.renci.org
     repository: helxplatform/bitnami-postgresql
     tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
     image:
-      registry: aisandboxrencitgt.azurecr.io
-      repository: helxplatform/bitnami-postgresql
+      registry: containers.renci.org
+      repository: helxplatform/third-party/bitnami-postgresql
       tag: 17.5.0-debian-12-r18
+      shmVolume:
+        chmod:
+          enabled: false
+    securityContext:
+      enabled: false
+      runAsUser: # CHANGEME
     primary:
+      containerSecurityContext:
+        enabled: false
+        runAsUser: # CHANGEME
+      podSecurityContext:
+        enabled: false
+        fsGroup: null
+        runAsUser: # CHANGEME
       resources:
         limits:
-          cpu: 500m
-          memory: 2Gi
+          cpu: 2
+          memory: 1Gi
         requests:
-          cpu: 500m
-          memory: 2Gi
+          cpu: 250m
+          memory: 256Mi
     volumePermissions:
-      image:
-        registry: aisandboxrencitgt.azurecr.io
-        repository: helxplatform/os-shell
-        tag: 12-debian-12-r50
+      enabled: false
   replicaCount: 1
   resources:
     limits:
-      cpu: 2
-      memory: 4Gi
+      cpu: 500m
+      memory: 1.5Gi
     requests:
-      cpu: 1
-      memory: 2Gi
+      cpu: 250m
+      memory: 512Mi
   saml:
     ASSERTION_URL:  # CHANGEME
     ENTITY_ID:      # CHANGEME
@@ -49,20 +60,40 @@ appstore:
     cache:
       FETCH_INTERVAL: 3600000
       enabled: true
-      storageClass: azurefile
       storageSize: 50M
+  securityContext:
+    fsGroup: null
+    runAsGroup: null
+    runAsUser: # CHANGEME
   tycho:
-    externalAppRegistryBranch: # CHANGEME
+    enableInitContainer: true
     externalAppRegistryEnabled: true
-    fsGroup: 0
-    initRunAsUser: 1001
-    runAsUser: 1001
+    externalAppRegistryRepo: # CHANGEME
+    externalAppRegistryBranch: # CHANGEME
+    init:
+      resources:
+        cpus: 250m
+        memory: 250Mi
+    initImageRepository: containers.renci.org/helxplatform/third-party/busybox
+    initImageTag: latest
+    initRunAsNobodyGroup: # CHANGEME
+    initRunAsNobodyUser: # CHANGEME
+    # Set to the same UID as runAsUser. The init container creates directories
+    # in the user's home (e.g. ~/.local/share) that the app must own.
+    initRunAsUser: # CHANGEME
+    runAsUser: # CHANGEME
+    fsGroup: # CHANGEME
   userStorage:
     createPVC: true
-    storageClass: azurefile-csi-nfs-posix
+  security:
+    isolatedApps: true
+    appEgressAllowedPods:
+      - app.kubernetes.io/name: openldap
+    dnsPodSelector:
+      dns.operator.openshift.io/daemonset-dns: default
 appstore-prepuller:
   appRegistry:
-    repo: https://github.com/helxplatform/helx-apps/raw
+    repo: # CHANGEME
     branch: # CHANGEME
     brand: # CHANGEME
   controller:
@@ -74,30 +105,55 @@ appstore-prepuller:
         cpu: 50m
         memory: 64Mi
   daemonset:
-    nodeSelector:
-      kubernetes.azure.com/mode: user
+    # ASHE nodes carry no worker label, so exclude the control plane instead.
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
+    # Let the SCC assign the init containers' UID; it rejects root.
+    initRunAsUser: ""
 appstore-sockets:
   securityContext:
-    runAsUser: 1001
+    runAsUser: # CHANGEME
 global:
   imagePullSecrets:
   - renci-registry-creds
-  - aisandboxrencitgt-creds
+  imageRegistry: ""
+helx-ldap:
+  # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+  # We can do the same thing in other services if we take the time to implement it similarly.
+  openldap:
+    podSecurityContext:
+      enabled: false
+    containerSecurityContext:
+      enabled: false
+  configuration:
+    job:
+      podSecurityContext:
+        enabled: false
+      securityContext:
+        enabled: false
 ldap-sync:
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
   searchBootstrap:
     id: get-groups
-    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:internal:*))'
     baseDN: ou=groups,dc=unc,dc=edu
+    job:
+      # Omit the security contexts so the SCC allocates IDs from the namespace's range.
+      podSecurityContext:
+        enabled: false
+      securityContext:
+        enabled: false
   config:
-    hooks:
-    - args:
-        - --baseGid=1025
-        - --baseGroup=helx-users
-      image:
-        repository: aisandboxrencitgt.azurecr.io/helxplatform/unc-group-x
-        tag: v2.4.1
-      name: unc-group-x
-      url: http://localhost:5001/hook
     source:
       url: "ldaps://ldap.unc.edu/"
       bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
@@ -116,7 +172,6 @@ ldap-sync:
       # granting the service account get/list/create on PVCs.
       pvcGroup:
         enabled: true
-        storageClass: azurefile
         size: 10Gi
         accessModes:
           - ReadWriteMany
@@ -129,57 +184,58 @@ pod-reaper:
       max_duration: 3h
       require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
 resty:
-  image:
-    repository: aisandboxrencitgt.azurecr.io/helxplatform/openresty
-  SSL:
-    nginxTLSSecret: # CHANGEME
   enabled: true
-  dnsResolver: 10.0.0.10
+  SSL: {}
+  # artifactCache:
+  #   enabled: true
+  dnsResolver: 172.30.0.10
   ingress:
+    # With no TLS Secret the chart renders `tls: - {}`; OpenShift only turns
+    # that into a Route using the router's default certificate when this is set.
     annotations:
-      cert-manager.io/cluster-issuer: letsencrypt
-      nginx.ingress.kubernetes.io/proxy-body-size: 100m
-      nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+      route.openshift.io/termination: edge
     create: true
-    ingressClassName: nginx
+    ingressClassName: openshift-campusapps-ingress-controller
   replicaCount: 1
   resources:
-    limits:
-      cpu: 2
-      memory: 2Gi
     requests:
-      cpu: 1
-      memory: 1Gi
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
   service:
     serverName: # CHANGEME
 ui:
   config:
-    appstore_asset_base_url: https:\/\/raw.githubusercontent.com\/helxplatform\/appstore
+    appstore_asset_base_url: # CHANGEME
     appstore_asset_branch: develop
     brand_description:
       html: # CHANGEME
     brand_name: # CHANGEME
-    default_space: workspaces
-    hidden_result_tabs: cdes
     login_title: # CHANGEME
     meta:
       title: # CHANGEME
-    search:
-      enabled: "false"
-      url: ""
     support:
       faqs_url: ""
       help_portal_url: # CHANGEME
       user_guide_url: # CHANGEME
     workspaces:
       enabled: "true"
+    search:
+      enabled: "false"
+      url: null
   resources:
     limits:
       cpu: 1
-      memory: 2Gi
+      memory: 512Mi
     requests:
-      cpu: 0.5
-      memory: 1Gi
+      cpu: 250m
+      memory: 256Mi
+  securityContext:
+    fsGroup: null
+    runAsGroup: 0
+    runAsUser: # CHANGEME
   service:
     annotations:
       getambassador.io/config: |
@@ -208,6 +264,8 @@ ui:
           headers:
           - Content-Type
 user-mutator:
+  webhook:
+    enabled: false
   config:
     features:
       ldap:

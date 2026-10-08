@@ -25,8 +25,10 @@ spec:
       automountServiceAccountToken: true
       serviceAccountName: {{ include "ldap-sync.searchBootstrapName" . }}
       restartPolicy: Never
+      {{- if .Values.searchBootstrap.job.podSecurityContext.enabled }}
       securityContext:
-        {{- toYaml .Values.searchBootstrap.job.podSecurityContext | nindent 8 }}
+        {{- omit .Values.searchBootstrap.job.podSecurityContext "enabled" | toYaml | nindent 8 }}
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -55,8 +57,10 @@ spec:
         - name: search-bootstrap
           image: "{{ .Values.searchBootstrap.image.repository }}:{{ .Values.searchBootstrap.image.tag }}"
           imagePullPolicy: {{ .Values.searchBootstrap.image.pullPolicy }}
+          {{- if .Values.searchBootstrap.job.securityContext.enabled }}
           securityContext:
-            {{- toYaml .Values.searchBootstrap.job.securityContext | nindent 12 }}
+            {{- omit .Values.searchBootstrap.job.securityContext "enabled" | toYaml | nindent 12 }}
+          {{- end }}
           env:
             - name: API_URL
               value: "http://{{ include "ldap-sync.fullname" . }}:{{ .Values.service.port }}"

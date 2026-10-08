@@ -25,10 +25,18 @@ controller:
 
 # -- DaemonSet that actually pre-pulls images (managed by the controller)
 daemonset:
-  nodeSelector:
-    kubernetes.azure.com/mode: user
+  # Empty by default because a parent chart cannot remove a key set here.
+  # Platform values files add their own node labels.
+  nodeSelector: {}
+  # Use affinity to exclude nodes by label, which nodeSelector cannot express.
+  affinity: {}
   tolerations:
     - operator: "Exists"
+  # UID for the pull init containers. Any numeric UID avoids "no users found"
+  # errors from images whose USER is a name (e.g. pgadmin), and it need not
+  # exist in the image, so root is unnecessary. "" leaves it unset so the
+  # platform assigns one; only use that on OpenShift, whose SCCs reject root.
+  initRunAsUser: 65534
   pauseImage: registry.k8s.io/pause:3.9
   resources:
     requests:

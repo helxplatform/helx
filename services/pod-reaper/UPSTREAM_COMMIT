@@ -1,0 +1,14 @@
+# Provenance for services/pod-reaper/chart.
+#
+# This chart was vendored from a SUBDIRECTORY of an upstream repo, so it is not
+# a git subtree: it has no merge base and it is absent from SUBTREE_MAP.
+# Sync it with:  make pull-vendored-chart NAME=pod-reaper
+# Check it with: make check-vendored-sync
+repo:      https://github.com/helxplatform/helx-chart
+branch:    master
+path:      charts/pod-reaper
+# All upstream changes through this commit are incorporated here.
+upstream:  9abd0f05a5ca474f5a3bdae6cfbed47f9dcaa370
+verified:  2026-09-20
+# Byte-identical to upstream at that commit, which is also upstream's newest
+# commit touching charts/pod-reaper (2025-11-03). No local divergence.

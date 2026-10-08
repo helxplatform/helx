@@ -44,6 +44,8 @@ ui:
     workspaces:
       enabled: "true"
 user-mutator:
+  secret:
+    existingSecret: ""
   config:
     userProfiles:
       enabled: true

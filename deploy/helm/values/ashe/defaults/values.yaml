@@ -88,7 +88,7 @@ appstore:
   security:
     isolatedApps: true
     appEgressAllowedPods:
-      - app.kubernetes.io/name: openldap-stack-ha
+      - app.kubernetes.io/name: openldap
     dnsPodSelector:
       dns.operator.openshift.io/daemonset-dns: default
 appstore-prepuller:

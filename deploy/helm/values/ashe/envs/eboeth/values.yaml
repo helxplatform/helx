@@ -1,7 +1,7 @@
 appstore:
   DEBUG: "true"
   logLevel: DEBUG
-  djangoSettings: ordrd
+  djangoSettings: helx
   postgresql:
     securityContext:
       runAsUser: 1002160001
@@ -16,8 +16,8 @@ appstore:
   securityContext:
     runAsUser: 1002160000
   tycho:
-    externalAppRegistryRepo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
-    externalAppRegistryBranch: ordrd-staging
+    externalAppRegistryRepo: https://eboeth.apps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    externalAppRegistryBranch: eboeth
     initRunAsNobodyGroup: 524288
     initRunAsNobodyUser: 524288
     # Match runAsUser: the init container creates ~/.local/share, which the
@@ -27,15 +27,17 @@ appstore:
     fsGroup: 1025
 appstore-prepuller:
   appRegistry:
-    repo: https://ordrd-staging.campusapps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
-    branch: ordrd-staging
-    brand: ordrd
+    repo: https://eboeth.apps.ashe-k8s.renci.unc.edu/artifact/assets/helx-apps
+    branch: eboeth
+    brand: helx
 appstore-sockets:
   securityContext:
     runAsUser: 1002160003
 resty:
   service:
     serverName: eboeth.apps.ashe-k8s.renci.unc.edu
+  artifactCache:
+    enabled: true
 ui:
   config:
     appstore_asset_base_url: https:\/\/ordrd-staging.campusapps.ashe-k8s.renci.unc.edu\/artifact\/appstore
@@ -60,3 +62,8 @@ ui:
       user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
     workspaces:
       enabled: "true"
+user-mutator:
+  fullnameOverride: user-mutator
+  secret:
+    mode: existingSecret
+    existingSecret: user-mutator-cert-tls

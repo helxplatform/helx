@@ -24,6 +24,15 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Name of the chart's Service: the bare chart name, not "<release>-<chart>",
+so other components can address it at a fixed name. fullnameOverride still
+takes over, which lets two releases share a namespace.
+*/}}
+{{- define "resty.serviceName" -}}
+{{- default .Chart.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "resty.chart" -}}

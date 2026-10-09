@@ -164,9 +164,9 @@ the selected mode.
 ### Certificate lifecycle
 
 `secret.mode: generate` is the default webhook TLS ownership mode and is
-mutually exclusive with `existingSecret`, `values`, and `externalSecret`. The chart generates a self-signed CA and a serving certificate whose SANs cover `<fullname>`, `<fullname>.<namespace>`, `<fullname>.<namespace>.svc`, and `<fullname>.<namespace>.svc.cluster.local`.
+mutually exclusive with `existingSecret`, `values`, and `externalSecret`. The chart generates a self-signed CA and a serving certificate whose SANs cover `<service>`, `<service>.<namespace>`, `<service>.<namespace>.svc`, and `<service>.<namespace>.svc.cluster.local`, where `<service>` is the Service name: `fullnameOverride` when set, otherwise `user-mutator`.
 
-Generated material is looked up and reused on every render, so upgrades never rotate the certificate out from under a webhook configuration that already carries the matching CA bundle. The Secret also carries `helm.sh/resource-policy: keep`, so it survives an uninstall and is picked back up by a reinstall. To rotate deliberately, delete the Secret named `<fullname>-tls` and upgrade.
+Generated material is looked up and reused on every render, so upgrades never rotate the certificate out from under a webhook configuration that already carries the matching CA bundle. The Secret records the Service name it was issued for in the `user-mutator.helxplatform.io/service-name` annotation, and the chart issues a new certificate, then rolls the Pod onto it, when that name no longer matches. A Secret without the annotation predates chart 2.2.1, whose Service was `<release>-user-mutator`, so the first upgrade to 2.2.1 or later replaces it once. The Secret also carries `helm.sh/resource-policy: keep`, so it survives an uninstall and is picked back up by a reinstall. To rotate deliberately, delete the Secret named `<fullname>-tls` and upgrade.
 
 There is no automatic rotation, so `secret.generate.validityDays` defaults to ten years.
 

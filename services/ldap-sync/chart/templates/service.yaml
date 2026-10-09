@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "ldap-sync.fullname" . }}
+  name: {{ include "ldap-sync.serviceName" . }}
   labels:
     {{- include "ldap-sync.labels" . | nindent 4 }}
 spec:

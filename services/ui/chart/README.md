@@ -2,7 +2,7 @@
 
 A Helm chart for Kubernetes
 
-![Version: 1.6.1](https://img.shields.io/badge/Version-1.6.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 6.4.2](https://img.shields.io/badge/AppVersion-6.4.2-informational?style=flat-square)
+![Version: 1.6.2](https://img.shields.io/badge/Version-1.6.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 6.4.2](https://img.shields.io/badge/AppVersion-6.4.2-informational?style=flat-square)
 
 ## About HELX-UI
 

@@ -20,3 +20,14 @@
   echo "Visit http://127.0.0.1:8080 to use your application"
   kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
 {{- end }}
+{{- if and .Values.webhook.enabled (eq .Values.webhook.mode "saveToConfigMap") }}
+
+2. The MutatingWebhookConfiguration was NOT created; webhook.mode is saveToConfigMap.
+   Until a cluster admin applies it, Deployments are not mutated. To apply it:
+
+  kubectl -n {{ .Release.Namespace }} get configmap {{ include "user-mutator.webhookName" . }} \
+    -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' | kubectl apply -f -
+
+   Re-apply after any upgrade that changes the webhook settings or rotates the
+   certificate; the ConfigMap is updated, the applied object is not.
+{{- end }}

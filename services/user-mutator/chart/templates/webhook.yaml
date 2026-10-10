@@ -42,36 +42,66 @@ data:
 {{- if not $caBundle }}
   {{- fail "user-mutator: webhook.enabled requires a CA bundle; set secret.mode to generate, or set webhook.caBundle to the base64 CA that signed the serving certificate" -}}
 {{- end }}
-{{- $namespaces := .Values.webhook.namespaces }}
-{{- if not $namespaces }}
-  {{- $namespaces = list .Release.Namespace }}
-{{- end }}
+{{- $manifest := include "user-mutator.mutatingWebhookConfiguration" (dict "root" . "caBundle" $caBundle) }}
+{{- if eq .Values.webhook.mode "create" }}
 ---
-apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingWebhookConfiguration
+{{ $manifest }}
+{{- else if eq .Values.webhook.mode "saveToConfigMap" }}
+{{/*
+The same manifest, stored instead of applied, for a deployer without
+cluster-level permission. A cluster admin applies it later; NOTES.txt prints
+the command.
+*/}}
+---
+apiVersion: v1
+kind: ConfigMap
 metadata:
   name: {{ include "user-mutator.webhookName" . }}
   labels:
     {{- include "user-mutator.labels" . | nindent 4 }}
+data:
+  mutating-webhook-configuration.yaml: |
+    {{- $manifest | nindent 4 }}
+{{- else }}
+  {{- fail (printf "user-mutator: webhook.mode %q is not a mode; use create or saveToConfigMap" (toString .Values.webhook.mode)) -}}
+{{- end }}
+{{- end }}
+
+{{/*
+The MutatingWebhookConfiguration itself, shared by both webhook.mode values.
+Takes a dict: root is the chart context, caBundle the resolved bundle.
+*/}}
+{{- define "user-mutator.mutatingWebhookConfiguration" -}}
+{{- $root := .root -}}
+{{- $namespaces := $root.Values.webhook.namespaces -}}
+{{- if not $namespaces -}}
+  {{- $namespaces = list $root.Release.Namespace -}}
+{{- end -}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "user-mutator.webhookName" $root }}
+  labels:
+    {{- include "user-mutator.labels" $root | nindent 4 }}
 webhooks:
-  - name: {{ printf "%s.%s.svc" (include "user-mutator.fullname" .) .Release.Namespace }}
+  - name: {{ printf "%s.%s.svc" (include "user-mutator.fullname" $root) $root.Release.Namespace }}
     admissionReviewVersions:
       - v1
     sideEffects: None
-    failurePolicy: {{ .Values.webhook.failurePolicy }}
-    reinvocationPolicy: {{ .Values.webhook.reinvocationPolicy }}
-    timeoutSeconds: {{ .Values.webhook.timeoutSeconds }}
+    failurePolicy: {{ $root.Values.webhook.failurePolicy }}
+    reinvocationPolicy: {{ $root.Values.webhook.reinvocationPolicy }}
+    timeoutSeconds: {{ $root.Values.webhook.timeoutSeconds }}
     clientConfig:
-      caBundle: {{ $caBundle }}
+      caBundle: {{ .caBundle }}
       service:
-        name: {{ include "user-mutator.fullname" . }}
-        namespace: {{ .Release.Namespace }}
-        path: {{ .Values.webhook.path }}
-        port: {{ .Values.service.port }}
+        name: {{ include "user-mutator.fullname" $root }}
+        namespace: {{ $root.Release.Namespace }}
+        path: {{ $root.Values.webhook.path }}
+        port: {{ $root.Values.service.port }}
     rules:
-      {{- toYaml .Values.webhook.rules | nindent 6 }}
+      {{- toYaml $root.Values.webhook.rules | nindent 6 }}
     namespaceSelector:
-      {{- with .Values.webhook.matchLabels }}
+      {{- with $root.Values.webhook.matchLabels }}
       matchLabels:
         {{- range $labelKey, $labelValue := . }}
         {{ $labelKey }}: {{ $labelValue | toString | quote }}
@@ -82,7 +112,7 @@ webhooks:
           operator: In
           values:
             {{- toYaml $namespaces | nindent 12 }}
-        {{- with .Values.webhook.extraMatchExpressions }}
+        {{- with $root.Values.webhook.extraMatchExpressions }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
-{{- end }}
+{{- end -}}

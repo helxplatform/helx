@@ -99,6 +99,7 @@ Edit `config.env` to customize:
 - Generates the webhook serving certificate and renders the cluster-scoped `MutatingWebhookConfiguration` by default (`secret.mode: generate` and `webhook.enabled: true`), so `helm install` needs no `make` targets
 - To opt out, select `secret.mode: existingSecret`, `values`, or `externalSecret`; there is no implicit fallback to a historical Secret name
 - `make deploy-webhook-server` passes those two opt-outs, because that target still creates the certificate and the webhook configuration out of band
+- `webhook.mode` is `create` (default, applies the configuration) or `saveToConfigMap`, which renders the identical manifest into a same-named ConfigMap for a cluster admin to apply, so a deployer without cluster-level permission can install the chart. Both modes render the manifest from one `define` in `templates/webhook.yaml`
 - `templates/webhook.yaml` renders the generated Secret and the webhook configuration together on purpose: Helm templates are pure functions, so splitting them would produce a CA bundle that does not match the serving certificate on a fresh install
 - Namespaces are selected by the automatic `kubernetes.io/metadata.name` label, so no namespace has to be labelled and the chart needs no namespace-patching RBAC
 - Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration

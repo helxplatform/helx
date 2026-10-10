@@ -1,27 +1,49 @@
+{{- /*
+helm install prints a subchart's NOTES.txt only with --render-subchart-notes,
+so anything an operator needs from a subchart is surfaced here.
+
+Subchart helpers are callable from this file, but they expect their own
+chart's context. The stand-ins below carry only what the helpers used here
+read: the subchart's values, the release, and the chart name. Add to them if
+one of those helpers starts reading anything else. A disabled subchart's
+templates are not loaded at all, so every include stays behind its enabled
+check.
+*/ -}}
+{{- $appstore := dict "Values" .Values.appstore "Release" .Release "Chart" (dict "Name" "appstore") -}}
+{{- $resty := dict "Values" .Values.resty "Release" .Release "Chart" (dict "Name" "resty") -}}
+{{- $userMutator := dict "Values" (index .Values "user-mutator") "Release" .Release "Chart" (dict "Name" "user-mutator") -}}
+
 {{- if .Values.appstore.enabled }}
-Use the following commands to get information about how to log in to the HeLx website.
-
-# copy/paste these commands
-
-DJANGO_ADMIN_USERNAME=`kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-appstore -o jsonpath="{.data.APPSTORE_DJANGO_USERNAME}" | base64 --decode` && \
-DJANGO_ADMIN_PASSWORD=`kubectl -n {{ .Release.Namespace }} get secret {{ .Release.Name }}-appstore -o jsonpath="{.data.APPSTORE_DJANGO_PASSWORD}" | base64 --decode` && \
+{{- $secret := include "appstore.secretName" $appstore }}
+{{- $protocol := .Values.appstore.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}
+{{- $serverName := "" }}
 {{- if .Values.resty.enabled }}
-{{- if eq .Values.resty.service.serverName "_" }}
-HELX_IP=`kubectl -n {{ .Release.Namespace }} get svc {{ .Release.Name }}-resty -o jsonpath="{.status.loadBalancer.ingress[*].ip}"` && \
-printf "\nDjango admin username: $DJANGO_ADMIN_USERNAME\n" && \
-printf '%s\n' "Django admin password: $DJANGO_ADMIN_PASSWORD" && \
-printf "Django admin URL     : {{ .Values.appstore.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}://$HELX_IP/admin\n" && \
-printf "HeLx URL             : {{ .Values.appstore.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}://$HELX_IP\n\n"
-{{- else }}
-printf "\nDjango admin username: $DJANGO_ADMIN_USERNAME\n" && \
-printf '%s\n' "Django admin password: $DJANGO_ADMIN_PASSWORD" && \
-printf "Django admin URL     : {{ .Values.appstore.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}://{{ .Values.resty.service.serverName }}/admin\n" && \
-printf "HeLx URL             : {{ .Values.appstore.ACCOUNT_DEFAULT_HTTP_PROTOCOL }}://{{ .Values.resty.service.serverName }}\n\n"
+  {{- $serverName = default "" .Values.resty.service.serverName | toString }}
 {{- end }}
-{{- else }}
-printf "\nDjango admin username: $DJANGO_ADMIN_USERNAME\n" && \
-printf '%s\n' "Django admin password: $DJANGO_ADMIN_PASSWORD"
+-- Appstore --
+Log in to HeLx with the Django admin account:
+
+  kubectl -n {{ .Release.Namespace }} get secret {{ $secret }} -o jsonpath='{.data.APPSTORE_DJANGO_USERNAME}' | base64 --decode; echo
+  kubectl -n {{ .Release.Namespace }} get secret {{ $secret }} -o jsonpath='{.data.APPSTORE_DJANGO_PASSWORD}' | base64 --decode; echo
+{{- if and $serverName (ne $serverName "_") }}
+
+  HeLx:          {{ $protocol }}://{{ $serverName }}
+  Django admin:  {{ $protocol }}://{{ $serverName }}/admin
+{{- else if .Values.resty.enabled }}
+
+resty.service.serverName is not set, so HeLx is reached at the address of the
+resty LoadBalancer Service:
+
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "resty.fullname" $resty }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+
+Then open {{ $protocol }}://<address>, with Django admin at /admin.
 {{- end }}
 {{- end }}
 
-#
+{{- if index .Values "user-mutator" "enabled" }}
+-- User Mutator --
+{{- with include "user-mutator.notes.webhookConfigMap" $userMutator }}
+
+{{ . }}
+{{- end }}
+{{- end }}

@@ -180,7 +180,7 @@ webhook:
   # scoped object; it stores the manifest in a ConfigMap of the same name in
   # the release namespace, under mutating-webhook-configuration.yaml, for a
   # cluster admin to apply later. The chart then needs only namespace access.
-  mode: create
+  mode: saveToConfigMap
 
   # -- Name of the configuration. Defaults to <fullname>-webhook-<namespace>.
   # The release qualifier keeps two releases in one namespace apart, and the

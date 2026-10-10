@@ -148,6 +148,25 @@ from colliding. Set webhook.name to adopt an existing configuration.
 {{- end -}}
 
 {{/*
+Install note for webhook.mode saveToConfigMap; empty in every other case.
+Shared by this chart's NOTES.txt and the helx umbrella's, because Helm does not
+print a subchart's NOTES.txt by default. The umbrella calls it with a stand-in
+context holding only Values, Release, and Chart.Name, so keep it to those.
+*/}}
+{{- define "user-mutator.notes.webhookConfigMap" -}}
+{{- if and .Values.webhook.enabled (eq .Values.webhook.mode "saveToConfigMap") -}}
+The MutatingWebhookConfiguration was NOT created, because webhook.mode is saveToConfigMap.
+Deployments are not mutated until a cluster admin applies it:
+
+  kubectl -n {{ .Release.Namespace }} get configmap {{ include "user-mutator.webhookName" . }} \
+    -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' | kubectl apply -f -
+
+Re-apply after any upgrade that changes the webhook settings or rotates the
+certificate; the ConfigMap is updated, the applied object is not.
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate the webhook TLS ownership mode. generate is chart-specific, while the
 other modes use the shared helx-common contract.
 */}}

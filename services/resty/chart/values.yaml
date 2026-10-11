@@ -139,9 +139,6 @@ stubStatus:
 dnsResolver: kube-dns.kube-system.svc.cluster.local
 
 global:
-  ambassador_service_name: ambassador
-  dug_web_service_name: dug-web
-  dug_search_client_service_name: dug-search-client
   restartr_api_service_name: restartr-api-service
   # -- PROTOTYPE (ambassador removal): direct backend service names that
   # were previously reached only through the "ambassador" service.

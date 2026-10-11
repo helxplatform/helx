@@ -33,7 +33,6 @@ env:
 jobs:
   self-test:
     name: Self-test CI
-    if: github.event.action != 'edited' || github.event.changes.base.ref.from
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -260,7 +259,7 @@ jobs:
 
   ci-gate:
     name: CI gate
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       - self-test
       - validate-common

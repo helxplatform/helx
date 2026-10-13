@@ -19,12 +19,12 @@ dependencies:
   version: 0.2.5
 - name: resty
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.0.5
+  version: 2.0.6
 - name: ui
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 1.6.2
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.2.2
-digest: sha256:7ec12c4e9f246961100a8c1fd8300e2c91a0a5077f95a73ad5cd49c45dcf960f
-generated: '2026-10-13T14:38:52.124232+00:00'
+digest: sha256:809b335bbdc0b3e684c15bcb9963d286dc7f622ec995b476b32534f992bded5e
+generated: '2026-10-13T17:46:42.678808+00:00'

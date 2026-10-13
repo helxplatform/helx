@@ -5,11 +5,19 @@ certificate once at startup via http.ListenAndServeTLS, so a rotated Secret is
 otherwise ignored until something restarts the process, and because
 webhook.failurePolicy defaults to Ignore that stale cert fails every handshake
 silently rather than surfacing an error.
+
+When webhook.yaml is about to replace a generated certificate that was issued
+for another Service name, the persisted data is stale, so it is hashed under a
+different key to roll the Pod onto the replacement in the same upgrade.
 */}}
 {{- $tlsChecksum := "" }}
 {{- $persistedTls := lookup "v1" "Secret" .Release.Namespace (get $secretNames "cert") }}
 {{- if $persistedTls }}
-  {{- $tlsChecksum = default (dict) $persistedTls.data | toYaml | sha256sum }}
+  {{- $tlsData := default (dict) $persistedTls.data }}
+  {{- if and (eq .Values.secret.mode "generate") (not (include "user-mutator.webhookCertReusable" .)) }}
+    {{- $tlsData = dict "replaced" $tlsData }}
+  {{- end }}
+  {{- $tlsChecksum = $tlsData | toYaml | sha256sum }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment

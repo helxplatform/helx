@@ -105,12 +105,19 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `templates/`. `validate-config` enforces both, and also rejects `.dockerignore`
   negation or `**`, which the gate cannot reason about.
 - On pull requests that do not target the default branch, and on direct pushes to
-  `develop`, the umbrella is judged with `--umbrella-above-release`: its version
-  must sit above the last published `v*` release rather than increase on every
-  change, and may not regress. Its dependency pins are still enforced. So only
-  the first pull request after a release picks the next version. Raising it
-  starts publishing a new `<version>-develop` channel automatically, since the
-  candidate tag derives from it. Never pass that flag on the default branch.
+  `develop`, versions are judged with `--above-release` (old name
+  `--umbrella-above-release` still works): each must sit strictly above what is
+  released rather than increase on every change, and may not regress against the
+  base (equal is fine). "Released" is the last `v*` tag for the umbrella, and the
+  `version`/`appVersion` in `origin/main`'s `Chart.yaml` for service charts and
+  their images (`--release-ref`; a chart absent there has no floor, a missing ref
+  is an error, no registry is queried). Equal to the release is allowed only when
+  the packaged files are identical to it (main's tree, or the tag's for the
+  umbrella), so merging a hotfix back needs no extra bump. The umbrella's
+  dependency pins are still enforced. So only the first pull request after a release picks each next
+  version. Raising the umbrella starts publishing a new `<version>-develop`
+  channel automatically, since the candidate tag derives from it. Never pass that
+  flag on the default branch.
 - `check-versions` compares committed revisions, so an uncommitted or untracked
   chart file is invisible to it.
 - Prefer fixing the ignore file over adding a CI exception. If a file never

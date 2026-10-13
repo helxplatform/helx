@@ -57,7 +57,7 @@ jobs:
             echo 'No previous develop commit to compare against.'
           else
             python .github/scripts/ci.py check-versions --base "$BASE_SHA" \
-              --umbrella-above-release
+              --above-release
           fi
       - name: Install actionlint 1.7.12
         shell: bash

@@ -1584,13 +1584,13 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
     def test_with_no_release_the_umbrella_is_unconstrained(self) -> None:
         # Nothing is published, so there is nothing to sit above.
         self.touch_umbrella()
-        self.check(umbrella_above_release=True)
+        self.check(above_release=True)
 
     def test_matching_the_last_release_is_rejected(self) -> None:
         self.release("4.6.2")
         self.touch_umbrella()
         with self.assertRaisesRegex(ci.CIError, "must sit above the last published release"):
-            self.check(umbrella_above_release=True)
+            self.check(above_release=True)
 
     def test_sitting_above_the_release_needs_no_further_bump(self) -> None:
         self.release("4.6.2")
@@ -1599,13 +1599,26 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
         self.git("commit", "-qm", "open 4.7.0")
         # A later change leaves the version alone and still passes.
         self.touch_umbrella()
-        self.check(umbrella_above_release=True)
+        self.check(above_release=True)
+
+    def test_merging_a_hotfix_release_back_may_match_the_tag(self) -> None:
+        self.release("4.6.2")
+        self.set_umbrella("4.6.3")
+        self.touch_umbrella()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "hotfix 4.6.3")
+        self.release("4.6.3")
+        # develop was still at 4.6.2; its tree now matches v4.6.3 exactly.
+        self.check(above_release=True)
+        self.write("deploy/helm/helx-chart/values.yaml", "develop: only\n")
+        with self.assertRaisesRegex(ci.CIError, "identical to v4.6.3's"):
+            self.check(above_release=True)
 
     def test_regression_against_the_base_is_rejected(self) -> None:
         self.release("4.0.0")
         self.set_umbrella("4.5.0")
         with self.assertRaisesRegex(ci.CIError, "must not decrease below"):
-            self.check(umbrella_above_release=True)
+            self.check(above_release=True)
 
     def test_default_mode_still_requires_a_bump_every_change(self) -> None:
         self.release("4.6.2")
@@ -1613,16 +1626,38 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
         with self.assertRaisesRegex(ci.CIError, "helx-chart chart version must increase"):
             self.check()
 
-    def test_the_rule_does_not_exempt_service_charts(self) -> None:
-        chart = self.root / "services/api/chart/Chart.yaml"
-        chart.write_text(chart.read_text() + "description: edited\n", encoding="utf-8")
-        with self.assertRaisesRegex(ci.CIError, "services/api/chart chart version must increase"):
-            self.check(umbrella_above_release=True)
+    def test_the_old_flag_name_is_an_alias(self) -> None:
+        for flag in ("--above-release", "--umbrella-above-release"):
+            with self.subTest(flag=flag):
+                args = ci.parse_args(["check-versions", "--base", "develop", flag])
+                self.assertTrue(args.above_release)
+        args = ci.parse_args(["check-versions", "--base", "develop"])
+        self.assertFalse(args.above_release)
+        self.assertEqual(args.release_ref, "origin/main")
 
-    def test_the_rule_does_not_exempt_image_app_versions(self) -> None:
-        self.write("services/api/main.go", "package main\n")
+
+class ServiceAboveReleaseTests(TempTreeTest):
+    """Service charts and appVersions are judged against what main has published.
+
+    History: an initial commit without the api chart, then "released" (what
+    main has published, api 6.0.4), then the base (develop, api 6.0.5).
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.git("init", "-q")
+        self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
+        self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.2")
+        self.commit("before api existed")
+        self.unreleased = self.git("rev-parse", "HEAD").stdout.strip()
+        self.set_api(version="6.0.4", app_version="6.0.4")
         self.write("services/api/Dockerfile", "FROM scratch\n")
-        images = {
+        self.commit("release api 6.0.4")
+        self.git("branch", "released")
+        self.set_api(version="6.0.5", app_version="6.0.5")
+        self.commit("open api 6.0.5")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.images = {
             "registry": ci.REGISTRY,
             "images": [{
                 "name": "api", "component": "api", "chart": "services/api/chart",
@@ -1631,11 +1666,171 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
                 "sources": ["services/api"], "excludes": ["services/api/chart"],
             }],
         }
-        with patch.object(ci, "load_images_config", return_value=images):
-            with self.assertRaisesRegex(ci.CIError, "api appVersion must increase"):
-                ci.check_versions(
-                    self.root, self.base, include_untracked=True, umbrella_above_release=True
-                )
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
+            cwd=self.root, text=True, capture_output=True, check=True,
+        )
+
+    def commit(self, message: str) -> None:
+        self.git("add", "-A")
+        self.git("commit", "-qm", message)
+
+    def set_api(self, *, version: str | None = None, app_version: str | None = None) -> None:
+        chart = self.root / "services/api/chart/Chart.yaml"
+        data = ci.read_yaml(chart) if chart.exists() else {}
+        self.write_chart(
+            "services/api/chart",
+            name="api",
+            version=version or data["version"],
+            app_version=app_version or data["appVersion"],
+        )
+
+    def sync_with_main(self) -> None:
+        """Make the base, and the working tree, match what main published."""
+        self.base = self.git("rev-parse", "released").stdout.strip()
+        self.set_api(version="6.0.4", app_version="6.0.4")
+
+    def touch_chart(self) -> None:
+        self.write("services/api/chart/templates/configmap.yaml", "kind: ConfigMap\n")
+
+    def touch_image(self) -> None:
+        self.write("services/api/main.go", "package main\n")
+
+    def check(self, *, release_ref: str = "released", **kwargs: bool) -> None:
+        with patch.object(ci, "load_images_config", return_value=self.images):
+            ci.check_versions(
+                self.root, self.base, include_untracked=True,
+                release_ref=release_ref, **kwargs,
+            )
+
+    def test_staying_at_the_base_version_passes_when_above_main(self) -> None:
+        # main has 6.0.4, develop already opened 6.0.5: a second pull request
+        # editing api leaves it at 6.0.5 and does not burn 6.0.6.
+        self.touch_chart()
+        self.check(above_release=True)
+
+    def test_default_mode_still_requires_a_bump_every_change(self) -> None:
+        self.touch_chart()
+        with self.assertRaisesRegex(ci.CIError, "services/api/chart chart version must increase"):
+            self.check()
+
+    def test_matching_main_is_rejected(self) -> None:
+        # develop has just been synced with main, so the first change must bump.
+        self.sync_with_main()
+        self.touch_chart()
+        with self.assertRaises(ci.CIError) as raised:
+            self.check(above_release=True)
+        self.assertEqual(
+            str(raised.exception),
+            "Version checks failed:\n"
+            "- services/api/chart chart version must increase above '6.0.4'; current "
+            "value is '6.0.4'. It must sit above the version released has published "
+            "unless its packaged files are identical to released's, so this pull "
+            "request needs to choose the next version",
+        )
+
+    def test_going_below_the_base_is_rejected(self) -> None:
+        # Still above main, but a merge conflict resolved the wrong way.
+        self.set_api(version="6.0.6")
+        self.commit("open api 6.0.6")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.set_api(version="6.0.5")
+        with self.assertRaisesRegex(
+            ci.CIError, "services/api/chart chart version must not decrease below '6.0.6'"
+        ):
+            self.check(above_release=True)
+
+    def test_a_chart_missing_on_main_is_unconstrained(self) -> None:
+        # Equal to the base, and there is nothing released to sit above.
+        self.sync_with_main()
+        self.touch_chart()
+        self.check(above_release=True, release_ref=self.unreleased)
+
+    def test_app_version_staying_at_the_base_passes_when_above_main(self) -> None:
+        self.touch_image()
+        self.check(above_release=True)
+
+    def test_app_version_default_mode_still_requires_a_bump(self) -> None:
+        self.touch_image()
+        with self.assertRaisesRegex(ci.CIError, "api appVersion must increase above '6.0.5'"):
+            self.check()
+
+    def test_app_version_matching_main_is_rejected(self) -> None:
+        self.sync_with_main()
+        self.touch_image()
+        with self.assertRaisesRegex(
+            ci.CIError,
+            "api appVersion must increase above '6.0.4'; current value is '6.0.4'. "
+            "It must sit above the appVersion released has published",
+        ):
+            self.check(above_release=True)
+
+    def test_app_version_going_below_the_base_is_rejected(self) -> None:
+        self.set_api(app_version="6.0.6")
+        self.commit("api app 6.0.6")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.set_api(app_version="6.0.5")
+        self.touch_image()
+        with self.assertRaisesRegex(ci.CIError, "api appVersion must not decrease below '6.0.6'"):
+            self.check(above_release=True)
+
+    def test_app_version_missing_on_main_is_unconstrained(self) -> None:
+        self.sync_with_main()
+        self.touch_image()
+        self.check(above_release=True, release_ref=self.unreleased)
+
+    def hotfix_main(self) -> None:
+        """main ships hotfix 6.0.5 over develop's 6.0.4, then develop merges it back.
+
+        The base is develop at the old release; the tree is exactly main's.
+        """
+        self.git("checkout", "-q", "released")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.set_api(version="6.0.5", app_version="6.0.5")
+        self.touch_chart()
+        self.touch_image()
+        self.commit("hotfix api 6.0.5")
+
+    def test_merging_a_hotfix_back_may_match_main(self) -> None:
+        self.hotfix_main()
+        self.check(above_release=True)
+
+    def test_matching_main_with_different_chart_content_is_rejected(self) -> None:
+        self.hotfix_main()
+        self.write("services/api/chart/templates/develop-only.yaml", "kind: ConfigMap\n")
+        with self.assertRaisesRegex(
+            ci.CIError,
+            "services/api/chart chart version must increase above '6.0.5'.*unless its "
+            "packaged files are identical",
+        ):
+            self.check(above_release=True)
+
+    def test_matching_main_ignores_files_the_chart_does_not_package(self) -> None:
+        self.hotfix_main()
+        self.write("services/api/chart/.helmignore", ".gitignore\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "helmignore on main")
+        self.write("services/api/chart/.gitignore", "*.tgz\n")
+        self.check(above_release=True)
+
+    def test_app_version_matching_main_with_different_sources_is_rejected(self) -> None:
+        self.hotfix_main()
+        self.write("services/api/main.go", "package main // develop only\n")
+        with self.assertRaisesRegex(
+            ci.CIError,
+            "api appVersion must increase above '6.0.5'.*unless its sources are identical",
+        ):
+            self.check(above_release=True)
+
+    def test_an_unavailable_release_ref_is_an_error_not_an_absent_floor(self) -> None:
+        self.touch_chart()
+        with self.assertRaisesRegex(ci.CIError, "Release ref 'origin/main' is not available"):
+            self.check(above_release=True, release_ref="origin/main")
+
+    def test_an_unavailable_release_ref_is_only_needed_when_something_is_checked(self) -> None:
+        self.check(above_release=True, release_ref="origin/main")
 
 
 class WorkflowShellSyntaxTests(unittest.TestCase):

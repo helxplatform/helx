@@ -45,6 +45,11 @@ user-mutator:
   # set user-mutator.webhook.enabled to false, set user-mutator.secret.mode to
   # existingSecret, and point user-mutator.secret.existingSecret at the Secret
   # name.
+  #
+  # If the deployer lacks cluster-level permission, set
+  # user-mutator.webhook.mode to saveToConfigMap. The chart then stores the
+  # MutatingWebhookConfiguration manifest in a ConfigMap for a cluster admin
+  # to apply, instead of creating it; the install notes print the command.
 
 global:
   # tycho_api_service_name: helx-tycho-api

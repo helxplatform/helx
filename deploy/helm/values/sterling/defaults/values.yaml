@@ -5,10 +5,6 @@ appstore:
     ALLOW_SAML_LOGIN: "true"
   gunicorn:
     workers: 5
-  imagePostgresql:
-    registry: containers.renci.org
-    repository: helxplatform/bitnami-postgresql
-    tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
@@ -197,8 +193,6 @@ ui:
           headers:
           - Content-Type
 user-mutator:
-  webhook:
-    enabled: false
   config:
     features:
       ldap:

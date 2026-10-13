@@ -46,7 +46,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: {{ include "resty.fullname" . }}
+            name: {{ include "resty.serviceName" . }}
             port:
               number: {{ .Values.service.httpPort }}
 ---
@@ -81,7 +81,7 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: {{ include "resty.fullname" . }}
+            name: {{ include "resty.serviceName" . }}
             port:
               number: {{ .Values.service.httpPort }}
 {{- end }}

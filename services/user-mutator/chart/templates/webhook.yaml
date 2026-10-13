@@ -32,6 +32,7 @@ metadata:
     {{- include "user-mutator.labels" . | nindent 4 }}
   annotations:
     helm.sh/resource-policy: keep
+    {{ include "user-mutator.webhookCertServiceAnnotation" . }}: {{ include "user-mutator.serviceName" . | quote }}
 type: kubernetes.io/tls
 data:
   tls.crt: {{ get $certs "tls.crt" }}
@@ -84,7 +85,7 @@ metadata:
   labels:
     {{- include "user-mutator.labels" $root | nindent 4 }}
 webhooks:
-  - name: {{ printf "%s.%s.svc" (include "user-mutator.fullname" $root) $root.Release.Namespace }}
+  - name: {{ printf "%s.%s.svc" (include "user-mutator.serviceName" $root) $root.Release.Namespace }}
     admissionReviewVersions:
       - v1
     sideEffects: None
@@ -94,7 +95,7 @@ webhooks:
     clientConfig:
       caBundle: {{ .caBundle }}
       service:
-        name: {{ include "user-mutator.fullname" $root }}
+        name: {{ include "user-mutator.serviceName" $root }}
         namespace: {{ $root.Release.Namespace }}
         path: {{ $root.Values.webhook.path }}
         port: {{ $root.Values.service.port }}

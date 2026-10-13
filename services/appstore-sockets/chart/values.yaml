@@ -48,7 +48,8 @@ secret:
     enabled: false
 
 requirePublishSecret: true
-# If running outside helx-chart, you will need to override this value.
+# The appstore chart names its Service "appstore" unless its fullnameOverride
+# is set. Set this to that same value when it is.
 appstoreServiceNameOverride: ""
 
 podAnnotations: {}

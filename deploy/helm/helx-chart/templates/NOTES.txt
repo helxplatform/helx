@@ -34,7 +34,7 @@ Log in to HeLx with the Django admin account:
 resty.service.serverName is not set, so HeLx is reached at the address of the
 resty LoadBalancer Service:
 
-  kubectl -n {{ .Release.Namespace }} get svc {{ include "resty.fullname" $resty }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "resty.serviceName" $resty }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
 
 Then open {{ $protocol }}://<address>, with Django admin at /admin.
 {{- end }}

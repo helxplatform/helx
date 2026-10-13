@@ -1,10 +1,10 @@
 dependencies:
 - name: appstore
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 6.0.5
+  version: 6.0.6
 - name: appstore-sockets
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.1.5
+  version: 2.1.6
 - name: appstore-prepuller
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 0.1.4
@@ -13,18 +13,18 @@ dependencies:
   version: 0.3.1
 - name: ldap-sync
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 3.0.3
+  version: 3.0.4
 - name: pod-reaper
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 0.2.5
 - name: resty
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.0.4
+  version: 2.0.5
 - name: ui
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 1.6.1
+  version: 1.6.2
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 2.2.1
-digest: sha256:da1c80a893a0d5f12bdf62164eabe05a6a3d7d6a517115e985acf73ef9dc3578
-generated: '2026-10-10T21:00:14.087973+00:00'
+  version: 2.2.2
+digest: sha256:7ec12c4e9f246961100a8c1fd8300e2c91a0a5077f95a73ad5cd49c45dcf960f
+generated: '2026-10-13T14:38:52.124232+00:00'

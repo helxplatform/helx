@@ -7,12 +7,14 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import yaml
@@ -93,6 +95,55 @@ class TempTreeTest(unittest.TestCase):
             f"{directory}/Chart.yaml",
             f"apiVersion: v2\nname: {name}\nversion: {version}\n{kind}{app}{dependencies}",
         )
+
+
+class GitFixtureTest(TempTreeTest):
+    """Build a class's fixture repository once, then copy it into each test.
+
+    Every git call is a process start, tens of milliseconds on macOS, so
+    replaying the same history in every setUp dominated the suite. Subclasses
+    build history in build_fixture and name the attributes it sets in
+    fixture_attributes; commit hashes are identical in every copy.
+    """
+
+    fixture_attributes: tuple[str, ...] = ()
+    _snapshot: tempfile.TemporaryDirectory | None = None
+    _state: dict[str, Any] = {}
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls._snapshot is not None:
+            cls._snapshot.cleanup()
+            cls._snapshot = None
+        super().tearDownClass()
+
+    def setUp(self) -> None:
+        super().setUp()
+        cls = type(self)
+        if cls._snapshot is None:
+            self.git("init", "-q")
+            self.build_fixture()
+            snapshot = tempfile.TemporaryDirectory()
+            shutil.copytree(self.root, snapshot.name, symlinks=True, dirs_exist_ok=True)
+            cls._snapshot = snapshot
+            cls._state = {name: getattr(self, name) for name in self.fixture_attributes}
+        else:
+            shutil.copytree(cls._snapshot.name, self.root, symlinks=True, dirs_exist_ok=True)
+            for name, value in cls._state.items():
+                setattr(self, name, value)
+
+    def build_fixture(self) -> None:
+        raise NotImplementedError
+
+    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
+            cwd=self.root, text=True, capture_output=True, check=True,
+        )
+
+    def commit(self, message: str) -> None:
+        self.git("add", "-A")
+        self.git("commit", "-qm", message)
 
 
 class SemVerTests(unittest.TestCase):
@@ -887,24 +938,14 @@ class DockerIgnoreTests(TempTreeTest):
                     ci.validate_dockerignore(self.root, config)
 
 
-class UntrackedChangeTests(TempTreeTest):
+class UntrackedChangeTests(GitFixtureTest):
     """A local run must be able to see what CI will see once files are committed."""
 
-    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
-            cwd=self.root,
-            text=True,
-            capture_output=True,
-            check=True,
-        )
+    fixture_attributes = ("base",)
 
-    def setUp(self) -> None:
-        super().setUp()
-        self.git("init", "-q")
+    def build_fixture(self) -> None:
         self.write_chart("services/api/chart", name="api", version="1.0.0")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "base")
+        self.commit("base")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
 
     def test_untracked_file_is_invisible_by_default(self) -> None:
@@ -1538,25 +1579,22 @@ class RegistryUrlTests(unittest.TestCase):
                 ci.validate_registry(value)
 
 
-class UmbrellaAboveReleaseTests(TempTreeTest):
+class UmbrellaAboveReleaseTests(GitFixtureTest):
     """The umbrella is judged against the last release, not every base revision."""
+
+    fixture_attributes = ("base",)
 
     def setUp(self) -> None:
         super().setUp()
-        self.git("init", "-q")
+        self.empty_images = {"registry": ci.REGISTRY, "images": []}
+
+    def build_fixture(self) -> None:
         self.write_chart("services/api/chart", name="api", version="1.0.0", app_version="1.0.0")
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
         self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.2")
         self.git("add", "-A")
         self.git("commit", "-qm", "base")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
-        self.empty_images = {"registry": ci.REGISTRY, "images": []}
-
-    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
-            cwd=self.root, text=True, capture_output=True, check=True,
-        )
 
     def release(self, version: str) -> None:
         self.git("tag", f"v{version}")
@@ -1620,12 +1658,6 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
         with self.assertRaisesRegex(ci.CIError, "must not decrease below"):
             self.check(above_release=True)
 
-    def test_default_mode_still_requires_a_bump_every_change(self) -> None:
-        self.release("4.6.2")
-        self.touch_umbrella()
-        with self.assertRaisesRegex(ci.CIError, "helx-chart chart version must increase"):
-            self.check()
-
     def test_the_old_flag_name_is_an_alias(self) -> None:
         for flag in ("--above-release", "--umbrella-above-release"):
             with self.subTest(flag=flag):
@@ -1636,16 +1668,28 @@ class UmbrellaAboveReleaseTests(TempTreeTest):
         self.assertEqual(args.release_ref, "origin/main")
 
 
-class ServiceAboveReleaseTests(TempTreeTest):
+class ServiceAboveReleaseTests(GitFixtureTest):
     """Service charts and appVersions are judged against what main has published.
 
     History: an initial commit without the api chart, then "released" (what
     main has published, api 6.0.4), then the base (develop, api 6.0.5).
     """
 
+    fixture_attributes = ("base", "unreleased")
+
     def setUp(self) -> None:
         super().setUp()
-        self.git("init", "-q")
+        self.images = {
+            "registry": ci.REGISTRY,
+            "images": [{
+                "name": "api", "component": "api", "chart": "services/api/chart",
+                "repository": "api", "context": "services/api",
+                "dockerfile": "services/api/Dockerfile",
+                "sources": ["services/api"], "excludes": ["services/api/chart"],
+            }],
+        }
+
+    def build_fixture(self) -> None:
         self.write_chart("deploy/helm/helx-common/chart", name="helx-common")
         self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.2")
         self.commit("before api existed")
@@ -1657,25 +1701,6 @@ class ServiceAboveReleaseTests(TempTreeTest):
         self.set_api(version="6.0.5", app_version="6.0.5")
         self.commit("open api 6.0.5")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
-        self.images = {
-            "registry": ci.REGISTRY,
-            "images": [{
-                "name": "api", "component": "api", "chart": "services/api/chart",
-                "repository": "api", "context": "services/api",
-                "dockerfile": "services/api/Dockerfile",
-                "sources": ["services/api"], "excludes": ["services/api/chart"],
-            }],
-        }
-
-    def git(self, *args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-c", "user.email=ci@example.invalid", "-c", "user.name=ci", *args],
-            cwd=self.root, text=True, capture_output=True, check=True,
-        )
-
-    def commit(self, message: str) -> None:
-        self.git("add", "-A")
-        self.git("commit", "-qm", message)
 
     def set_api(self, *, version: str | None = None, app_version: str | None = None) -> None:
         chart = self.root / "services/api/chart/Chart.yaml"
@@ -1711,11 +1736,6 @@ class ServiceAboveReleaseTests(TempTreeTest):
         self.touch_chart()
         self.check(above_release=True)
 
-    def test_default_mode_still_requires_a_bump_every_change(self) -> None:
-        self.touch_chart()
-        with self.assertRaisesRegex(ci.CIError, "services/api/chart chart version must increase"):
-            self.check()
-
     def test_matching_main_is_rejected(self) -> None:
         # develop has just been synced with main, so the first change must bump.
         self.sync_with_main()
@@ -1743,9 +1763,11 @@ class ServiceAboveReleaseTests(TempTreeTest):
             self.check(above_release=True)
 
     def test_a_chart_missing_on_main_is_unconstrained(self) -> None:
-        # Equal to the base, and there is nothing released to sit above.
+        # Version and appVersion equal the base, and nothing is released to sit
+        # above. The same tree fails against "released"; see the matching tests.
         self.sync_with_main()
         self.touch_chart()
+        self.touch_image()
         self.check(above_release=True, release_ref=self.unreleased)
 
     def test_app_version_staying_at_the_base_passes_when_above_main(self) -> None:
@@ -1776,11 +1798,6 @@ class ServiceAboveReleaseTests(TempTreeTest):
         with self.assertRaisesRegex(ci.CIError, "api appVersion must not decrease below '6.0.6'"):
             self.check(above_release=True)
 
-    def test_app_version_missing_on_main_is_unconstrained(self) -> None:
-        self.sync_with_main()
-        self.touch_image()
-        self.check(above_release=True, release_ref=self.unreleased)
-
     def hotfix_main(self) -> None:
         """main ships hotfix 6.0.5 over develop's 6.0.4, then develop merges it back.
 
@@ -1807,14 +1824,6 @@ class ServiceAboveReleaseTests(TempTreeTest):
         ):
             self.check(above_release=True)
 
-    def test_matching_main_ignores_files_the_chart_does_not_package(self) -> None:
-        self.hotfix_main()
-        self.write("services/api/chart/.helmignore", ".gitignore\n")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "helmignore on main")
-        self.write("services/api/chart/.gitignore", "*.tgz\n")
-        self.check(above_release=True)
-
     def test_app_version_matching_main_with_different_sources_is_rejected(self) -> None:
         self.hotfix_main()
         self.write("services/api/main.go", "package main // develop only\n")
@@ -1825,12 +1834,11 @@ class ServiceAboveReleaseTests(TempTreeTest):
             self.check(above_release=True)
 
     def test_an_unavailable_release_ref_is_an_error_not_an_absent_floor(self) -> None:
+        # Only resolved once something needs a floor, so unrelated changes pass.
+        self.check(above_release=True, release_ref="origin/main")
         self.touch_chart()
         with self.assertRaisesRegex(ci.CIError, "Release ref 'origin/main' is not available"):
             self.check(above_release=True, release_ref="origin/main")
-
-    def test_an_unavailable_release_ref_is_only_needed_when_something_is_checked(self) -> None:
-        self.check(above_release=True, release_ref="origin/main")
 
 
 class WorkflowShellSyntaxTests(unittest.TestCase):

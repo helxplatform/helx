@@ -114,10 +114,10 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   is an error, no registry is queried). Equal to the release is allowed only when
   the packaged files are identical to it (main's tree, or the tag's for the
   umbrella), so merging a hotfix back needs no extra bump. The umbrella's
-  dependency pins are still enforced. So only the first pull request after a release picks each next
-  version. Raising the umbrella starts publishing a new `<version>-develop`
-  channel automatically, since the candidate tag derives from it. Never pass that
-  flag on the default branch.
+  dependency pins are still enforced. So only the first pull request after a
+  release picks each next version. Raising the umbrella starts publishing a new
+  `<version>-develop` channel automatically, since the candidate tag derives
+  from it. Never pass that flag on the default branch.
 - `check-versions` compares committed revisions, so an uncommitted or untracked
   chart file is invisible to it.
 - Prefer fixing the ignore file over adding a CI exception. If a file never

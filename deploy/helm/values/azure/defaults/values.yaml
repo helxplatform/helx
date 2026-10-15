@@ -208,6 +208,8 @@ ui:
           headers:
           - Content-Type
 user-mutator:
+  webhook:
+    mode: create
   config:
     features:
       ldap:

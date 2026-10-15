@@ -16,7 +16,7 @@ imagePostgresql:
   # Leave empty when the repository already includes the registry host.
   registry: ""
   # -- repository where postgresql image is located
-  repository: containers.renci.org/third-party/bitnami-postgresql
+  repository: containers.renci.org/helxplatform/third-party/bitnami-postgresql
   # -- pull policy
   pullPolicy: IfNotPresent
   # -- Image tag for postgresql, coordinate this with postgresql dependency.

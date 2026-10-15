@@ -18,3 +18,5 @@ verified:  2026-09-20
 #   - templates/ingress.yaml: TLS Secret stays caller-managed; a missing SSL
 #     block fails to render instead of dereferencing nil
 #   - values.yaml: Harbor image repository; no default basic-auth credentials
+#   - values.yaml: unused global defaults removed (ambassador_service_name,
+#     dug_web_service_name, dug_search_client_service_name)

@@ -29,6 +29,11 @@
 - Shared image build logic is in `.github/actions/build-service/action.yml` and
   shared chart logic is in `.github/actions/publish-charts/action.yml`. Keep
   workflows thin and reuse these actions.
+- Pull requests build only the images whose sources changed; chart edits never
+  select an image. The exception is `REBUILD_ALL_IMAGE_PATHS` in
+  `.github/scripts/ci.py` (`build-service`, `images.yaml`, `ci.py`, `ci.yml`):
+  touching any of them builds every image. That is intentional, so a CI change
+  rebuilding everything is not a bug.
 - Image tags come from chart metadata, not from Git tags or commit messages:
   released images are `v<appVersion>` of the owning chart, and candidate images
   are `<channel>-<short-sha>`. There is no automatic version bumping; bump

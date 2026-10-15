@@ -32,8 +32,17 @@ flowchart TD
 
 `helx-common` is always processed first. If it cannot be built, linted, or
 published, no service chart, umbrella chart, image, or release proceeds. This is
-intentional because services' chart will consume the shared library from the OCI
-registry.
+intentional, for two reasons:
+
+- Every service chart depends on this library chart, and the umbrella depends on
+  the service charts, so none of them can build while it is broken. During a
+  build the library is packaged from this tree, not pulled from the registry,
+  because each service chart pins exactly the in-tree version (`appstore` pins
+  `helx-common` `0.2.0`, which is what `deploy/helm/helx-common/chart` contains).
+- Those service charts still name `oci://ghcr.io/helxplatform/helm-charts` as
+  where `helx-common` comes from. On `main` the library is published there
+  first, so the version a service chart names already exists in the registry by
+  the time that service chart is published.
 
 ## CI validation
 
@@ -373,7 +382,12 @@ chart-only services remain covered by generic Helm chart discovery.
 - user-mutator.
 
 Pull requests build affected images with the GitHub Actions cache and no Harbor
-credentials. Chart-only changes are excluded from image-source detection. When
+credentials. Chart-only changes are excluded from image-source detection. A
+change to [`actions/build-service`](actions/build-service),
+[`ci/images.yaml`](ci/images.yaml), [`scripts/ci.py`](scripts/ci.py), or
+[`workflows/ci.yml`](workflows/ci.yml) builds every image instead, because those
+files decide how all images are selected and built
+(`REBUILD_ALL_IMAGE_PATHS` in `ci.py`). When
 no image sources changed, the matrix runs one clearly labeled no-op job so the
 workflow remains successful without showing an unresolved matrix expression.
 

@@ -1227,9 +1227,12 @@ def check_versions(
 
     The candidate channel follows for free, because its tag is derived from the
     umbrella version: raising it to 4.7.0 simply starts publishing 4.7.0-develop.
-    And because every service chart on the branch sits above its released
-    version, a candidate never vendors a chart under a version that is already
-    published with different content.
+    And because every service chart a pull request edits must sit above its
+    released version, a candidate normally does not vendor a chart under a
+    version already published with different content. The exception is a hotfix
+    on release_ref that publishes a version the branch already uses for other
+    content: an unedited chart is not re-checked until the hotfix is merged
+    back, which then requires the next version.
 
     Publication from the default branch must never set this. Republishing one
     version with different content is what the preflight refuses.
@@ -1264,7 +1267,11 @@ def check_versions(
                     "to choose the next version"
                 )
             else:
-                released = released_charts.field(chart_dir, "version")
+                try:
+                    released = released_charts.field(chart_dir, "version")
+                except CIError as exc:
+                    errors.append(str(exc))
+                    continue
                 release_tree = release_ref
                 hint = (
                     f". It must sit above the version {release_ref} has published unless "
@@ -1317,9 +1324,9 @@ def check_versions(
         current_app = metadata_value(current, "appVersion", str(chart_file(chart_dir)))
         base_app = metadata_value(previous, "appVersion", f"{base}:{image['chart']}/Chart.yaml")
         label = f"{image['component']} appVersion"
-        released_app = released_charts.field(chart_dir, "appVersion") if above_release else None
         try:
             if above_release:
+                released_app = released_charts.field(chart_dir, "appVersion")
                 _require_above_release(
                     current_app,
                     base_app,
@@ -1341,6 +1348,8 @@ def check_versions(
         except CIError as exc:
             errors.append(str(exc))
     if errors:
+        # A missing release ref fails every lookup with the same message.
+        errors = list(dict.fromkeys(errors))
         raise CIError("Version checks failed:\n- " + "\n- ".join(errors))
 
 

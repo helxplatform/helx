@@ -116,8 +116,16 @@ main merged back, appstore identical, 6.0.6 -> merges: same files as the publish
 main merged back, develop edits too, 6.0.6  -> rejected: different content, must pick 6.0.7
 ```
 
-Because every service chart on `develop` sits above its released version, a
-candidate never vendors a chart under a version that is already published.
+Because every service chart a pull request edits must sit above its released
+version, a candidate normally does not vendor a chart under a version that is
+already published with different content. A hotfix opens one gap. Say `develop`
+has given its own appstore edits 6.0.5 while `main` is still at 6.0.4, and a
+hotfix on `main` then publishes a different 6.0.5. Until `main` is merged back,
+nothing re-checks appstore unless a pull request edits it, so candidates vendor
+`develop`'s 6.0.5 while the registry holds `main`'s. The merge back closes it:
+appstore then differs from the published 6.0.5 and must move to 6.0.6, as in the
+last row above. Closing it sooner would mean checking every chart against `main`
+on each `develop` push.
 
 The umbrella follows the same rule against the `v*` tags. The practical effect is
 one version decision per release cycle instead of one per pull request, made by the

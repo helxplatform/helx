@@ -1840,6 +1840,33 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         with self.assertRaisesRegex(ci.CIError, "Release ref 'origin/main' is not available"):
             self.check(above_release=True, release_ref="origin/main")
 
+    def regress_umbrella(self) -> None:
+        """An unrelated error, so a release lookup failure must not hide it."""
+        self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.1")
+
+    def test_an_unavailable_release_ref_is_listed_once_with_other_errors(self) -> None:
+        self.regress_umbrella()
+        self.touch_chart()
+        self.touch_image()
+        with self.assertRaises(ci.CIError) as raised:
+            self.check(above_release=True, release_ref="origin/main")
+        message = str(raised.exception)
+        self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
+        self.assertEqual(message.count("Release ref 'origin/main' is not available"), 1)
+
+    def test_a_released_chart_without_app_version_is_listed_with_other_errors(self) -> None:
+        self.git("checkout", "-q", "-b", "no-app", "released")
+        self.write_chart("services/api/chart", name="api", version="6.0.4")
+        self.commit("release api without appVersion")
+        self.git("checkout", "-q", "-")
+        self.regress_umbrella()
+        self.touch_image()
+        with self.assertRaises(ci.CIError) as raised:
+            self.check(above_release=True, release_ref="no-app")
+        message = str(raised.exception)
+        self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
+        self.assertIn("no-app:services/api/chart/Chart.yaml", message)
+
 
 class WorkflowShellSyntaxTests(unittest.TestCase):
     """Every `run:` block must be valid bash.

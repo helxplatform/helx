@@ -32,8 +32,17 @@ flowchart TD
 
 `helx-common` is always processed first. If it cannot be built, linted, or
 published, no service chart, umbrella chart, image, or release proceeds. This is
-intentional because services' chart will consume the shared library from the OCI
-registry.
+intentional, for two reasons:
+
+- Every service chart depends on this library chart, and the umbrella depends on
+  the service charts, so none of them can build while it is broken. During a
+  build the library is packaged from this tree, not pulled from the registry,
+  because each service chart pins exactly the in-tree version (`appstore` pins
+  `helx-common` `0.2.0`, which is what `deploy/helm/helx-common/chart` contains).
+- Those service charts still name `oci://ghcr.io/helxplatform/helm-charts` as
+  where `helx-common` comes from. On `main` the library is published there
+  first, so the version a service chart names already exists in the registry by
+  the time that service chart is published.
 
 ## CI validation
 
@@ -63,22 +72,64 @@ All charts are validated instead of maintaining a changed-chart dependency
 planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
 
-Version increases in service charts are required on **every** pull request, not only 
-those targeting `main`, and again on direct pushes to `develop` and `main`. The
-`develop` candidate channel vendors service charts straight out of the tree, so a
-chart edited without a version bump would otherwise ship under a version already
-published with different content. Manual validation runs have no base revision to
-compare against and are exempt.
+Version checks run on **every** pull request, not only those targeting `main`,
+and again on direct pushes to `develop` and `main`. The `develop` candidate channel
+vendors service charts straight out of the tree, so a chart edited without a
+version bump could otherwise ship under a version already published with
+different content. Manual validation runs have no base revision to compare against
+and are exempt.
 
-The umbrella chart is judged differently. It is published immutably only from
-`main`, so on a pull request into any other branch, and on direct pushes to
-`develop`, `--umbrella-above-release` applies: rather than having to increase on
-every change, its version need only sit **above the last published release**, and
-may not regress against the base. Its dependency pins are still enforced.
+What "bump" means depends on where the change is going. Charts and
+`v<appVersion>` images are published immutably only from `main`, so on a pull
+request into `main` every changed chart version and image `appVersion` must
+increase over the base. On a pull request into any other branch, and on direct
+pushes to `develop`, `--above-release` applies instead: rather than having to
+increase on every change, a version need only sit **above what is already
+released**, and may not regress against the base. "Released" means:
 
-The practical effect is one version decision per release cycle instead of one per
-pull request, made by the person who knows whether their change is a patch, a
-minor, or a major:
+- for the umbrella, the highest `v*` tag;
+- for a service chart, the `version` in `origin/main`'s copy of its `Chart.yaml`;
+- for an image, the owning chart's `appVersion` on `origin/main`.
+
+A chart that does not exist on `main` has never been released, so it has no
+floor. A version *equal* to the released one passes only when the packaged files
+are identical to that release (the chart's own `.helmignore` decides what is
+packaged; for an image, its `sources`, `excludes`, and `.dockerignore`). That is
+what merging a hotfix from `main` back into `develop` produces: the same content
+under the same version is not a second artifact. For the umbrella, "that release"
+is the tree at the `v*` tag. The ref is `--release-ref` (CI passes `origin/<default branch>`); if it is
+missing the check fails rather than silently dropping the floor. No registry is
+queried. The umbrella's dependency pins are still enforced.
+
+Without this, two pull requests into `develop` that each edit appstore would
+force 6.0.5 and then 6.0.6, and 6.0.5 would never ship. With it:
+
+```text
+main has appstore 6.0.4, develop has 6.0.4  -> next pull request editing appstore must raise it
+pull request picks 6.0.5                    -> merges, develop has 6.0.5
+next pull request editing appstore, 6.0.5   -> merges, 6.0.5 is still above main's 6.0.4
+pull request sets appstore to 6.0.4         -> rejected: not above main's 6.0.4
+merge leaves appstore at 6.0.5 over 6.0.6   -> rejected: below the base, a bad conflict resolution
+pull request into main at 6.0.5             -> publishes 6.0.5
+hotfix on main publishes 6.0.6              -> develop is still at 6.0.5
+main merged back, appstore identical, 6.0.6 -> merges: same files as the published 6.0.6
+main merged back, develop edits too, 6.0.6  -> rejected: different content, must pick 6.0.7
+```
+
+Because every service chart a pull request edits must sit above its released
+version, a candidate normally does not vendor a chart under a version that is
+already published with different content. A hotfix opens one gap. Say `develop`
+has given its own appstore edits 6.0.5 while `main` is still at 6.0.4, and a
+hotfix on `main` then publishes a different 6.0.5. Until `main` is merged back,
+nothing re-checks appstore unless a pull request edits it, so candidates vendor
+`develop`'s 6.0.5 while the registry holds `main`'s. The merge back closes it:
+appstore then differs from the published 6.0.5 and must move to 6.0.6, as in the
+last row above. Closing it sooner would mean checking every chart against `main`
+on each `develop` push.
+
+The umbrella follows the same rule against the `v*` tags. The practical effect is
+one version decision per release cycle instead of one per pull request, made by the
+person who knows whether their change is a patch, a minor, or a major:
 
 ```text
 released 4.6.2                  -> develop still at 4.6.2, next pull request must raise it
@@ -95,12 +146,12 @@ channels such as `4.6.3-develop` stop being written to and become abandoned; use
 `make candidate-version` to learn which one is current.
 
 Because develop always sits above the last release, `<version>-develop` is an
-honest preview of `<version>` and correctly sorts below it. "Last released" is
-resolved from the `v*` tags publication creates; before the first release there is
-nothing to sit above, so the umbrella is unconstrained.
+honest preview of `<version>` and correctly sorts below it. Before the first `v*`
+release there is nothing to sit above, so the umbrella is unconstrained.
 
-The required increase reappears on the pull request into `main`, where
-publication would otherwise fail the immutability preflight.
+The required increase over the base reappears on the pull request into `main`,
+where publication would otherwise fail the immutability preflight. Never pass
+`--above-release` there.
 
 ### What counts as a change
 
@@ -339,7 +390,12 @@ chart-only services remain covered by generic Helm chart discovery.
 - user-mutator.
 
 Pull requests build affected images with the GitHub Actions cache and no Harbor
-credentials. Chart-only changes are excluded from image-source detection. When
+credentials. Chart-only changes are excluded from image-source detection. A
+change to [`actions/build-service`](actions/build-service),
+[`ci/images.yaml`](ci/images.yaml), [`scripts/ci.py`](scripts/ci.py), or
+[`workflows/ci.yml`](workflows/ci.yml) builds every image instead, because those
+files decide how all images are selected and built
+(`REBUILD_ALL_IMAGE_PATHS` in `ci.py`). When
 no image sources changed, the matrix runs one clearly labeled no-op job so the
 workflow remains successful without showing an unresolved matrix expression.
 

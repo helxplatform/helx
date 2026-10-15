@@ -625,6 +625,9 @@ The version gate compares against `develop` by default and includes uncommitted
 and untracked files. That last part matters: without it a chart file you have
 created but not yet committed is invisible, and a local pass can still fail in
 CI. Override with `BASE=<ref>`, or `CHECK_VERSIONS_FLAGS=` for committed-only.
+It also fetches `origin main` first, because the release floor is read from
+`origin/main` and the `v*` tags; if the fetch fails it warns and uses what you
+have.
 
 ### Gotchas
 

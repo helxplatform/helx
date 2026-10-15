@@ -63,7 +63,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 # Defaults for the developer-facing targets. All are overridable on the command
 # line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked --umbrella-above-release
+CHECK_VERSIONS_FLAGS            ?= --include-untracked --above-release
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -907,6 +907,10 @@ ci-validate-everything: $(PYTHON_READY)
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
+	@# --above-release reads the release floor from origin/main and the v* tags.
+	@# A stale copy sets the floor too low, so a local pass could fail in CI.
+	@git fetch --quiet origin main 2>/dev/null || \
+		echo "warning: could not fetch origin main; the release floor may be stale." >&2
 	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
 
 # ci-tests: Run the unit tests for the CI helpers. [PYTHON, VENV]

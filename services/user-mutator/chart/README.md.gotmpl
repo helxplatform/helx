@@ -164,9 +164,9 @@ the selected mode.
 ### Certificate lifecycle
 
 `secret.mode: generate` is the default webhook TLS ownership mode and is
-mutually exclusive with `existingSecret`, `values`, and `externalSecret`. The chart generates a self-signed CA and a serving certificate whose SANs cover `<fullname>`, `<fullname>.<namespace>`, `<fullname>.<namespace>.svc`, and `<fullname>.<namespace>.svc.cluster.local`.
+mutually exclusive with `existingSecret`, `values`, and `externalSecret`. The chart generates a self-signed CA and a serving certificate whose SANs cover `<service>`, `<service>.<namespace>`, `<service>.<namespace>.svc`, and `<service>.<namespace>.svc.cluster.local`, where `<service>` is the Service name: `fullnameOverride` when set, otherwise `user-mutator`.
 
-Generated material is looked up and reused on every render, so upgrades never rotate the certificate out from under a webhook configuration that already carries the matching CA bundle. The Secret also carries `helm.sh/resource-policy: keep`, so it survives an uninstall and is picked back up by a reinstall. To rotate deliberately, delete the Secret named `<fullname>-tls` and upgrade.
+Generated material is looked up and reused on every render, so upgrades never rotate the certificate out from under a webhook configuration that already carries the matching CA bundle. The Secret records the Service name it was issued for in the `user-mutator.helxplatform.io/service-name` annotation, and the chart issues a new certificate, then rolls the Pod onto it, when that name no longer matches. A Secret without the annotation predates chart 2.2.2, whose Service was `<release>-user-mutator`, so the first upgrade to 2.2.2 or later replaces it once. The Secret also carries `helm.sh/resource-policy: keep`, so it survives an uninstall and is picked back up by a reinstall. To rotate deliberately, delete the Secret named `<fullname>-tls` and upgrade.
 
 There is no automatic rotation, so `secret.generate.validityDays` defaults to ten years.
 
@@ -203,7 +203,32 @@ Delete any configuration created out of band before installing. Helm will not ta
 kubectl delete mutatingwebhookconfiguration "$NAME"
 ```
 
-Installing the chart requires cluster-level permission on `admissionregistration.k8s.io`, since that is where the configuration lives.
+Installing the chart requires cluster-level permission on `admissionregistration.k8s.io`, since that is where the configuration lives, unless `webhook.mode` is `saveToConfigMap` (below).
+
+### Deploying without cluster-level permission
+
+`webhook.mode` decides what happens to the rendered configuration when `webhook.enabled` is `true`:
+
+- `create` (the default) applies it, as described above.
+- `saveToConfigMap` creates no cluster-scoped object. The chart stores the same manifest in a ConfigMap in the release namespace, named like the configuration (`<fullname>-webhook-<namespace>` by default), under the key `mutating-webhook-configuration.yaml`. Every other object the chart renders is namespaced, so the deployer needs only namespace access.
+
+```yaml
+webhook:
+  mode: saveToConfigMap
+```
+
+Deployments are not mutated until a cluster admin applies the stored manifest. The install notes print the command; for a release `helx` in namespace `helx-dev`:
+
+```sh
+kubectl -n helx-dev get configmap helx-user-mutator-webhook-helx-dev \
+  -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' | kubectl apply -f -
+```
+
+The applied object is not owned by the release, which has three consequences:
+
+- An upgrade that changes a `webhook.*` value, or a certificate rotation, updates the ConfigMap but not the live configuration. The admin has to re-apply it.
+- `helm uninstall` removes the ConfigMap but leaves the live configuration behind. With the default `failurePolicy: Ignore` it fails open, but it should still be deleted.
+- Switching back to `create` later fails, because Helm will not take over an object it does not own. Delete the applied configuration first, as in the section above.
 
 ## Additional caller-managed Secrets
 

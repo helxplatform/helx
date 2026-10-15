@@ -63,14 +63,16 @@ jobs:
       # A chart edited without a version bump would otherwise reach develop and be
       # vendored into a candidate under a version that is already published with
       # different content.
-      # The umbrella is only published immutably from the default branch. On a
-      # pull request into any other branch it is judged against the last
-      # published release rather than the base, so only the first pull request
-      # after a release has to choose the next version -- and whoever chooses it
-      # knows whether the change is a patch, a minor, or a major. Its dependency
-      # pins are still enforced and it still may not regress. Raising it starts
-      # publishing a new <version>-develop channel automatically, because the
-      # candidate tag is derived from this version.
+      # Charts and v<appVersion> images are only published immutably from the
+      # default branch. On a pull request into any other branch they are judged
+      # against what is already released rather than the base: the last v* tag
+      # for the umbrella, and the default branch's Chart.yaml for each service
+      # chart and appVersion. So only the first pull request after a release has
+      # to choose the next version -- and whoever chooses it knows whether the
+      # change is a patch, a minor, or a major. The umbrella's dependency pins
+      # are still enforced and no version may regress against the base. Raising
+      # the umbrella starts publishing a new <version>-develop channel
+      # automatically, because the candidate tag is derived from its version.
       - name: Require chart and image version increases
         if: github.event_name == 'pull_request'
         shell: bash
@@ -82,8 +84,8 @@ jobs:
           set -euo pipefail
           arguments=(check-versions --base "$BASE_SHA")
           if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
-            arguments+=(--umbrella-above-release)
-            echo "Base is $BASE_REF, not $DEFAULT_BRANCH: the umbrella is judged against the last release."
+            arguments+=(--above-release --release-ref "origin/$DEFAULT_BRANCH")
+            echo "Base is $BASE_REF, not $DEFAULT_BRANCH: versions are judged against the last release."
           fi
           python .github/scripts/ci.py "${arguments[@]}"
 

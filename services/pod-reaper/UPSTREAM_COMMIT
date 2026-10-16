@@ -10,5 +10,9 @@ path:      charts/pod-reaper
 # All upstream changes through this commit are incorporated here.
 upstream:  9abd0f05a5ca474f5a3bdae6cfbed47f9dcaa370
 verified:  2026-09-20
-# Byte-identical to upstream at that commit, which is also upstream's newest
-# commit touching charts/pod-reaper (2025-11-03). No local divergence.
+# Upstream's newest commit touching charts/pod-reaper (2025-11-03). The local
+# copy is deliberately AHEAD of it and must not be overwritten wholesale by a
+# future pull. Intentional divergence:
+#   - Chart.yaml: version 0.3.0
+#   - templates/deployment.yaml, values.yaml: containerSecurityContext,
+#     defaulting to allowPrivilegeEscalation: false, which AKS requires

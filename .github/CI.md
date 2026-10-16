@@ -65,7 +65,9 @@ It performs these checks:
 6. run `actionlint` against the workflows;
 7. lint and package `deploy/helm/helx-common/chart`;
 8. lint and package every discovered `services/*/chart`;
-9. lint and package `deploy/helm/helx-chart`; and
+9. lint `deploy/helm/helx-chart`, render it to check that no container allows
+   privilege escalation (see
+   [Privilege escalation](#privilege-escalation)), and package it; and
 10. build only affected images without logging in or pushing.
 
 All charts are validated instead of maintaining a changed-chart dependency
@@ -307,6 +309,36 @@ If no exact local chart exists, validation authenticates to GHCR with the job
 `GITHUB_TOKEN` and pulls the version recorded in `Chart.lock`. `publish: false`
 prevents a push; it does not disable dependency resolution.
 
+### Privilege escalation
+
+AKS runs an Azure Policy in deny mode that rejects any pod with a container that
+does not set `securityContext.allowPrivilegeEscalation: false`. The policy judges
+pods, not Deployments, so a violating chart still installs; its pods just never
+appear, and the only trace is a `FailedCreate` event on the ReplicaSet.
+
+Every chart therefore defaults its container security context to that setting,
+and building the umbrella renders it with `helm template` and fails on any
+container, init container included, that leaves it unset or true. It renders the
+umbrella once with its own defaults and once for every environment under
+`deploy/helm/values/azure/envs`, because an environment's values can override
+what a chart defaults to. Other platforms do not enforce the policy and are not
+rendered; `PRIVILEGE_ESCALATION_PLATFORMS` in `scripts/ci.py` lists the ones
+that are.
+
+The renders layer [`helm/lint-values/helx.yaml`](helm/lint-values/helx.yaml),
+then the platform defaults and environment values, then
+[`helm/render-values/helx.yaml`](helm/render-values/helx.yaml). That last file
+supplies placeholder Secret values, since `helm template` cannot look existing
+Secrets up, and turns on optional containers so they are checked too. Run it on
+its own with `python .github/scripts/ci.py check-privilege-escalation
+deploy/helm/helx-chart` once the umbrella's dependencies are vendored, which
+`make build-helx-chart` does.
+
+Tycho's app pods are not rendered by any chart. Its pod template,
+`services/appstore/appstore/tycho/template/pod.yaml`, sets the field on every
+container itself, and the user-mutator webhook also adds it to the Deployments
+it mutates.
+
 ### Publication
 
 Every `main` publication reconciles all charts rather than selecting changed
@@ -483,7 +515,10 @@ For a chart:
 3. use strict `x.y.z` chart versions;
 4. commit `Chart.lock` whenever dependencies are declared; and
 5. add a values override under `helm/lint-values/<chart-name>.yaml` only when
-   default values cannot be linted safely.
+   default values cannot be linted safely; and
+6. default every container's `securityContext` to
+   `allowPrivilegeEscalation: false`, or the umbrella build fails (see
+   [Privilege escalation](#privilege-escalation)).
 
 For an image:
 

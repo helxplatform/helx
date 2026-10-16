@@ -528,8 +528,7 @@ make uninstall-release RELEASE=helx NAMESPACE=<deploy-namespace>
 `helm uninstall` on its own does not leave the namespace clean. The
 chart-managed Secrets are annotated `helm.sh/resource-policy: keep`, so that
 handing a Secret's ownership to `existingSecret` or External Secrets does not
-delete the live credentials mid-migration. The shared user storage claim
-`stdnfs` carries that same annotation, and the `data-*` claims belong to
+delete the live credentials mid-migration. The `data-*` claims belong to
 StatefulSet `volumeClaimTemplates`, which Helm never owned in the first place.
 All of that survives the uninstall and is then adopted by the next install,
 which is exactly wrong when you are trying to start clean.
@@ -538,11 +537,21 @@ So this target uninstalls the release and then deletes those leftovers:
 
 | Variable | Default |
 | --- | --- |
-| `UNINSTALL_PVCS` | `appstore-postgresql-pvc`, `stdnfs`, `data-$(RELEASE)-postgresql-0`, `data-$(RELEASE)-ldap-sync-postgres-0`, `data-openldap-0` |
+| `UNINSTALL_PVCS` | `appstore-postgresql-pvc`, `data-$(RELEASE)-postgresql-0`, `data-$(RELEASE)-ldap-sync-postgres-0`, `data-openldap-0` |
 | `UNINSTALL_SECRETS` | `$(RELEASE)-appstore-secrets`, `$(RELEASE)-appstore-sockets`, `$(RELEASE)-ldap-sync-secrets`, `$(RELEASE)-postgresql`, `openldap-credentials`, `pgadmin-env` |
 
 `appstore-postgresql-pvc` is the one entry Helm normally deletes with the
 release; it is listed so that a copy left behind by an older install goes too.
+
+The shared user storage claim `stdnfs` also carries `helm.sh/resource-policy:
+keep` and survives the uninstall, but it is deliberately left off the default
+list: it holds every user's home directory, and on a dynamically provisioned
+volume deleting the claim deletes the files with it. Name it to delete it:
+
+```bash
+make uninstall-release RELEASE=helx \
+  UNINSTALL_PVCS="appstore-postgresql-pvc stdnfs data-helx-postgresql-0 data-helx-ldap-sync-postgres-0 data-openldap-0"
+```
 
 Only the names that actually exist are touched, and everything found is listed
 for confirmation before anything is deleted:
@@ -552,7 +561,7 @@ Uninstalling helx
   context   my-cluster
   namespace my-namespace
   release   installed
-  pvcs      appstore-postgresql-pvc stdnfs data-helx-postgresql-0
+  pvcs      appstore-postgresql-pvc data-helx-postgresql-0
   secrets   helx-appstore-secrets pgadmin-env
 Deleting those claims destroys the data in them; this cannot be undone.
 Proceed? [y/N]

@@ -169,6 +169,16 @@ lint_chart() {
   helm lint "${arguments[@]}"
 }
 
+# Only the umbrella assembles every service chart, and only it has
+# per-environment values files, so it is the one chart rendered here. The
+# dependencies prepare_dependencies vendored are what it renders.
+check_privilege_escalation() {
+  local chart_dir=$1
+
+  [[ "${chart_dir%/}" == "$UMBRELLA_CHART" ]] || return 0
+  "$PYTHON" .github/scripts/ci.py check-privilege-escalation "$chart_dir"
+}
+
 package_chart() {
   local chart_dir=$1
   local chart_name=$2
@@ -245,6 +255,7 @@ main() {
   fi
 
   lint_chart "$chart_dir" "$chart_name"
+  check_privilege_escalation "$chart_dir"
   package_chart "$chart_dir" "$chart_name" "$chart_version"
 }
 

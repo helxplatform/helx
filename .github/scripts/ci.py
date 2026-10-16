@@ -105,6 +105,27 @@ REBUILD_ALL_IMAGE_PATHS = (
     ".github/scripts/ci.py",
     ".github/workflows/ci.yml",
 )
+# Platforms whose clusters deny any container that does not set
+# allowPrivilegeEscalation: false (AKS, through an Azure Policy in deny mode).
+# check-privilege-escalation renders the umbrella once with its own defaults and
+# once per environment under deploy/helm/values/<platform>/envs, since an
+# environment's values can drop what the charts default to.
+PRIVILEGE_ESCALATION_PLATFORMS = ("azure",)
+VALUES_DIR = Path("deploy/helm/values")
+LINT_VALUES_DIR = Path(".github/helm/lint-values")
+RENDER_VALUES_DIR = Path(".github/helm/render-values")
+# Path from each workload object to the pod spec its containers live in.
+POD_SPEC_PATHS = {
+    "Pod": ("spec",),
+    "Deployment": ("spec", "template", "spec"),
+    "ReplicaSet": ("spec", "template", "spec"),
+    "ReplicationController": ("spec", "template", "spec"),
+    "StatefulSet": ("spec", "template", "spec"),
+    "DaemonSet": ("spec", "template", "spec"),
+    "Job": ("spec", "template", "spec"),
+    "CronJob": ("spec", "jobTemplate", "spec", "template", "spec"),
+}
+CONTAINER_LIST_FIELDS = ("initContainers", "containers", "ephemeralContainers")
 REQUIRED_IMAGE_FIELDS = (
     "name",
     "component",
@@ -1820,6 +1841,105 @@ def release_notes(manifest: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def escalating_containers(documents: Iterable[Any]) -> list[str]:
+    """Name every container that does not set allowPrivilegeEscalation: false.
+
+    Unset counts as a failure: the API server leaves it unset, which the AKS
+    policy treats the same as true.
+    """
+    found: list[str] = []
+    for document in documents:
+        if not isinstance(document, dict) or document.get("kind") not in POD_SPEC_PATHS:
+            continue
+        spec: Any = document
+        for key in POD_SPEC_PATHS[document["kind"]]:
+            spec = spec.get(key) if isinstance(spec, dict) else None
+        if not isinstance(spec, dict):
+            continue
+        name = (document.get("metadata") or {}).get("name", "<unnamed>")
+        for field in CONTAINER_LIST_FIELDS:
+            for container in spec.get(field) or []:
+                context = container.get("securityContext") or {}
+                if context.get("allowPrivilegeEscalation") is not False:
+                    found.append(
+                        f"{document['kind']}/{name} {field} {container.get('name', '<unnamed>')}"
+                    )
+    return found
+
+
+def privilege_escalation_value_sets(root: Path, chart_name: str) -> list[tuple[str, list[Path]]]:
+    """Return each labelled list of values files check-privilege-escalation renders.
+
+    The CI render values go last so their placeholder Secret values survive an
+    environment that sets those keys empty.
+    """
+    lint = root / LINT_VALUES_DIR / f"{chart_name}.yaml"
+    render = root / RENDER_VALUES_DIR / f"{chart_name}.yaml"
+    first = [lint] if lint.is_file() else []
+    last = [render] if render.is_file() else []
+    sets = [("chart defaults", [*first, *last])]
+    for platform in PRIVILEGE_ESCALATION_PLATFORMS:
+        platform_dir = root / VALUES_DIR / platform
+        defaults = platform_dir / "defaults" / "values.yaml"
+        environments = sorted(
+            path.parent for path in (platform_dir / "envs").glob("*/values.yaml")
+        )
+        if not defaults.is_file() or not environments:
+            raise CIError(
+                f"{relative_path(root, platform_dir)} needs defaults/values.yaml and at "
+                "least one envs/<name>/values.yaml for check-privilege-escalation"
+            )
+        for environment in environments:
+            sets.append(
+                (
+                    f"{platform}/{environment.name}",
+                    [*first, defaults, environment / "values.yaml", *last],
+                )
+            )
+    return sets
+
+
+def helm_template(chart: Path, values_files: Sequence[Path]) -> str:
+    """Render a chart offline with helm template and return the manifests."""
+    command = ["helm", "template", "helx", str(chart), "--namespace", "helx-ci"]
+    for values_file in values_files:
+        command += ["--values", str(values_file)]
+    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise CIError(f"helm template {chart} failed:\n{result.stderr.strip()}")
+    return result.stdout
+
+
+def check_privilege_escalation(
+    root: Path,
+    chart_dir: Path,
+    render: Callable[[Path, Sequence[Path]], str] = helm_template,
+) -> list[str]:
+    """Render chart_dir with every value set and fail on any escalating container.
+
+    Returns the labels of the value sets that passed.
+    """
+    chart_path = chart_file(chart_dir)
+    chart_name = metadata_value(read_yaml(chart_path), "name", str(chart_path))
+    failures: list[str] = []
+    passed: list[str] = []
+    for label, values_files in privilege_escalation_value_sets(root, chart_name):
+        documents = list(yaml.safe_load_all(render(chart_dir, values_files)))
+        offenders = escalating_containers(documents)
+        if offenders:
+            failures.append(f"{label}:\n  - " + "\n  - ".join(offenders))
+        else:
+            passed.append(label)
+    if failures:
+        raise CIError(
+            "These containers do not set securityContext.allowPrivilegeEscalation: "
+            "false, which AKS denies. Set it in the owning chart's default "
+            "container securityContext, or stop the values file from removing it:\n"
+            + "\n".join(failures)
+        )
+    return passed
+
+
 def output_path(root: Path, value: str) -> Path:
     """Resolve a CLI output path relative to root unless already absolute."""
     path = Path(value)
@@ -1877,6 +1997,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
     locked = commands.add_parser("locked-dependencies")
     locked.add_argument("chart_dir")
+
+    escalation = commands.add_parser(
+        "check-privilege-escalation",
+        help="render a chart whose dependencies are already vendored, with its "
+        "defaults and each enforcing platform's environments, and fail on any "
+        "container that leaves allowPrivilegeEscalation unset or true",
+    )
+    escalation.add_argument("chart_dir")
 
     info = commands.add_parser("release-info")
     info.add_argument("--base", required=True)
@@ -1958,6 +2086,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "locked-dependencies":
             for dependency in exact_locked_dependencies(output_path(ROOT, args.chart_dir)):
                 print(dependency.tsv())
+        elif args.command == "check-privilege-escalation":
+            passed = check_privilege_escalation(ROOT, output_path(ROOT, args.chart_dir))
+            print("No container allows privilege escalation: " + ", ".join(passed))
         elif args.command == "release-info":
             write_github_outputs(
                 output_path(ROOT, args.github_output), release_info(ROOT, args.base, args.force)

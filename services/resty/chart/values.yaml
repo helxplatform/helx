@@ -26,6 +26,12 @@ service:
   serverName: _
   # nodePort: 31337
 
+# -- Container securityContext, applied to every container this chart renders.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+
 resources:
   limits:
     cpu: 100m

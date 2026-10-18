@@ -13,6 +13,6 @@ verified:  2026-09-20
 # Upstream's newest commit touching charts/pod-reaper (2025-11-03). The local
 # copy is deliberately AHEAD of it and must not be overwritten wholesale by a
 # future pull. Intentional divergence:
-#   - Chart.yaml: version 0.3.0
+#   - Chart.yaml: version 0.2.6
 #   - templates/deployment.yaml, values.yaml: containerSecurityContext,
 #     defaulting to allowPrivilegeEscalation: false, which AKS requires

@@ -25,19 +25,19 @@ dependencies:
   #   repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore
     condition: appstore.enabled
-    version: "6.1.0"
+    version: "6.0.7"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-sockets
     condition: appstore-sockets.enabled
-    version: "2.2.0"
+    version: "2.1.7"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: appstore-prepuller
     condition: appstore-prepuller.enabled
-    version: "0.2.0"
+    version: "0.1.5"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: helx-ldap
     condition: helx-ldap.enabled
-    version: "0.4.0"
+    version: "0.3.2"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ldap-sync
     condition: ldap-sync.enabled
@@ -45,11 +45,11 @@ dependencies:
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: pod-reaper
     condition: pod-reaper.enabled
-    version: "0.3.0"
+    version: "0.2.6"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: resty
     condition: resty.enabled
-    version: "2.1.0"
+    version: "2.0.7"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
   - name: ui
     condition: ui.enabled

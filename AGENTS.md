@@ -172,6 +172,13 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   where that key already reached the containers, and as
   `containerSecurityContext` elsewhere; in appstore-sockets, `securityContext`
   is still not applied to any container. Tycho's pod template sets it itself.
+- Lint values live in `.github/helm/lint-values/<chart name>.yaml`, one file
+  per chart, used when that chart is linted alone. The umbrella has none to
+  maintain: `ci.py lint-values` nests each dependency's file under its name (a
+  `helx.yaml`, if ever added, goes on top), and both `helm lint` in
+  `helm-build-chart.sh` and the render checks use that. A chart-managed Secret
+  that requires values belongs in `existingSecret` mode there, or lint prints
+  `[INFO] Fail:` lines. `validate-config` rejects a file not named after a chart.
 - Use `helm lint` on the affected chart, then the complete chart set when
   practical. Dependency archives are not checked in. CI does not run
   `helm dependency update`; `prepare_dependencies` in

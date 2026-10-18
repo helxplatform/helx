@@ -11,6 +11,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import tempfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -898,7 +899,12 @@ def validate_config(root: Path = ROOT, config_path: Path | None = None) -> dict[
             charts[name] = data
         except CIError as exc:
             errors.append(str(exc))
-    for check in (validate_dependency_versions, _validate_locks, validate_helmignore):
+    for check in (
+        validate_dependency_versions,
+        _validate_locks,
+        validate_helmignore,
+        validate_lint_values,
+    ):
         try:
             check(root)
         except CIError as exc:
@@ -1867,15 +1873,63 @@ def escalating_containers(documents: Iterable[Any]) -> list[str]:
     return found
 
 
-def privilege_escalation_value_sets(root: Path, chart_name: str) -> list[tuple[str, list[Path]]]:
+def lint_values(root: Path, chart_dir: Path) -> dict[str, Any]:
+    """Return the CI lint values helm lint and the render checks use for a chart.
+
+    A chart's own are in .github/helm/lint-values/<chart name>.yaml. The
+    umbrella's are composed: each dependency's file, nested under the key Helm
+    gives that subchart (its alias, else its name), with the umbrella's own file
+    on top if there is one. So a service's lint settings live in one file, used
+    both when it is linted alone and when the umbrella is.
+    """
+    chart_path = chart_file(chart_dir)
+    data = read_yaml(chart_path)
+    name = metadata_value(data, "name", str(chart_path))
+    values: dict[str, Any] = {}
+    if chart_dir.resolve() == (root / UMBRELLA_DIR).resolve():
+        for dependency in data.get("dependencies") or []:
+            dependency_values = root / LINT_VALUES_DIR / f"{dependency['name']}.yaml"
+            if dependency_values.is_file():
+                key = dependency.get("alias") or dependency["name"]
+                values[key] = read_yaml(dependency_values)
+    own = root / LINT_VALUES_DIR / f"{name}.yaml"
+    if own.is_file():
+        values = deep_merge(values, read_yaml(own))
+    return values
+
+
+def validate_lint_values(root: Path) -> None:
+    """Require every lint values file to be named after a chart in this tree.
+
+    A file is matched to its chart by name alone, so a misspelt one would
+    silently stop applying anywhere.
+    """
+    directory = root / LINT_VALUES_DIR
+    if not directory.is_dir():
+        return
+    names = set()
+    for chart_dir in [*discover_chart_dirs(root), root / COMMON_DIR]:
+        if (chart_dir / "Chart.yaml").is_file():
+            chart_path = chart_dir / "Chart.yaml"
+            names.add(metadata_value(read_yaml(chart_path), "name", str(chart_path)))
+    stray = sorted(path.name for path in directory.glob("*.yaml") if path.stem not in names)
+    if stray:
+        raise CIError(
+            f"{relative_path(root, directory)} files must be named <chart name>.yaml; "
+            f"no chart is named after: {', '.join(stray)}"
+        )
+
+
+def privilege_escalation_value_sets(
+    root: Path, chart_name: str, lint_file: Path | None = None
+) -> list[tuple[str, list[Path]]]:
     """Return each labelled list of values files check-privilege-escalation renders.
 
-    The CI render values go last so their placeholder Secret values survive an
-    environment that sets those keys empty.
+    lint_file, the chart's composed lint values, goes first, and the CI render
+    values last, so they survive an environment that changes the same keys.
     """
-    lint = root / LINT_VALUES_DIR / f"{chart_name}.yaml"
     render = root / RENDER_VALUES_DIR / f"{chart_name}.yaml"
-    first = [lint] if lint.is_file() else []
+    first = [lint_file] if lint_file else []
     last = [render] if render.is_file() else []
     sets = [("chart defaults", [*first, *last])]
     for platform in PRIVILEGE_ESCALATION_PLATFORMS:
@@ -1923,13 +1977,16 @@ def check_privilege_escalation(
     chart_name = metadata_value(read_yaml(chart_path), "name", str(chart_path))
     failures: list[str] = []
     passed: list[str] = []
-    for label, values_files in privilege_escalation_value_sets(root, chart_name):
-        documents = list(yaml.safe_load_all(render(chart_dir, values_files)))
-        offenders = escalating_containers(documents)
-        if offenders:
-            failures.append(f"{label}:\n  - " + "\n  - ".join(offenders))
-        else:
-            passed.append(label)
+    with tempfile.TemporaryDirectory() as scratch:
+        lint_file = Path(scratch) / "lint-values.yaml"
+        lint_file.write_text(yaml.safe_dump(lint_values(root, chart_dir)), encoding="utf-8")
+        for label, values_files in privilege_escalation_value_sets(root, chart_name, lint_file):
+            documents = list(yaml.safe_load_all(render(chart_dir, values_files)))
+            offenders = escalating_containers(documents)
+            if offenders:
+                failures.append(f"{label}:\n  - " + "\n  - ".join(offenders))
+            else:
+                passed.append(label)
     if failures:
         raise CIError(
             "These containers do not set securityContext.allowPrivilegeEscalation: "
@@ -2005,6 +2062,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "container that leaves allowPrivilegeEscalation unset or true",
     )
     escalation.add_argument("chart_dir")
+
+    lint = commands.add_parser(
+        "lint-values",
+        help="write the CI lint values for a chart; the umbrella's are composed "
+        "from its dependencies' files",
+    )
+    lint.add_argument("chart_dir")
+    lint.add_argument("--output", required=True)
 
     info = commands.add_parser("release-info")
     info.add_argument("--base", required=True)
@@ -2089,6 +2154,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "check-privilege-escalation":
             passed = check_privilege_escalation(ROOT, output_path(ROOT, args.chart_dir))
             print("No container allows privilege escalation: " + ", ".join(passed))
+        elif args.command == "lint-values":
+            output_path(ROOT, args.output).write_text(
+                yaml.safe_dump(lint_values(ROOT, output_path(ROOT, args.chart_dir))),
+                encoding="utf-8",
+            )
         elif args.command == "release-info":
             write_github_outputs(
                 output_path(ROOT, args.github_output), release_info(ROOT, args.base, args.force)

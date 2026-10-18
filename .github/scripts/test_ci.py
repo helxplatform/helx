@@ -1925,7 +1925,7 @@ class PrivilegeEscalationTests(TempTreeTest):
         )
 
     def test_value_sets_cover_defaults_then_each_environment_in_order(self) -> None:
-        lint = self.write(".github/helm/lint-values/helx.yaml", "{}\n")
+        lint = self.root / "composed-lint-values.yaml"
         render = self.write(".github/helm/render-values/helx.yaml", "{}\n")
         self.write_platform("azure", "zeta", "alpha")
         # Platforms the policy does not apply to are not rendered.
@@ -1934,7 +1934,7 @@ class PrivilegeEscalationTests(TempTreeTest):
         environments = self.root / "deploy/helm/values/azure/envs"
 
         self.assertEqual(
-            ci.privilege_escalation_value_sets(self.root, "helx"),
+            ci.privilege_escalation_value_sets(self.root, "helx", lint),
             [
                 ("chart defaults", [lint, render]),
                 ("azure/alpha", [lint, defaults, environments / "alpha/values.yaml", render]),
@@ -1978,6 +1978,68 @@ class PrivilegeEscalationTests(TempTreeTest):
             ci.check_privilege_escalation(self.root, chart, render=render),
             ["chart defaults", "azure/only"],
         )
+
+
+class LintValuesTests(TempTreeTest):
+    """Synthetic charts only; nothing here runs helm."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        dependencies = (
+            "dependencies:\n"
+            "  - name: app\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+            "  - name: other\n"
+            "    alias: renamed\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+            "  - name: bare\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+        )
+        self.umbrella = self.write_chart(
+            "deploy/helm/helx-chart", name="helx", dependencies=dependencies
+        ).parent
+        self.app = self.write_chart("services/app/chart", name="app").parent
+        self.write_chart("services/other/chart", name="other")
+        self.write_chart("services/bare/chart", name="bare")
+        self.write_chart("services/loose/chart", name="loose")
+        self.write(".github/helm/lint-values/app.yaml", "secret:\n  mode: existingSecret\n")
+        self.write(".github/helm/lint-values/other.yaml", "enabled: true\n")
+        # Not an umbrella dependency: used when linting it alone, never nested.
+        self.write(".github/helm/lint-values/loose.yaml", "x: 1\n")
+
+    def test_a_service_uses_its_own_file(self) -> None:
+        self.assertEqual(ci.lint_values(self.root, self.app), {"secret": {"mode": "existingSecret"}})
+        bare = self.root / "services/bare/chart"
+        self.assertEqual(ci.lint_values(self.root, bare), {})
+
+    def test_the_umbrella_nests_each_dependency_file_under_its_key(self) -> None:
+        self.assertEqual(
+            ci.lint_values(self.root, self.umbrella),
+            {"app": {"secret": {"mode": "existingSecret"}}, "renamed": {"enabled": True}},
+        )
+
+    def test_the_umbrella_file_applies_on_top(self) -> None:
+        self.write(
+            ".github/helm/lint-values/helx.yaml",
+            "app:\n  secret:\n    existingSecret: s\nglobal:\n  a: b\n",
+        )
+        self.assertEqual(
+            ci.lint_values(self.root, self.umbrella),
+            {
+                "app": {"secret": {"mode": "existingSecret", "existingSecret": "s"}},
+                "renamed": {"enabled": True},
+                "global": {"a": "b"},
+            },
+        )
+
+    def test_file_names_must_name_a_chart(self) -> None:
+        ci.validate_lint_values(self.root)
+        self.write(".github/helm/lint-values/ap.yaml", "{}\n")
+        with self.assertRaisesRegex(ci.CIError, "no chart is named after: ap.yaml"):
+            ci.validate_lint_values(self.root)
 
 
 class WorkflowShellSyntaxTests(unittest.TestCase):

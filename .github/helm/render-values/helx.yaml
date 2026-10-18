@@ -5,36 +5,12 @@
 # fails if any container leaves the setting out. This file holds the extra
 # values those renders need, and is applied last on each one.
 #
-# helm template can't read existing Secrets, so chart-managed Secrets get
-# placeholder values here; the output is only inspected, never applied.
-# Optional containers are also turned on so they get checked. The one container
+# Secrets need nothing here: the lint values, applied first, point every
+# chart-managed Secret at an existing one, which renders without credentials.
+# Optional containers are turned on so they get checked too. The one container
 # not checked is helx-ldap's PVC migration Job, which only renders during an
 # upgrade and would need many more placeholder credentials.
 appstore:
-  secret:
-    values:
-      SECRET_KEY: render-only
-      APPSTORE_DJANGO_USERNAME: render-only
-      APPSTORE_DJANGO_PASSWORD: render-only
-      PG_DB_PASSWORD: render-only
   saml:
     cache:
       enabled: true
-
-helx-ldap:
-  secret:
-    values:
-      LDAP_ADMIN_PASSWORD: render-only
-      LDAP_CONFIG_ADMIN_PASSWORD: render-only
-
-ldap-sync:
-  secret:
-    values:
-      SOURCE_BIND_PASSWORD: render-only
-      TARGET_BIND_PASSWORD: render-only
-
-user-mutator:
-  ldap:
-    secret:
-      values:
-        password: render-only

@@ -309,6 +309,23 @@ If no exact local chart exists, validation authenticates to GHCR with the job
 `GITHUB_TOKEN` and pulls the version recorded in `Chart.lock`. `publish: false`
 prevents a push; it does not disable dependency resolution.
 
+### Lint values
+
+`helm lint` and the render checks give each chart the values in
+[`helm/lint-values/<chart name>.yaml`](helm/lint-values), when that file
+exists. They exist only where a chart's defaults cannot render offline,
+typically because a chart-managed Secret requires values: those files switch it
+to `existingSecret` mode, which needs no credentials. Left out, helx-common's
+missing-value check prints `[INFO] Fail: ...` on every lint, since helm lint
+logs a template `fail` instead of stopping.
+
+The umbrella has no file of its own to keep in step. `ci.py lint-values` builds
+its values from its dependencies' files, each nested under that subchart's key,
+so `appstore.yaml` lands under `appstore:`. A `helx.yaml` would be applied on
+top, for values that belong to the umbrella itself; none exists today. Every
+file has to be named after a chart in this repository, which `validate-config`
+checks, since a misspelt one would otherwise stop applying silently.
+
 ### Privilege escalation
 
 AKS runs an Azure Policy in deny mode that rejects any pod with a container that
@@ -325,11 +342,12 @@ what a chart defaults to. Other platforms do not enforce the policy and are not
 rendered; `PRIVILEGE_ESCALATION_PLATFORMS` in `scripts/ci.py` lists the ones
 that are.
 
-The renders layer [`helm/lint-values/helx.yaml`](helm/lint-values/helx.yaml),
-then the platform defaults and environment values, then
-[`helm/render-values/helx.yaml`](helm/render-values/helx.yaml). That last file
-supplies placeholder Secret values, since `helm template` cannot look existing
-Secrets up, and turns on optional containers so they are checked too. Run it on
+The renders layer the umbrella's lint values (see
+[Lint values](#lint-values)), then the platform defaults and environment
+values, then [`helm/render-values/helx.yaml`](helm/render-values/helx.yaml),
+which turns on optional containers so they are checked too. The lint values
+point every chart-managed Secret at an existing one, so the renders need no
+credentials even though `helm template` cannot look Secrets up. Run it on
 its own with `python .github/scripts/ci.py check-privilege-escalation
 deploy/helm/helx-chart` once the umbrella's dependencies are vendored, which
 `make build-helx-chart` does.
@@ -515,7 +533,8 @@ For a chart:
 3. use strict `x.y.z` chart versions;
 4. commit `Chart.lock` whenever dependencies are declared; and
 5. add a values override under `helm/lint-values/<chart-name>.yaml` only when
-   default values cannot be linted safely; and
+   default values cannot be linted safely; the umbrella picks it up too (see
+   [Lint values](#lint-values)); and
 6. default every container's `securityContext` to
    `allowPrivilegeEscalation: false`, or the umbrella build fails (see
    [Privilege escalation](#privilege-escalation)).

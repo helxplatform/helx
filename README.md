@@ -327,7 +327,7 @@ helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
    That writes both the tag and the repository for those services. Everything
    outside `SERVICES` keeps pulling from Harbor, so the cluster needs
    credentials for both registries unless you mirrored the rest yourself.
-5. You can install the `.tgz` it prints:
+6. You can install the `.tgz` it prints:
 
    ```bash
    helm upgrade --install helx /path/to/helx-<version>-local.tgz \

@@ -7,7 +7,8 @@ replicaCount: 1
 image:
   repository: containers.renci.org/helxplatform/ldap-sync
   pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
+  # Overrides the image tag whose default is v<chart appVersion>, the tag CI
+  # publishes released images under.
   tag: ""
 
 imagePullSecrets: []

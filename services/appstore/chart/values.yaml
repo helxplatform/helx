@@ -171,6 +171,12 @@ serviceAccount:
 
 podSecurityContext: {}
 
+# -- Container securityContext, applied to every container this chart renders.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+
 service:
   type: ClusterIP
   port: 80
@@ -525,5 +531,8 @@ postgresql:
     storageClass:
   volumePermissions:
     enabled: true
+    # Merged into the subchart's default (runAsUser: 0) for init-chmod-data.
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
   # -- enable/disable postgresql network policy, allows traffic to and from appstore pod only.
   networkPolicyEnabled: true

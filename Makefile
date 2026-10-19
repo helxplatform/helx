@@ -140,9 +140,10 @@ HELM_FLAGS                      ?=
 # volumeClaimTemplates, which helm never owned in the first place. Names the
 # charts build out of the release name are written with $(RELEASE); the rest are
 # fixed by whichever chart creates them. Set either variable empty to leave that
-# kind of resource alone.
+# kind of resource alone. The shared user storage claim stdnfs is deliberately
+# not in the default: it holds every user's home directory, so deleting it has
+# to be asked for by name, e.g. UNINSTALL_PVCS="stdnfs ...".
 UNINSTALL_PVCS                  ?= appstore-postgresql-pvc \
-                                   stdnfs \
                                    data-$(RELEASE)-postgresql-0 \
                                    data-$(RELEASE)-ldap-sync-postgres-0 \
                                    data-openldap-0

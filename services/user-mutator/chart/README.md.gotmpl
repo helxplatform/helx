@@ -191,6 +191,24 @@ webhook:
     enable-user-mutator-webhook-ai-sb-test: "true"
 ```
 
+### Deployment selection and failure policy
+
+By default, every Deployment created or updated in the selected namespaces is sent to the webhook, and `webhook.failurePolicy` is `Ignore`. If the webhook cannot be reached, or does not answer within `webhook.timeoutSeconds`, the API server admits the Deployment unchanged. For a Tycho app, that means it starts without the user's LDAP UID and groups, their volumes, or the nslcd sidecar, and nothing reports an error.
+
+To make such a launch fail instead, set `failurePolicy: Fail` together with an `objectSelector` that limits the webhook to the Deployments Tycho launches, which it labels `executor: tycho`:
+
+```yaml
+webhook:
+  objectSelector:
+    matchLabels:
+      executor: tycho
+  failurePolicy: Fail
+```
+
+Keep the selector whenever `Fail` is set. Without it, a webhook outage blocks every Deployment in the namespace, including this chart's own rollout. With both set, an outage stops only app launches and changes to running apps, and Tycho gets an error back from the API server.
+
+Neither is set by default or in this repository's platform values. Tycho's pod template sets `allowPrivilegeEscalation: false` on every container itself, so app pods pass AKS's privilege-escalation policy whether or not the webhook ran.
+
 ### Adopting a configuration created out of band
 
 The configuration is cluster-scoped, so `webhook.name` defaults to `<fullname>-webhook-<namespace>`. Both qualifiers matter: the release name keeps two releases in one namespace apart, and the namespace keeps one release name in two namespaces apart. The `webhook` token makes the object self-describing in a cluster-wide listing.

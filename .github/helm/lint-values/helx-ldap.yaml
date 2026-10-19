@@ -1,4 +1,5 @@
-# CI-only values for the standalone helx-ldap chart lint. Helm lint does not
+# CI-only lint values for the helx-ldap chart, used when it is linted on its own
+# and, nested under helx-ldap:, when the umbrella is. Helm lint does not
 # contact a cluster, so these values exercise the caller-managed credentials
 # Secret mode without putting synthetic credentials in rendered manifests.
 secret:

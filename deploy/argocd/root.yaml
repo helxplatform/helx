@@ -1,0 +1,27 @@
+# The one Application applied by hand, once per cluster:
+#
+#   kubectl apply -n argocd -f deploy/argocd/root.yaml
+#
+# It keeps deploy/argocd/bootstrap/ synced, so every later change to the
+# AppProject, the External Secrets install, or the ApplicationSet goes through
+# Git. See docs/argocd-setup-in-new-cluster.md.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/helxplatform/helx.git
+    targetRevision: develop
+    path: deploy/argocd/bootstrap
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    # prune stays off: removing a file from bootstrap/ should not silently
+    # delete what it created. Delete such objects by hand once you mean it.
+    automated:
+      prune: false
+      selfHeal: true

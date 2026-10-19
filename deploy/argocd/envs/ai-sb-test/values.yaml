@@ -1,0 +1,84 @@
+# Argo CD-only values for ai-sb-test, layered after
+# deploy/helm/values/azure/defaults/values.yaml and
+# deploy/helm/values/azure/envs/ai-sb-test/values.yaml.
+#
+# Argo CD renders the chart with `helm template`, so Helm's `lookup` finds
+# nothing and every render is a fresh install. Anything a chart would otherwise
+# generate or carry over from the live cluster (passwords, the webhook
+# certificate) must come from somewhere fixed, or Argo CD would replace it on
+# every sync. Here that is Vault, through the SecretStore named `vault` in
+# manifests/secret-store.yaml.
+#
+# Each Vault entry is named after the Kubernetes Secret it fills, under
+# helx/ai-sb-test/, and holds exactly that Secret's keys.
+
+appstore:
+  secret:
+    mode: externalSecret
+    externalSecret:
+      enabled: true
+      remoteRef: helx/ai-sb-test/helx-appstore-secrets
+    # Migration reads live Secrets, which Argo CD cannot do.
+    migration:
+      enabled: false
+  pgadmin:
+    secret:
+      mode: externalSecret
+      externalSecret:
+        enabled: true
+        remoteRef: helx/ai-sb-test/pgadmin-env
+  # The bitnami subchart would generate a new admin password on every render.
+  # manifests/postgres-secrets.yaml fills this Secret from Vault instead.
+  postgresql:
+    global:
+      postgresql:
+        auth:
+          existingSecret: helx-postgresql
+
+appstore-sockets:
+  secret:
+    mode: externalSecret
+    externalSecret:
+      enabled: true
+      remoteRef: helx/ai-sb-test/helx-appstore-sockets
+
+helx-ldap:
+  secret:
+    mode: externalSecret
+    externalSecret:
+      enabled: true
+      remoteRef: helx/ai-sb-test/openldap-credentials
+
+ldap-sync:
+  secret:
+    mode: externalSecret
+    externalSecret:
+      enabled: true
+      remoteRef: helx/ai-sb-test/helx-ldap-sync-secrets
+  # Same as appstore's PostgreSQL: filled by manifests/postgres-secrets.yaml.
+  postgres:
+    auth:
+      existingSecret: helx-ldap-sync-postgres
+
+user-mutator:
+  # The default, secret.mode: generate, makes a new CA on every render, which
+  # would also change the webhook's caBundle on every sync.
+  secret:
+    mode: externalSecret
+    externalSecret:
+      enabled: true
+      remoteRef: helx/ai-sb-test/helx-user-mutator-tls
+  webhook:
+    # The CA that signed the serving certificate in Vault; it is public, not a
+    # secret. Copied from the live webhook before the takeover:
+    #   kubectl get mutatingwebhookconfiguration \
+    #     helx-user-mutator-webhook-ai-sb-test \
+    #     -o jsonpath='{.webhooks[0].clientConfig.caBundle}'
+    # Valid until 2036-10-11. Replace it together with the Vault entry.
+    caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURJRENDQWdpZ0F3SUJBZ0lSQVB6THVMU1dWTHdHaktMMy9KN1FBMHd3RFFZSktvWklodmNOQVFFTEJRQXcKR2pFWU1CWUdBMVVFQXhNUGRYTmxjaTF0ZFhSaGRHOXlMV05oTUI0WERUSTJNVEF4TkRBd05UQXhNVm9YRFRNMgpNVEF4TVRBd05UQXhNVm93R2pFWU1CWUdBMVVFQXhNUGRYTmxjaTF0ZFhSaGRHOXlMV05oTUlJQklqQU5CZ2txCmhraUc5dzBCQVFFRkFBT0NBUThBTUlJQkNnS0NBUUVBcGl3NElRaTdkR3Z3WVJUUmpGL21xZEk5RmtGSUxrVkQKYmVSb0pBWUl5MkU1dGJtRGJabWY2dmdWY3gwdnAvRGdrYWdobVNPTGV4dTNGU1NodDhPV0JoUFpzR0NDSUFobQorVy81dGRCTU5IaUFhaGYwNlJ3ME51L2NlUVJUODBJNGVVOTZPdEViMGpUTkVnanRjd3JzeWwrbmU4WWhEYkR6Ck54NThueVpsM05ramJCQVQxSC9zUjMzSUVwM2VnVHpEVGM0ekhJTndheFd2MUhaZngzZTlFb0pSNGJYSmliQi8KdHNaVnF3YnM0b3daQlhyR0laci9BUFd5bGtGSlBnV3Vrb1hRUGs3NDM0WEhDbjBZUkQ1end1WFN6dWVWT2gwSwpmQWN4MFg4eVFsSWlKQzBVaDU4TkkyQThMTXQ3NU1pNWREL0krenBoOStRQWhWaGR2UzZCRXdJREFRQUJvMkV3Clh6QU9CZ05WSFE4QkFmOEVCQU1DQXFRd0hRWURWUjBsQkJZd0ZBWUlLd1lCQlFVSEF3RUdDQ3NHQVFVRkJ3TUMKTUE4R0ExVWRFd0VCL3dRRk1BTUJBZjh3SFFZRFZSME9CQllFRkZuRGhsenhVSmlvYjh5cXRwWEtWN3NkT3pEegpNQTBHQ1NxR1NJYjNEUUVCQ3dVQUE0SUJBUUJKTEY2WWlZNnczK01rbEoyWFcvcitpdENoZ0w2dW0rblg0eFhaCnZVc0EwY3JReWR6SzA4VERraFRuUEphSEVFd1JJdFI2WDVHU0lLdlhwdDlXQlowUTJOSEMyUjdTZTB5cytYN24KZ2RyMitMZnZvcHVuWG1hcEFSLzBhOGtTZHFuU0I4VXdWRDZ4V2RsQko3QU05ZjdNbUlQQTNlZEk0SjhaWHNuSwphNnNjcG9pM1prTWJCSVFkVW9IZTdzdy93cnl4eWFGM2d3V1B4OThuVTBtS2kxZXFtMlB3OStIcGQ2M3FPZllzCjZObzMrOE9kb293a3QzakR6SWI4WWRRcldsMThLVDJ6WHpLa09YZnMxZTYzbnYraEtaZkxhWlN4d1ZJQ0NPMDkKNmF3MHFsTElNQmFVenN5K3kwVEV4Z2RQRWZLOU1UNEhTcEhhR0I3WkhCREJZeU1OCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+  ldap:
+    secret:
+      mode: externalSecret
+      externalSecret:
+        enabled: true
+        remoteRef: helx/ai-sb-test/helx-user-mutator-ldap-password

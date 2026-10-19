@@ -21,6 +21,10 @@ readonly UMBRELLA_CHART="deploy/helm/helx-chart"
 # the commit being built, so the archive always describes the current tree.
 readonly CHANNEL="${CHART_CHANNEL:-}"
 readonly CHANNEL_COMMIT="${CHART_CHANNEL_COMMIT:-}"
+# Optional: a number that only grows, such as the workflow run number. It makes
+# the candidate <version>-<channel>.<build>, published once and never
+# overwritten, which is what Argo CD needs to notice a new candidate.
+readonly CHANNEL_BUILD="${CHART_CHANNEL_BUILD:-}"
 # Optional: limit the image pins to these components, use a literal tag
 # instead of <channel>-<short-sha>, and point those images at a registry other
 # than the one in .github/ci/images.yaml. All three are for local builds where
@@ -239,8 +243,9 @@ main() {
       echo "::error::CHART_CHANNEL only applies to $UMBRELLA_CHART, not $chart_dir" >&2
       exit 1
     fi
-    chart_version=$("$PYTHON" .github/scripts/ci.py candidate-version \
-      --channel "$CHANNEL" --chart-dir "$chart_dir")
+    local -a version_arguments=(--channel "$CHANNEL" --chart-dir "$chart_dir")
+    [[ -n "$CHANNEL_BUILD" ]] && version_arguments+=(--build "$CHANNEL_BUILD")
+    chart_version=$("$PYTHON" .github/scripts/ci.py candidate-version "${version_arguments[@]}")
     apply_candidate_values "$chart_dir"
   fi
 

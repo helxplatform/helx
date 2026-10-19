@@ -1,0 +1,19 @@
+# Read by deploy/argocd/bootstrap/applicationset-helx.yaml, which turns it into
+# the Application helx-ai-sb-test. The folder name, ai-sb-test, must match the
+# folder under deploy/helm/values/<cluster>/envs/.
+
+# Selects deploy/helm/values/azure/.
+cluster: azure
+namespace: ai-sb-test
+# Must equal the existing Helm release name, or every resource name changes.
+releaseName: helx
+# Branch the values files and manifests/ are read from.
+valuesRef: develop
+chart:
+  repoURL: ghcr.io/helxplatform/helm-charts
+  # The newest version, prereleases included: develop.yml's numbered
+  # <version>-develop.<run number> candidates, or a release once one is newer.
+  # Images come from ACR either way, through the repositories set in
+  # deploy/helm/values/azure/defaults/values.yaml.
+  version: '>=0.0.0-0'
+autoSync: false

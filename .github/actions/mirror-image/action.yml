@@ -1,0 +1,70 @@
+name: Copy image to another registry
+description: >-
+  Copy one published HeLx image from Harbor to another registry, such as the
+  ACR the Azure AI Sandbox cluster pulls from, without rebuilding it
+
+inputs:
+  repository:
+    description: Image repository relative to helxplatform/, as in the image matrix
+    required: true
+  tag:
+    description: Image tag, which must already exist in Harbor
+    required: true
+  target-registry:
+    description: Login server of the registry to copy to, without a path
+    required: true
+  harbor-username:
+    description: Harbor username
+    required: true
+  harbor-password:
+    description: Harbor password
+    required: true
+  target-username:
+    description: Username for target-registry
+    required: true
+  target-password:
+    description: Password or token for target-username
+    required: true
+
+outputs:
+  reference:
+    description: Fully qualified reference of the copy
+    value: ${{ inputs.target-registry }}/helxplatform/${{ inputs.repository }}:${{ inputs.tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+
+    - name: Log in to Harbor
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+      with:
+        registry: containers.renci.org
+        username: ${{ inputs.harbor-username }}
+        password: ${{ inputs.harbor-password }}
+        logout: true
+
+    - name: Log in to the target registry
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+      with:
+        registry: ${{ inputs.target-registry }}
+        username: ${{ inputs.target-username }}
+        password: ${{ inputs.target-password }}
+        logout: true
+
+    # imagetools copies the manifest and its layers registry to registry, so the
+    # copy has the same digest as the Harbor image. Copying a tag that is
+    # already there rewrites the same content, so re-runs are harmless.
+    - name: Copy image
+      shell: bash
+      env:
+        REPOSITORY: ${{ inputs.repository }}
+        TAG: ${{ inputs.tag }}
+        TARGET_REGISTRY: ${{ inputs.target-registry }}
+      run: |
+        set -euo pipefail
+        source="containers.renci.org/helxplatform/$REPOSITORY:$TAG"
+        target="$TARGET_REGISTRY/helxplatform/$REPOSITORY:$TAG"
+        docker buildx imagetools create --tag "$target" "$source"
+        docker buildx imagetools inspect "$target"

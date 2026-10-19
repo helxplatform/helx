@@ -45,6 +45,7 @@ SEMVER_RE = re.compile(
 DIGEST_RE = re.compile(r"^Digest:\s*(sha256:[0-9a-f]{64})\s*$", re.MULTILINE)
 CHANNEL_RE = re.compile(r"^[a-z][0-9a-z]*(?:-[0-9a-z]+)*$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
+BUILD_RE = re.compile(r"^[1-9][0-9]*$")
 VALUES_PART_RE = re.compile(r"^[A-Za-z_][0-9A-Za-z_-]*$")
 SHORT_SHA_LENGTH = 7
 OCI_TAG_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
@@ -1455,13 +1456,31 @@ def short_commit(commit: str) -> str:
     return commit.strip()[:SHORT_SHA_LENGTH]
 
 
-def candidate_version(version: str, channel: str) -> str:
-    """Return the mutable prerelease chart version published for a channel."""
+def candidate_version(version: str, channel: str, build: str | None = None) -> str:
+    """Return the prerelease chart version published for a channel.
+
+    Without `build` this is the mutable `<version>-<channel>`. With it, the
+    version is `<version>-<channel>.<build>`, which is published once and never
+    overwritten. `build` must be a number that only grows, such as the
+    workflow run number, because SemVer compares numeric identifiers
+    numerically: that is what lets a consumer such as Argo CD follow the
+    channel with the range `>=0.0.0-0` and always land on the newest build.
+    """
     if SemVer.parse(version, "chart version").prerelease:
         raise CIError(f"Cannot build a candidate from prerelease version {version!r}")
     candidate = f"{str(version).strip()}-{validate_channel(channel)}"
+    if build is not None:
+        candidate = f"{candidate}.{validate_build_number(build)}"
     SemVer.parse(candidate, "candidate chart version")
     return candidate
+
+
+def validate_build_number(build: str) -> str:
+    """Validate a candidate build number usable as a numeric SemVer identifier."""
+    text = str(build).strip()
+    if not BUILD_RE.fullmatch(text):
+        raise CIError(f"Build number must be a positive integer without leading zeros: {build!r}")
+    return text
 
 
 def candidate_image_tag(channel: str, commit: str) -> str:
@@ -1886,6 +1905,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     version = commands.add_parser("candidate-version")
     version.add_argument("--channel", required=True)
     version.add_argument("--chart-dir", default=str(UMBRELLA_DIR))
+    version.add_argument(
+        "--build",
+        help="append .<build> to the candidate version, publishing an immutable "
+        "build of the channel rather than the mutable channel version",
+    )
     version.add_argument("--github-output")
 
     plan = commands.add_parser("image-plan")
@@ -1966,7 +1990,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             chart_dir = output_path(ROOT, args.chart_dir)
             data = read_yaml(chart_file(chart_dir))
             base = metadata_value(data, "version", str(chart_file(chart_dir)))
-            candidate = candidate_version(base, args.channel)
+            candidate = candidate_version(base, args.channel, args.build or None)
             if args.github_output:
                 write_github_outputs(
                     output_path(ROOT, args.github_output),

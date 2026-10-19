@@ -211,6 +211,40 @@ jobs:
           registry-username: ${{ secrets.CONTAINERHUB_USERNAME }}
           registry-password: ${{ secrets.CONTAINERHUB_PASSWORD }}
 
+  # The Azure AI Sandbox cluster cannot pull from Harbor. When the
+  # ACR_LOGIN_SERVER repository variable is set, every released image is also
+  # copied to <ACR_LOGIN_SERVER>/helxplatform/, so an Azure environment can run
+  # a released umbrella as well as a develop candidate. The release does not
+  # wait for it. Leave the variable unset to skip it.
+  mirror-images-acr:
+    name: Copy ${{ matrix.image.name }}:${{ matrix.image.tag }} to ACR
+    if: vars.ACR_LOGIN_SERVER != ''
+    needs:
+      - plan-images
+      - publish-images
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        image: ${{ fromJSON(needs.plan-images.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Copy released image
+        uses: ./.github/actions/mirror-image
+        with:
+          repository: ${{ matrix.image.repository }}
+          tag: ${{ matrix.image.tag }}
+          target-registry: ${{ vars.ACR_LOGIN_SERVER }}
+          harbor-username: ${{ secrets.CONTAINERHUB_USERNAME }}
+          harbor-password: ${{ secrets.CONTAINERHUB_PASSWORD }}
+          target-username: ${{ secrets.ACR_USERNAME }}
+          target-password: ${{ secrets.ACR_PASSWORD }}
+
   release-info:
     name: Determine release
     needs:

@@ -50,7 +50,17 @@
   Harbor. The override reaches `ci.py` as `image-plan --registry` and
   `candidate-values --registry`, and the latter rewrites each image's
   `repository` alongside its tag, so the packaged chart names the registry the
-  images were actually pushed to. CI never sets it.
+  images were actually pushed to.
+- The one exception in CI is ACR, for the Azure AI Sandbox cluster, which cannot
+  pull from Harbor. When the repository variable `ACR_LOGIN_SERVER` is set,
+  `develop.yml` and `publish.yml` each run `mirror-images-acr`, which copies
+  every image they published from Harbor to `<ACR_LOGIN_SERVER>/helxplatform/`
+  with `.github/actions/mirror-image` (no rebuild, same digest), using the
+  secrets `ACR_USERNAME` and `ACR_PASSWORD`. Unset the variable and it skips.
+  Only images go to ACR; charts are published to GHCR only. The chart keeps
+  pinning Harbor repositories, and `deploy/helm/values/azure/defaults/values.yaml`
+  repoints every built image's `repository` at ACR, so a new image in
+  `.github/ci/images.yaml` needs a line there too.
 
 ## Candidate channels
 
@@ -77,6 +87,38 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   invisible.
 - The immutability preflight is skipped for candidates and must stay that way;
   it exists to protect released versions only.
+- A candidate can also be numbered: `CHART_CHANNEL_BUILD` (the action's
+  `channel-build`, `candidate-version --build`) makes it
+  `<version>-<channel>.<build>`, published once and never overwritten. Argo CD
+  caches a chart by its version string and never notices an overwritten tag,
+  so anything Argo CD follows must be numbered; it follows the newest with the
+  range `>=0.0.0-0`. The build must only grow (CI uses `github.run_number`),
+  since SemVer compares numeric identifiers numerically. `develop.yml`
+  publishes both: the mutable `<version>-develop` (`publish-candidate`), then
+  the same content as `<version>-develop.<run number>`
+  (`publish-numbered-candidate`), which waits for `mirror-images-acr` so a
+  cluster pulling from ACR never sees a chart before its images.
+
+## Argo CD
+
+- Argo CD config lives in `deploy/argocd/`. `root.yaml` is applied by hand once
+  per cluster and syncs `bootstrap/` (the `helx` AppProject, External Secrets,
+  and the ApplicationSet). The ApplicationSet makes one Application,
+  `helx-<env>`, per `envs/<env>/config.yaml`, rendering the whole umbrella with
+  the cluster and env files from `deploy/helm/values/` plus
+  `envs/<env>/values.yaml`, and applying `envs/<env>/manifests/`.
+  `docs/argocd-setup-in-new-cluster.md` is the procedure, including taking over
+  an existing Helm release.
+- Argo CD renders with `helm template`: `lookup` returns nothing and
+  `.Release.IsUpgrade` is always false. A chart value that generates something
+  (`randAlphaNum`, `genCA`) or carries it over from the live cluster renders
+  differently on every sync. `envs/<env>/values.yaml` exists to replace those
+  with Vault-backed ExternalSecrets or fixed values. After changing a chart or
+  those values, render twice with every values file the Application uses and
+  check the two outputs are identical.
+- Migration switches (`*.migration.enabled`) need a real `helm upgrade` and
+  must stay off in anything Argo CD renders. Run migrations with
+  `make helm-deploy` before handing a namespace to Argo CD.
 
 ## Helm charts
 
@@ -170,8 +212,8 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `.github/scripts/helm-build-chart.sh` vendors each locked dependency itself,
   preferring an in-tree chart and pulling from the registry otherwise.
 - Validate workflow/action YAML and inspect project diagnostics after edits.
-- Preserve unrelated user changes, including untracked directories such as
-  `deployments/argocd/`; do not commit or create branches unless requested.
+- Preserve unrelated user changes, including untracked files and directories;
+  do not commit or create branches unless requested.
 
 ## Other rules
 

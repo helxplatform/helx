@@ -564,6 +564,19 @@ class CandidateChannelTests(TempTreeTest):
             with self.assertRaisesRegex(ci.CIError, "Channel"):
                 ci.candidate_version("4.5.6", channel)
 
+    def test_numbered_candidate_versions_sort_by_build_and_below_the_release(self) -> None:
+        self.assertEqual(ci.candidate_version("4.5.6", "develop", "42"), "4.5.6-develop.42")
+        ninth = ci.SemVer.parse(ci.candidate_version("4.5.6", "develop", "9"))
+        tenth = ci.SemVer.parse(ci.candidate_version("4.5.6", "develop", "10"))
+        self.assertLess(ninth, tenth)
+        self.assertLess(tenth, ci.SemVer.parse("4.5.6"))
+        self.assertLess(tenth, ci.SemVer.parse(ci.candidate_version("4.5.7", "develop", "1")))
+
+    def test_candidate_build_number_must_be_a_positive_integer(self) -> None:
+        for build in ("0", "07", "-1", "1.2", "abc", ""):
+            with self.assertRaisesRegex(ci.CIError, "Build number"):
+                ci.candidate_version("4.5.6", "develop", build)
+
     def test_candidate_image_tag_shortens_the_commit(self) -> None:
         self.assertEqual(
             ci.candidate_image_tag("develop", "e3452604aaaabbbbccccddddeeeeffff00001111"),

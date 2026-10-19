@@ -1,4 +1,15 @@
+# This cluster cannot pull from Harbor reliably, so every image this
+# repository builds is pulled from ACR instead. Only the repository is set
+# here; the tag still comes from the chart. When the ACR_LOGIN_SERVER
+# repository variable is set, CI copies every develop and released image to
+# aisandboxrencitgt.azurecr.io/helxplatform/ (see the mirror-images-acr jobs).
+# A new image in .github/ci/images.yaml needs a repository line here too.
+# The paths below are the ones this prints:
+#   python .github/scripts/ci.py candidate-values --channel develop \
+#     --commit 0000000 --registry aisandboxrencitgt.azurecr.io/helxplatform --output /dev/stdout
 appstore:
+  image:
+    repository: aisandboxrencitgt.azurecr.io/helxplatform/appstore
   ACCOUNT_DEFAULT_HTTP_PROTOCOL: https
   djangoSettings: helx
   django:
@@ -66,6 +77,8 @@ appstore-prepuller:
     branch: # CHANGEME
     brand: # CHANGEME
   controller:
+    image:
+      repository: aisandboxrencitgt.azurecr.io/helxplatform/appstore-prepuller
     resources:
       limits:
         cpu: 200m
@@ -77,6 +90,11 @@ appstore-prepuller:
     nodeSelector:
       kubernetes.azure.com/mode: user
 appstore-sockets:
+  image:
+    repository: aisandboxrencitgt.azurecr.io/helxplatform/appstore-sockets/server
+  monitoring:
+    image:
+      repository: aisandboxrencitgt.azurecr.io/helxplatform/appstore-sockets/monitoring
   securityContext:
     runAsUser: 1001
 global:
@@ -84,6 +102,8 @@ global:
   - renci-registry-creds
   - aisandboxrencitgt-creds
 ldap-sync:
+  image:
+    repository: aisandboxrencitgt.azurecr.io/helxplatform/ldap-sync
   searchBootstrap:
     id: get-groups
     filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
@@ -153,6 +173,8 @@ resty:
   service:
     serverName: # CHANGEME
 ui:
+  image:
+    repository: aisandboxrencitgt.azurecr.io/helxplatform/helx-ui
   config:
     appstore_asset_base_url: https:\/\/raw.githubusercontent.com\/helxplatform\/appstore
     appstore_asset_branch: develop
@@ -208,6 +230,12 @@ ui:
           headers:
           - Content-Type
 user-mutator:
+  image:
+    repository: aisandboxrencitgt.azurecr.io/helxplatform/user-mutator
+  ldap:
+    sidecar:
+      image:
+        repository: aisandboxrencitgt.azurecr.io/helxplatform/nslcd-sidecar
   webhook:
     mode: create
   config:

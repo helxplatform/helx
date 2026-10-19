@@ -1,0 +1,22 @@
+# Limits the HeLx Applications to this repository, the chart registries, and
+# the namespaces listed here. Add a namespace to destinations when you add an
+# environment under deploy/argocd/envs/.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: helx
+  namespace: argocd
+spec:
+  description: HeLx umbrella releases
+  sourceRepos:
+    - https://github.com/helxplatform/helx.git
+    - ghcr.io/helxplatform/helm-charts
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: ai-sb-test
+  # The only cluster-scoped object the umbrella renders is user-mutator's
+  # MutatingWebhookConfiguration (webhook.mode: create). Namespaced kinds are
+  # all allowed because namespaceResourceWhitelist is left unset.
+  clusterResourceWhitelist:
+    - group: admissionregistration.k8s.io
+      kind: MutatingWebhookConfiguration

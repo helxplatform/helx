@@ -22,11 +22,19 @@ inputs:
   channel:
     description: >-
       Candidate channel name. When set, the umbrella is built from the local
-      tree and published as a mutable <version>-<channel> prerelease.
+      tree and published as a mutable <version>-<channel> prerelease, or as
+      an immutable <version>-<channel>.<build> one when channel-build is set.
     required: false
     default: ''
   channel-commit:
     description: Commit whose images the candidate pins
+    required: false
+    default: ''
+  channel-build:
+    description: >-
+      Number that only grows, such as the workflow run number. When set with
+      channel, the candidate is <version>-<channel>.<build> and is never
+      overwritten, so Argo CD can follow the channel with a version range.
     required: false
     default: ''
 
@@ -72,6 +80,7 @@ runs:
         CHART_DIR: ${{ inputs.chart-dir }}
         CHART_CHANNEL: ${{ inputs.channel }}
         CHART_CHANNEL_COMMIT: ${{ inputs.channel-commit }}
+        CHART_CHANNEL_BUILD: ${{ inputs.channel-build }}
       run: bash .github/scripts/helm-build-chart.sh "$CHART_DIR"
 
     # Candidate channels are deliberately mutable, so the immutability preflight

@@ -1,0 +1,63 @@
+# Creates one Application, helx-<env>, for each deploy/argocd/envs/<env>/config.yaml.
+# Each Application renders the umbrella chart with three values files, in order:
+#
+#   deploy/helm/values/<cluster>/defaults/values.yaml     shared by the cluster
+#   deploy/helm/values/<cluster>/envs/<env>/values.yaml   the environment
+#   deploy/argocd/envs/<env>/values.yaml                  Argo CD-only settings
+#
+# and also applies the plain manifests in deploy/argocd/envs/<env>/manifests/.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: helx
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  syncPolicy:
+    # Deleting this ApplicationSet, or an env file, must never uninstall HeLx.
+    preserveResourcesOnDeletion: true
+  generators:
+    - git:
+        repoURL: https://github.com/helxplatform/helx.git
+        revision: develop
+        files:
+          - path: deploy/argocd/envs/*/config.yaml
+  template:
+    metadata:
+      name: 'helx-{{ .path.basename }}'
+      labels:
+        app.kubernetes.io/part-of: helx
+    spec:
+      project: helx
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ .namespace }}'
+      sources:
+        - repoURL: '{{ .chart.repoURL }}'
+          chart: helx
+          targetRevision: '{{ .chart.version }}'
+          helm:
+            releaseName: '{{ .releaseName }}'
+            # Argo CD has no equivalent of helm test; leave the test Pods out.
+            skipTests: true
+            valueFiles:
+              - '$values/deploy/helm/values/{{ .cluster }}/defaults/values.yaml'
+              - '$values/deploy/helm/values/{{ .cluster }}/envs/{{ .path.basename }}/values.yaml'
+              - '$values/deploy/argocd/envs/{{ .path.basename }}/values.yaml'
+        - repoURL: https://github.com/helxplatform/helx.git
+          targetRevision: '{{ .valuesRef }}'
+          ref: values
+        - repoURL: https://github.com/helxplatform/helx.git
+          targetRevision: '{{ .valuesRef }}'
+          path: 'deploy/argocd/envs/{{ .path.basename }}/manifests'
+  # Automatic sync is opt-in per environment, so a takeover starts with
+  # autoSync: false and someone reviewing the first diff.
+  templatePatch: |
+    {{- if .autoSync }}
+    spec:
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+    {{- end }}

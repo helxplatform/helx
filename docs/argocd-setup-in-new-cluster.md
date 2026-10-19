@@ -173,20 +173,74 @@ up):
 ```sh
 kubectl --context ai-sandbox -n ai-sb-test run vault-check --rm -i --restart=Never \
   --image=curlimages/curl:8.10.1 -- \
-  curl -sS --max-time 10 https://<vault address>/v1/sys/health
+  curl -sS --max-time 10 https://vault.apps.renci.org/v1/sys/health
 ```
 
 - **JSON comes back:** the cluster can reach Vault; carry on below.
-- **Timeout or "could not resolve host":** it can't. The network
-  administrators need to route the cluster's outbound traffic to Vault (for
-  example a site-to-site VPN or private link from the cluster's Azure network
-  to RENCI). Until then, External Secrets can't fill any Secret here.
+- **Timeout or "could not resolve host":** it can't. `vault.apps.renci.org`
+  resolves to a public address (152.54.15.132), so the usual fix is for
+  the team that runs Vault to allow connections from the cluster's outbound
+  IP address (next section). If they can't, the network administrators need
+  to route the cluster's outbound traffic to Vault (for example a
+  site-to-site VPN or private link from the cluster's Azure network to
+  RENCI). Until one of these is done, External Secrets can't fill any Secret here.
   Everything else in this procedure is independent of the secret store, so if
   that route can't be arranged, swap the store. Only `secret-store.yaml`
   changes, for example to ESO's Azure Key Vault provider with workload identity.
   The charts' ExternalSecrets, `values.yaml`, and the Vault paths stay as they
   are; Azure Key Vault secret names can't contain `/`, so the `remoteRef`
   values would change too.
+
+### Finding the cluster's outbound IP address
+
+Connections from pods leave the cluster through one public IP address, which
+is what Vault's allow-list needs. With `az` logged in to the cluster's
+subscription:
+
+```sh
+# How the cluster sends outbound traffic, and which IP resource it uses
+az aks show -g renci-ai-sandbox -n ai-sandbox --query \
+  '{outboundType: networkProfile.outboundType,
+    lbIps: networkProfile.loadBalancerProfile.effectiveOutboundIPs[].id,
+    natIps: networkProfile.natGatewayProfile.effectiveOutboundIPs[].id}'
+
+# The address of each IP resource listed above
+az network public-ip show --ids <id from above> --query ipAddress -o tsv
+```
+
+On the Azure cluster `outboundType` is `loadBalancer`, with one outbound IP:
+**9.169.134.173** (Standard SKU, so it is static). No node pool gives its nodes
+their own public IPs, so all pod traffic leaves through that address. The
+`outboundType` decides where to look:
+
+- `loadBalancer`: the IPs under `lbIps`, as above.
+- `managedNATGateway` or `userAssignedNATGateway`: the IPs under `natIps`.
+- `userDefinedRouting`: traffic leaves through a firewall or appliance the
+  network team runs; ask them for its address.
+
+To confirm from inside the cluster (prints the address the internet sees):
+
+```sh
+kubectl --context ai-sandbox -n ai-sb-test run egress-ip --rm -i --restart=Never \
+  --image=curlimages/curl:8.10.1 -- curl -sS --max-time 10 https://ifconfig.me
+```
+
+AKS created and manages this IP (it is tagged `aks-slb-managed-outbound-ip`).
+It is a separate Azure resource from the nodes, so node restarts, node image
+upgrades, and Kubernetes upgrades leave it alone. On the Azure cluster it was
+created on 2026-04-27, along with the cluster, and was still unchanged in
+October 2026 after automatic node image upgrades (nodes were on July 2026
+images). It changes if someone changes the cluster's outbound settings, for
+example the number of managed outbound IPs or the outbound type. If the
+cluster is recreated, it gets a new address and the allow-list must be
+updated. Microsoft's stop/start documentation warns only that the API
+server's IP may change after `az aks start`; it doesn't mention the outbound
+IP, so re-check it after a stop and start. Don't confuse it with
+`pubip-ingress-nginx` in the same resource group: that is the inbound address
+for the ingress controller, not the one pods' outbound traffic uses. For an address that survives all of
+that, create a public IP (or prefix) yourself and attach it with
+`az aks update --load-balancer-outbound-ips <id>` before asking for the
+allow-list.
 
 ### Vault login: JWT auth
 

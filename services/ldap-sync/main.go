@@ -150,6 +150,11 @@ type HookResponse struct {
 
 var config Config
 var logger *slog.Logger
+
+// logLevel backs the handler built by initLogger. setLogLevel changes it in
+// place, because search goroutines read logger concurrently and replacing the
+// pointer would race with them.
+var logLevel = new(slog.LevelVar)
 var currentLogLevel string
 var searches = make(map[string]*SearchSpec)
 var searchResults = make(map[string]map[string]LDAPResult)
@@ -1025,15 +1030,16 @@ func initLogger(loglevel string) {
 	case "info":
 		lvl = slog.LevelInfo
 	}
+	logLevel.Set(lvl)
 	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     lvl,
+		Level:     logLevel,
 		AddSource: true,
 	})
 	logger = slog.New(h)
 	logger.Info("Logger initialized", "level", lvlStr)
 }
 
-// setLogLevel updates the global logger to the new level.
+// setLogLevel updates the level of the global logger.
 func setLogLevel(newLevel string) {
 	var lvl slog.Level = slog.LevelInfo
 	switch strings.ToLower(newLevel) {
@@ -1046,11 +1052,7 @@ func setLogLevel(newLevel string) {
 	case "info":
 		lvl = slog.LevelInfo
 	}
-	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     lvl,
-		AddSource: true,
-	})
-	logger = slog.New(h)
+	logLevel.Set(lvl)
 	logger.Info("Log level updated", "newLevel", newLevel)
 }
 

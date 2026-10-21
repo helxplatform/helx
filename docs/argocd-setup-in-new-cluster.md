@@ -2,18 +2,16 @@
 
 This is the procedure for moving a cluster's HeLx deployments from
 `make helm-deploy` to Argo CD, including taking over Helm releases that are
-already running. It was first carried out on the Azure AI Sandbox cluster
-(kube context `ai-sandbox`), starting with the `ai-sb-test` namespace, in
-October 2026. Each section records what was done there and what to change for
-another cluster.
+already running. The commands use the Azure AI Sandbox cluster (kube context
+`ai-sandbox`) and its `ai-sb-test` namespace as the example; substitute your
+own cluster and namespace. Where the Azure cluster needs something other
+clusters don't (pulling images from ACR), the section says so.
 
-> **Status (2026-10-20):** the repository side is done: sections 2, 6, and 7
+> **Status (2026-10-21):** the repository side is done: sections 2, 6, and 7
 > (the CI half), and the files in `deploy/argocd/`. External Secrets is
-> installed on the Azure cluster (section 3). Steps that change the
-> cluster, Vault, ACR, or GitHub settings are marked *(not done yet)*. Update
-> each one as it is carried out. The open question is whether the cluster can
-> reach Vault at all, since Vault is only reachable over the RENCI VPN
-> (section 4).
+> installed on the Azure cluster (section 3) and connected to Vault
+> (section 4). Steps that change the cluster, Vault, ACR, or GitHub
+> settings are marked *(not done yet)*. Update each one as it is carried out.
 
 ## How the pieces fit
 
@@ -48,13 +46,14 @@ deploy/argocd/
 ├── bootstrap/                         synced by root
 │   ├── project-helx.yaml              AppProject: allowed repos and namespaces
 │   ├── external-secrets.yaml          Application: the ESO Helm chart
+│   ├── vault-cluster-secret-store.yaml  how ESO logs in to Vault
+│   ├── vault-token-renewal.yaml       weekly CronJob that renews ESO's Vault token
 │   └── applicationset-helx.yaml       one Application per envs/<env>/
 └── envs/
     └── ai-sb-test/
         ├── config.yaml                cluster, namespace, chart and version
         ├── values.yaml                Argo CD-only values (third values file)
         └── manifests/
-            ├── secret-store.yaml      how ESO logs in to Vault
             └── postgres-secrets.yaml  ExternalSecrets the charts can't render
 ```
 
@@ -87,30 +86,25 @@ kubectl --context "$CONTEXT" -n ai-sb-test get secrets -o \
   jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.app\.kubernetes\.io/managed-by}{"\n"}{end}'
 ```
 
-What this showed on the Azure cluster:
+What to look for in the output:
 
-| Namespace    | What runs there                                                                                          |
-| ------------ | -------------------------------------------------------------------------------------------------------- |
-| `ai-sb-test` | One `helx` release, chart `helx-5.1.1-local` (packaged locally with `make build-helx-chart`).            |
-| `default`    | The older layout: `helx` chart 4.5.10 plus separate `ldap-sync`, `openldap`, `user-mutator`, and `appstore-prepuller` releases. |
-| `infra`      | cert-manager, ingress-nginx, gpu-operator.                                                                |
-| `argocd`     | Argo CD v3.5.5, installed from manifests shortly before this work. No Applications yet.                   |
-
-External Secrets was not installed. `gatekeeper-system` exists, so Gatekeeper
-policies may reject some objects; check its audit results if a sync fails
-with an admission error.
-
-The HeLx images in `ai-sb-test` come from ACR
-(`aisandboxrencitgt.azurecr.io/helxplatform/...`, tag `azure-demo-deploy-1`),
-not from Harbor, because this cluster cannot reliably pull from Harbor. Charts
-are different: the cluster and Argo CD can reach GHCR, so the chart comes from
-there like everywhere else. On a cluster that can pull from
-`containers.renci.org`, skip the ACR parts of section 7.
-
-`ai-sb-test` was chosen first because it already runs the current umbrella
-chart. A namespace still on the old split layout (like `default` here) must
-first be migrated to the umbrella with `make helm-deploy`, following
-[DeploymentMigration.md](DeploymentMigration.md), before Argo CD takes it over.
+- **Which layout each HeLx namespace uses.** A namespace with a single `helx`
+  release runs the current umbrella chart and can be taken over directly. A
+  namespace with separate `ldap-sync`, `openldap`, `user-mutator`, or
+  `appstore-prepuller` releases is on the older split layout. Migrate it to
+  the umbrella with `make helm-deploy` first, following
+  [DeploymentMigration.md](DeploymentMigration.md).
+- **The Helm release name** of the umbrella (`helx` in the examples). Argo CD
+  must use the same name (section 10).
+- **Whether External Secrets is already installed** (`*.external-secrets.io`
+  CRDs). Section 3 assumes it isn't.
+- **Whether `gatekeeper-system` exists.** If it does, Gatekeeper policies may
+  reject some objects. Check its enforced constraints (section 3), and its
+  audit results if a sync fails with an admission error.
+- **Where the images come from.** If they come from ACR rather than Harbor
+  (`containers.renci.org`), the cluster can't reliably pull from Harbor, and
+  section 7's ACR steps apply. Charts are different: Argo CD pulls them from
+  GHCR on every cluster.
 
 ## 2. Finish chart migrations before handing over
 
@@ -139,8 +133,7 @@ every deploy looks like a fresh install. So:
   grep -rn -A2 'migration:' deploy/helm/values/<cluster>/ deploy/argocd/envs/<env>/
   ```
 
-On the Azure cluster none was enabled for `ai-sb-test`. As a safeguard,
-`deploy/argocd/envs/ai-sb-test/values.yaml` sets
+Each `deploy/argocd/envs/<env>/values.yaml` also sets
 `appstore.secret.migration.enabled: false` explicitly, because appstore's
 chart default is `true`.
 
@@ -149,9 +142,8 @@ chart default is `true`.
 `deploy/argocd/bootstrap/external-secrets.yaml` installs ESO chart 2.13.0 into
 the `external-secrets` namespace. The root Application (section 9) applies it
 along with the rest of `bootstrap/`. ESO doesn't depend on anything else in
-this procedure, though, so it can be applied on its own first. That is what
-was done on the Azure cluster, so the SecretStore could be tested before the
-bootstrap:
+this procedure, though, so it can be applied on its own first, which lets
+you connect it to Vault (section 4) before the bootstrap:
 
 ```sh
 kubectl --context ai-sandbox apply -f deploy/argocd/bootstrap/external-secrets.yaml
@@ -178,10 +170,10 @@ rejected:
 - no `external-secrets` namespace and no `*.external-secrets.io` CRDs yet
   (`kubectl get crd | grep external-secrets`)
 - the cluster can pull `ghcr.io/external-secrets/external-secrets`
-- no admission policy blocks ESO. On the Azure cluster, Gatekeeper enforces
-  only "no privileged containers" and "no privilege escalation", and ESO's
-  three containers set neither; the other Azure Policy constraints there only
-  record violations:
+- no admission policy blocks ESO. List the constraints Gatekeeper enforces;
+  the others only record violations. ESO's three containers are not
+  privileged and set `allowPrivilegeEscalation: false`, which satisfies AKS's
+  usual "no privileged containers" and "no privilege escalation" policies:
 
   ```sh
   kubectl get constraints -o \
@@ -205,36 +197,53 @@ ExternalSecrets), so nothing else on the cluster is affected.
 
 To upgrade ESO later, change `targetRevision` in that file.
 
-## 4. Connect External Secrets to Vault *(not done yet)*
+## 4. Connect External Secrets to Vault *(done)*
 
-Each HeLx namespace gets its own SecretStore named `vault`, defined in
-`deploy/argocd/envs/<env>/manifests/secret-store.yaml`. Every ExternalSecret
-the HeLx charts render points at a SecretStore with that name by default. A
-namespaced SecretStore, rather than one cluster-wide store, means each
-namespace can only read its own Vault entries.
+External Secrets reads Vault through one ClusterSecretStore named `vault`,
+defined in `deploy/argocd/bootstrap/vault-cluster-secret-store.yaml`. Every
+ExternalSecret under `deploy/argocd/envs/` points at it. It logs in with a
+single Vault token for the whole cluster, kept in the Secret `vault-token` in
+the `external-secrets` namespace. That Secret is created by hand and never
+committed.
+
+- The token's Vault policy only allows reading entries under `helx/`.
+- The store's `conditions` list the namespaces allowed to use it. Add a
+  namespace there when you add an environment.
+- The token lasts at most a year. `bootstrap/vault-token-renewal.yaml` renews
+  it weekly, and someone replaces it once a year (below).
 
 ### Can the cluster reach Vault?
 
 ESO runs in the cluster and connects to Vault on every refresh, so pods in the
 cluster need a network path to Vault. RENCI's Vault is usually only reachable
-over the VPN, so on the Azure cluster this has to be confirmed before anything
+over the VPN, so on a new cluster this has to be confirmed before anything
 else in this section. Run this from a throwaway pod (it only asks Vault whether
 it is up):
 
 ```sh
-kubectl --context ai-sandbox -n ai-sb-test run vault-check --rm -i \ 
-  --restart=Never --image=curlimages/curl:8.10.1 -- \
-  curl -sS --max-time 10 https://vault.apps.renci.org/v1/sys/health
+kubectl --context ai-sandbox -n ai-sb-test run vault-check --rm -i \
+  --restart=Never --image=curlimages/curl:8.10.1 --command -- sh -c \
+  'sleep 3; curl -sS --max-time 10 -o /dev/null -w "HTTP %{http_code} from %{remote_ip}\n" https://vault.apps.renci.org/v1/sys/health; echo "curl exit $?"'
 ```
 
-- **JSON comes back:** the cluster can reach Vault; carry on below.
-- **Timeout or "could not resolve host":** it can't. `vault.apps.renci.org`
-  resolves to a public address (152.54.15.132), so the usual fix is for
-  the team that runs Vault to allow connections from the cluster's outbound
-  IP address (next section). If they can't, the network administrators need
-  to route the cluster's outbound traffic to Vault (for example a
-  site-to-site VPN or private link from the cluster's Azure network to
-  RENCI). Until one of these is done, External Secrets can't fill any Secret here.
+The `sleep 3` matters. `kubectl run -i` attaches to the pod only after it has
+started, and a bare `curl` finishes before that, so its output is lost and the
+command prints nothing whether or not it worked.
+
+- **`HTTP 200`, `429`, `472`, `473`, `501`, or `503`:** the cluster reached
+  Vault itself; these are Vault's normal health answers (200 active, 429
+  unsealed standby, 503 sealed, and so on). A standby forwards requests to
+  the active node, so 429 works for ESO too. Carry on below.
+- **`HTTP 403`:** the cluster reached the server, but an access rule in front
+  of Vault refused the cluster's address. Ask the team that runs Vault to
+  allow the cluster's outbound IP (next section).
+- **`HTTP 000` with `curl exit 28` (timeout) or `curl exit 6` (could not
+  resolve host):** nothing got through. `vault.apps.renci.org` resolves to a
+  public address (152.54.15.132), so the usual fix is the same allow-list
+  request. If they can't do that, the network administrators need to route
+  the cluster's outbound traffic to Vault (for example a site-to-site VPN or
+  private link from the cluster's Azure network to RENCI). Until one of these
+  is done, External Secrets can't fill any Secret here.
 
 **If the cluster can never reach Vault**, keep the secret values somewhere it
 can reach instead, such as Azure Key Vault. External Secrets supports both, so
@@ -242,10 +251,11 @@ the charts would render the same ExternalSecrets and produce the same
 Kubernetes Secrets, and sections 5–11 would still apply with a different
 place to store the values. Only two things would change:
 
-1. `manifests/secret-store.yaml`: the SecretStore's `provider` becomes
-   `azurekv` (Azure Key Vault, logging in with workload identity) instead of
-   `vault`. Keep the name `vault`, or the charts' ExternalSecrets would need
-   `secretStoreRef.name` changed as well.
+1. `bootstrap/vault-cluster-secret-store.yaml`: the store's `provider`
+   becomes `azurekv` (Azure Key Vault, logging in with workload identity)
+   instead of `vault`, and the renewal CronJob goes away. Keep the name
+   `vault`, or every ExternalSecret's `secretStoreRef.name` would need
+   changing as well.
 2. The name each value is stored under. Every `remoteRef` and `extract.key`
    in `deploy/argocd/envs/<env>/values.yaml` and
    `manifests/postgres-secrets.yaml` is a Vault path such as
@@ -272,8 +282,8 @@ az aks show -g renci-ai-sandbox -n ai-sandbox --query \
 az network public-ip show --ids <id from above> --query ipAddress -o tsv
 ```
 
-On the Azure cluster `outboundType` is `loadBalancer`, with one outbound IP:
-**9.169.134.173** (Standard SKU, so it is static). No node pool gives its nodes
+The Azure cluster's `outboundType` is `loadBalancer`, with one outbound IP,
+**9.169.134.173** (Standard SKU, so static). Its node pools don't give nodes
 their own public IPs, so all pod traffic leaves through that address. The
 `outboundType` decides where to look:
 
@@ -291,81 +301,166 @@ kubectl --context ai-sandbox -n ai-sb-test run egress-ip --rm -i --restart=Never
 
 AKS created and manages this IP (it is tagged `aks-slb-managed-outbound-ip`).
 It is a separate Azure resource from the nodes, so node restarts, node image
-upgrades, and Kubernetes upgrades leave it alone. On the Azure cluster it was
-created on 2026-04-27, along with the cluster, and was still unchanged in
-October 2026 after automatic node image upgrades (nodes were on July 2026
-images). It changes if someone changes the cluster's outbound settings, for
+upgrades, and Kubernetes upgrades leave it alone. It changes if someone
+changes the cluster's outbound settings, for
 example the number of managed outbound IPs or the outbound type. If the
 cluster is recreated, it gets a new address and the allow-list must be
 updated. Microsoft's stop/start documentation warns only that the API
 server's IP may change after `az aks start`; it doesn't mention the outbound
 IP, so re-check it after a stop and start. Don't confuse it with
 `pubip-ingress-nginx` in the same resource group: that is the inbound address
-for the ingress controller, not the one pods' outbound traffic uses. For an address that survives all of
-that, create a public IP (or prefix) yourself and attach it with
+for the ingress controller, not the one pods' outbound traffic uses.
+
+For an address that survives all of that, create a public IP (or prefix) yourself and attach it with
 `az aks update --load-balancer-outbound-ips <id>` before asking for the
 allow-list.
 
-### Vault login: JWT auth
+### Create the Vault policy and token
 
-ESO logs in to Vault with a short-lived token for the `external-secrets-vault`
-ServiceAccount in the namespace. The file uses Vault's **JWT** auth, not its
-Kubernetes auth, because JWT auth never needs Vault to connect to the
-cluster. Kubernetes auth would need Vault to call the cluster's API server,
-which a Vault behind the VPN may not be able to do. With JWT auth Vault checks
-the token's signature against the cluster's public OIDC issuer. Find the
-issuer with:
+Run these from a machine on the VPN, logged in to Vault (`vault login`).
+
+The policy lets the token read HeLx entries and nothing else. Vault's KV
+version 2 stores values under `<mount>/data/`, so the policy names
+`secret/data/helx/*` for entries such as `secret/helx/ai-sb-test/pgadmin-env`:
 
 ```sh
-kubectl --context ai-sandbox get --raw /.well-known/openid-configuration | jq -r .issuer
-```
-
-For the Azure cluster it is
-`https://eastus2.oic.prod-aks.azure.com/58b3d54f-16c9-42d3-af08-1fcabd095666/b2c653e1-be86-434e-8990-2e07518d395e/`.
-
-Ask the Vault administrators to set up the following. The names match
-`secret-store.yaml`; any of them can change, as long as the file matches.
-
-```sh
-# A JWT auth mount for this cluster
-vault auth enable -path=jwt-ai-sandbox jwt
-vault write auth/jwt-ai-sandbox/config \
-  oidc_discovery_url="<issuer from above>" \
-  bound_issuer="<issuer from above>"
-
-# Read access to this namespace's entries only
-vault policy write helx-ai-sb-test - <<'POLICY'
-path "secret/data/helx/ai-sb-test/*" {
+vault policy write helx-eso-read - <<'POLICY'
+path "secret/data/helx/*" {
   capabilities = ["read"]
 }
 POLICY
-
-# A role that only the external-secrets-vault ServiceAccount in ai-sb-test can use
-vault write auth/jwt-ai-sandbox/role/helx-ai-sb-test \
-  role_type=jwt \
-  user_claim=sub \
-  bound_audiences=vault \
-  bound_subject="system:serviceaccount:ai-sb-test:external-secrets-vault" \
-  token_policies=helx-ai-sb-test \
-  token_ttl=1h
 ```
 
-`oidc_discovery_url` needs Vault to reach the issuer URL over the internet.
-If Vault has no internet access either, configure the mount with the
-cluster's signing keys instead of a discovery URL. Vault then needs no network
-at all, but the keys must be updated whenever AKS rotates them:
+`vault secrets list -detailed` shows the KV mount's name and version. If the
+mount isn't `secret/` (version 2), change the policy path and `path:` in
+`vault-cluster-secret-store.yaml` to match.
+
+Create the token:
 
 ```sh
-kubectl --context ai-sandbox get --raw /openid/v1/jwks > ai-sandbox-jwks.json
-# convert each key to PEM, then:
-vault write auth/jwt-ai-sandbox/config \
-  jwt_validation_pubkeys=@ai-sandbox.pem bound_issuer="<issuer from above>"
+vault token create -orphan -policy=helx-eso-read -period=768h \
+  -explicit-max-ttl=8760h -display-name=eso-<cluster>
 ```
 
-You will also need write access to `secret/helx/ai-sb-test/` for section 5.
+- **`-orphan`:** without it, the new token is a child of your own login
+  token, and Vault revokes it when yours expires.
+- **`-period=768h`:** makes a periodic token, which lives as long as it is
+  renewed within each 768h. A token made with `-ttl` instead stops at Vault's
+  maximum token lifetime (768h) no matter how often it is renewed. Don't add
+  `-ttl`; the period overrides it anyway.
+- **`-explicit-max-ttl=8760h`:** the hard limit, one year after creation.
+- **`default`:** Vault adds this policy automatically. It lets the token look
+  itself up and renew itself, which the renewal job needs.
 
-Then replace the `TODO(vault)` placeholders in `secret-store.yaml` (`server`,
-the KV mount `path`, and `auth.jwt.path`) and commit.
+Creating a token with a policy you don't hold yourself, a period, or the
+orphan flag needs `sudo` on `auth/token/create`. Check with
+`vault token capabilities auth/token/create`. Without it, ask the Vault team
+for a token role with `allowed_policies=helx-eso-read`, `token_period=768h`,
+`token_explicit_max_ttl=8760h`, and `orphan=true`, and create the token with
+`vault token create -role=<role>`.
+
+Check the new token:
+
+```sh
+VAULT_TOKEN='<new token>' vault token lookup
+```
+
+Expect `period` `768h`, `explicit_max_ttl` `8760h`, `ttl` close to `768h`,
+`renewable` `true`, `orphan` `true`, and `policies` `[default helx-eso-read]`.
+A `period` of `0s` means Vault made a normal token, which would expire after
+768h however often it was renewed.
+
+Check that it can read a HeLx entry and nothing more. The first command
+should print the entry (once section 5 has filled it) and the second should
+fail with "permission denied":
+
+```sh
+VAULT_TOKEN='<new token>' vault kv get -mount=secret helx/ai-sb-test/helx-postgresql
+VAULT_TOKEN='<new token>' vault kv put -mount=secret helx/ai-sb-test/test x=1
+```
+
+### Put the token in the cluster
+
+Store the token in the Secret `vault-token`, reading it without echoing it or
+leaving it in your shell history (`read` below is zsh; in bash use
+`read -rsp 'Vault token: ' VAULT_ESO_TOKEN`):
+
+```sh
+read -rs 'VAULT_ESO_TOKEN?Vault token: '; echo
+kubectl --context ai-sandbox -n external-secrets create secret generic vault-token \
+  --from-literal=token="$VAULT_ESO_TOKEN"
+unset VAULT_ESO_TOKEN
+```
+
+The `external-secrets` namespace exists once section 3 is done.
+
+### Apply the store and the renewal job
+
+Both files are in `bootstrap/`, so the root Application (section 9) applies
+them. Applying them by hand now lets you check the connection first; the root
+Application takes them over later without changing anything:
+
+```sh
+kubectl --context ai-sandbox apply -f deploy/argocd/bootstrap/vault-cluster-secret-store.yaml
+kubectl --context ai-sandbox apply -f deploy/argocd/bootstrap/vault-token-renewal.yaml
+```
+
+Check that ESO can log in. `READY` must be `True`; if it isn't,
+`kubectl describe clustersecretstore vault` shows Vault's error:
+
+```sh
+kubectl --context ai-sandbox get clustersecretstore vault
+```
+
+Run the renewal once by hand instead of waiting for Monday, and read its
+output. It prints the new expiry and when the token was issued, never the
+token itself:
+
+```sh
+kubectl --context ai-sandbox -n external-secrets create job vault-token-renewal-now \
+  --from=cronjob/vault-token-renewal
+kubectl --context ai-sandbox -n external-secrets wait --for=condition=complete \
+  job/vault-token-renewal-now --timeout=2m
+kubectl --context ai-sandbox -n external-secrets logs job/vault-token-renewal-now
+kubectl --context ai-sandbox -n external-secrets delete job vault-token-renewal-now
+```
+
+If a scheduled run ever fails, `kubectl -n external-secrets get jobs` shows
+it. The token has three more weekly runs before it would lapse.
+
+### Replace the token once a year
+
+Renewal can't extend a token past its `explicit_max_ttl`, so a year after the
+token was issued it stops working. The renewal job's log prints the issue
+date. Before then:
+
+1. Create and check a new token as above.
+2. Replace the Secret's contents (ESO picks up the change on its own):
+
+   ```sh
+   read -rs 'VAULT_ESO_TOKEN?Vault token: '; echo
+   kubectl --context ai-sandbox -n external-secrets create secret generic vault-token \
+     --from-literal=token="$VAULT_ESO_TOKEN" --dry-run=client -o yaml \
+     | kubectl --context ai-sandbox apply -f -
+   unset VAULT_ESO_TOKEN
+   ```
+
+3. Check `kubectl get clustersecretstore vault` is still `READY`, then revoke
+   the old token: `vault token revoke '<old token>'`.
+
+If the token does lapse, Kubernetes Secrets that ESO already created stay in
+place and running apps keep working. ESO only stops picking up changes from
+Vault and can't fill Secrets for anything new until the token is replaced.
+
+### Other ways to log in
+
+A single token is what the Vault team recommends. Vault's JWT login, or its
+Kubernetes login, would avoid both the stored token and the yearly
+replacement. Each namespace's ServiceAccount token would identify it to
+Vault, and Vault could limit each namespace to its own entries. Those need
+Vault-side setup (an auth mount and a role per namespace). Kubernetes login
+also needs Vault to reach the cluster's API server. Only
+`vault-cluster-secret-store.yaml` would change to use either.
 
 ## 5. Move each secret into Vault *(not done yet)*
 
@@ -441,7 +536,7 @@ cmp /tmp/render-1.yaml /tmp/render-2.yaml && echo identical
 (`deploy/helm/helx-chart/charts/` must hold the dependency archives; any
 earlier `make build-helx-chart` leaves them there.)
 
-Without the third values file, six objects differed between renders:
+Without the third values file, these objects differ between renders:
 
 | Object                                    | Why it changed                                    | Fix in `deploy/argocd/envs/ai-sb-test/values.yaml` |
 | ----------------------------------------- | ------------------------------------------------- | -------------------------------------------------- |
@@ -454,12 +549,13 @@ Without the third values file, six objects differed between renders:
 
 The remaining chart-managed Secrets (`helx-appstore-secrets`,
 `openldap-credentials`, `helx-ldap-sync-secrets`,
-`helx-user-mutator-ldap-password`) were stable only because they read their
-values from the secrets files. Under Argo CD they move to Vault too. With the
+`helx-user-mutator-ldap-password`) are stable under `make helm-deploy` only
+because they read their values from the secrets files. Under Argo CD they move
+to Vault too. With the
 third values file, the two renders are identical, and the chart renders no
 Secret objects at all.
 
-The CA bundle is public, so it is committed. It was read from the live webhook:
+The CA bundle is public, so it is committed. Read it from the live webhook:
 
 ```sh
 kubectl --context ai-sandbox get mutatingwebhookconfiguration \
@@ -467,10 +563,11 @@ kubectl --context ai-sandbox get mutatingwebhookconfiguration \
   -o jsonpath='{.webhooks[0].clientConfig.caBundle}'
 ```
 
-It is valid until 2036-10-11. When it is replaced, update the Vault entry
+The one in `deploy/argocd/envs/ai-sb-test/values.yaml` is valid until
+2036-10-11. When it is replaced, update the Vault entry
 `helx-user-mutator-tls` and `webhook.caBundle` together.
 
-Two other Helm features behave differently under Argo CD; neither needed a
+Two other Helm features behave differently under Argo CD; neither needs a
 change:
 
 - `post-install,post-upgrade` hooks (`helx-ldap` configure Job, `ldap-sync`
@@ -479,7 +576,7 @@ change:
 - `helm test` Pods are left out with `skipTests: true` in the ApplicationSet.
 
 Compared with the Helm render, the only differences are Secrets becoming
-ExternalSecrets and the webhook's `caBundle`, which now matches the live one.
+ExternalSecrets and the webhook's `caBundle`, which matches the live one.
 No Deployment or StatefulSet template changes, so the takeover itself restarts
 nothing. Pods do roll when the first ACR candidate changes the image tags.
 
@@ -491,10 +588,10 @@ For a test environment that follows `develop`, the chart's version must
 change on every push. Argo CD caches a chart by its version string, so it
 never notices that the mutable `5.1.1-develop` tag on GHCR was overwritten.
 
-So `develop.yml` now publishes every candidate twice to
+So `develop.yml` publishes every candidate twice to
 `oci://ghcr.io/helxplatform/helm-charts/helx`:
 
-- `publish-candidate`: the mutable `<version>-develop`, as before
+- `publish-candidate`: the mutable `<version>-develop`
 - `publish-numbered-candidate`: the same content as
   `<version>-develop.<run number>` (for example `5.1.1-develop.214`),
   published once and never overwritten
@@ -503,17 +600,15 @@ So `develop.yml` now publishes every candidate twice to
 `>=0.0.0-0`, which means "the newest version, prereleases included". Run
 numbers compare as numbers, so `develop.10` sorts above `develop.9`, and
 raising the umbrella version (`5.2.0-develop.1`) sorts above every
-`5.1.1-develop.*`. This was checked with `helm search repo --version` against
-a throwaway index.
+`5.1.1-develop.*`.
 
 The range also matches releases. Right after a release such as `5.1.1` is
 cut, that release is the newest version until the first `develop` push with a
 higher umbrella version, so the test environment runs it. That is
 intentional, and it is why released images are copied to ACR too (below).
 CI publishes and copies released images only as `v<appVersion>`, so every
-chart's default image tag must be `v<appVersion>` as well. ldap-sync's default
-was the bare appVersion (`ldap-sync:4.4.2`); it was fixed during this work
-(chart 3.0.4, not yet released at the time).
+chart's default image tag must be `v<appVersion>` as well, or a release names
+an image that isn't there.
 
 ### The images: copies in ACR
 
@@ -537,9 +632,8 @@ builds is copied to ACR, and the cluster pulls the copy:
   an image is added to `.github/ci/images.yaml`, add its repository there too.
   The comment at the top of that file has the command that prints every path.
 
-Images this repository doesn't build were already handled before this work.
-Bitnami PostgreSQL, os-shell, openresty, and unc-group-x already point at ACR
-in the same file. ldap-sync's `docker.io/postgres` and pod-reaper's
+Images this repository doesn't build are set separately in the same file:
+Bitnami PostgreSQL, os-shell, openresty, and unc-group-x point at ACR. ldap-sync's `docker.io/postgres` and pod-reaper's
 `helxplatform/pod-reaper` come from Docker Hub, which this cluster can reach.
 
 To set it up (someone with ACR and GitHub admin rights):
@@ -571,9 +665,9 @@ To set it up (someone with ACR and GitHub admin rights):
 
 - **GitHub** (`https://github.com/helxplatform/helx.git`) is public, so it
   needs no credentials.
-- **GHCR** (`ghcr.io/helxplatform/helm-charts`): pulling a chart worked without
-  credentials, but GHCR refused an anonymous tag listing, and Argo CD lists
-  tags to resolve the `>=0.0.0-0` range. Register it with a GitHub token that
+- **GHCR** (`ghcr.io/helxplatform/helm-charts`) serves charts without
+  credentials but refuses to list tags anonymously, and Argo CD lists tags to
+  resolve the `>=0.0.0-0` range. Register it with a GitHub token that
   has only `read:packages`, ideally from a bot account rather than a
   person's. The `url` has no `oci://` prefix and must equal `chart.repoURL`
   in the env's `config.yaml`:
@@ -598,13 +692,13 @@ To set it up (someone with ACR and GitHub admin rights):
 
 Before this step, check that:
 
-- the cluster can reach Vault and `secret-store.yaml` has no `TODO(vault)`
-  left (section 4)
+- `kubectl get clustersecretstore vault` shows `READY` `True` (section 4)
 - every Vault entry exists (section 5)
 - the images are in ACR (section 7)
 - the GHCR repository Secret exists (section 8)
 
-The bootstrap reads `develop`, so merge this work to `develop` first. To try it
+The bootstrap reads `develop`, so `deploy/argocd/` and the env's values must
+be merged there first. To try it
 from a branch before merging, change `targetRevision` in `root.yaml`,
 `revision` in `bootstrap/applicationset-helx.yaml`, and `valuesRef` in the
 env's `config.yaml` to the branch, and change them back before merging.
@@ -613,18 +707,16 @@ env's `config.yaml` to the branch, and change them back before merging.
 kubectl --context ai-sandbox apply -n argocd -f deploy/argocd/root.yaml
 ```
 
-Then wait for External Secrets to be running, and check that the SecretStore
-can log in to Vault:
+Then check that `root`, `external-secrets`, and `helx-ai-sb-test` exist, and
+that `root` and `external-secrets` are Synced:
 
 ```sh
 kubectl --context ai-sandbox -n argocd get applications
-kubectl --context ai-sandbox -n external-secrets get pods
-kubectl --context ai-sandbox -n ai-sb-test get secretstore vault
 ```
 
-The SecretStore only exists once `helx-ai-sb-test` has synced, which is the
-next section. `READY` must be `True` before any ExternalSecret can fill a
-Secret. If it isn't, `kubectl describe secretstore vault` gives Vault's error.
+If External Secrets, the ClusterSecretStore, and the renewal CronJob were
+applied by hand in sections 3 and 4, `root` takes them over without changing
+them.
 
 `helx-ai-sb-test` starts with automatic sync off (`autoSync: false`), so
 nothing in `ai-sb-test` changes until someone presses Sync.
@@ -637,8 +729,9 @@ tracking annotation to each object on the first sync. Helm's own release
 record (`sh.helm.release.v1.helx.*` Secrets) is not touched.
 
 1. In the Argo CD UI, open `helx-ai-sb-test` and press **App Diff**. Expect:
-   - image tags changing from `azure-demo-deploy-1` to `develop-<sha>`
-   - ExternalSecrets, the SecretStore, and its ServiceAccount being added
+   - image tags changing from whatever the release was last deployed with
+     to `develop-<sha>`
+   - ExternalSecrets being added
    - the chart-managed Secrets missing from Git. They show as present in the
      cluster but not in Git; they are **not** deleted, because Argo CD never
      prunes objects it didn't create, and there's no automatic pruning yet.
@@ -698,13 +791,16 @@ record (`sh.helm.release.v1.helx.*` Secrets) is not touched.
 2. Copy `deploy/argocd/envs/ai-sb-test/` to `deploy/argocd/envs/<env>/`. The
    folder name must match `deploy/helm/values/<cluster>/envs/<env>/`. Then edit
    `config.yaml` (a production environment pins an exact released `version`
-   and sets `valuesRef: main`), the Vault paths and CA bundle in
-   `values.yaml`, and `manifests/` (the Vault role and JWT mount).
-3. Add the namespace to `destinations` in `bootstrap/project-helx.yaml`.
+   and sets `valuesRef: main`), and the Vault paths and CA bundle in
+   `values.yaml` and `manifests/`.
+3. Add the namespace to `destinations` in `bootstrap/project-helx.yaml` and
+   to `conditions` in `bootstrap/vault-cluster-secret-store.yaml`.
 4. Re-run the double render from section 6 for the new values files.
-5. Sections 4 and 5 for its Vault role and entries, then 10 and 11.
+5. Section 5 for its Vault entries (the token's policy already covers every
+   `helx/` path), then 10 and 11.
 
-On a new cluster, Argo CD itself and section 8 come first, then `root.yaml`
-(section 9). A cluster that pulls from Harbor needs no ACR steps and no
+On a new cluster, Argo CD itself and section 8 come first, then sections 3
+and 4 (External Secrets, and a new Vault token in that cluster's
+`vault-token` Secret), then `root.yaml` (section 9). A cluster that pulls from Harbor needs no ACR steps and no
 repository overrides in its values; one that can't pull from Harbor needs its
 own copy of section 7's ACR setup, since the CI jobs copy to a single registry.

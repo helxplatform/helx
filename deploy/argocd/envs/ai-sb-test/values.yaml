@@ -6,8 +6,10 @@
 # nothing and every render is a fresh install. Anything a chart would otherwise
 # generate or carry over from the live cluster (passwords, the webhook
 # certificate) must come from somewhere fixed, or Argo CD would replace it on
-# every sync. Here that is Vault, through the SecretStore named `vault` in
-# manifests/secret-store.yaml.
+# every sync. Here that is Vault, through the ClusterSecretStore named `vault`
+# in deploy/argocd/bootstrap/vault-cluster-secret-store.yaml. The charts
+# default to a namespaced SecretStore, so each externalSecret below names the
+# kind as well.
 #
 # Each Vault entry is named after the Kubernetes Secret it fills, under
 # helx/ai-sb-test/, and holds exactly that Secret's keys.
@@ -17,6 +19,9 @@ appstore:
     mode: externalSecret
     externalSecret:
       enabled: true
+      secretStoreRef:
+        name: vault
+        kind: ClusterSecretStore
       remoteRef: helx/ai-sb-test/helx-appstore-secrets
     # Migration reads live Secrets, which Argo CD cannot do.
     migration:
@@ -26,6 +31,9 @@ appstore:
       mode: externalSecret
       externalSecret:
         enabled: true
+        secretStoreRef:
+          name: vault
+          kind: ClusterSecretStore
         remoteRef: helx/ai-sb-test/pgadmin-env
   # The bitnami subchart would generate a new admin password on every render.
   # manifests/postgres-secrets.yaml fills this Secret from Vault instead.
@@ -40,6 +48,9 @@ appstore-sockets:
     mode: externalSecret
     externalSecret:
       enabled: true
+      secretStoreRef:
+        name: vault
+        kind: ClusterSecretStore
       remoteRef: helx/ai-sb-test/helx-appstore-sockets
 
 helx-ldap:
@@ -47,6 +58,9 @@ helx-ldap:
     mode: externalSecret
     externalSecret:
       enabled: true
+      secretStoreRef:
+        name: vault
+        kind: ClusterSecretStore
       remoteRef: helx/ai-sb-test/openldap-credentials
 
 ldap-sync:
@@ -54,6 +68,9 @@ ldap-sync:
     mode: externalSecret
     externalSecret:
       enabled: true
+      secretStoreRef:
+        name: vault
+        kind: ClusterSecretStore
       remoteRef: helx/ai-sb-test/helx-ldap-sync-secrets
   # Same as appstore's PostgreSQL: filled by manifests/postgres-secrets.yaml.
   postgres:
@@ -67,6 +84,9 @@ user-mutator:
     mode: externalSecret
     externalSecret:
       enabled: true
+      secretStoreRef:
+        name: vault
+        kind: ClusterSecretStore
       remoteRef: helx/ai-sb-test/helx-user-mutator-tls
   webhook:
     # The CA that signed the serving certificate in Vault; it is public, not a
@@ -81,4 +101,7 @@ user-mutator:
       mode: externalSecret
       externalSecret:
         enabled: true
+        secretStoreRef:
+          name: vault
+          kind: ClusterSecretStore
         remoteRef: helx/ai-sb-test/helx-user-mutator-ldap-password

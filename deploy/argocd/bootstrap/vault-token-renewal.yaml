@@ -1,0 +1,75 @@
+# Renews the Vault token in the Secret `vault-token` once a week. It is a
+# periodic token (768h period, 1-year explicit max TTL), so each renewal
+# resets it to 768h; weekly leaves three missed runs before it would lapse.
+# External Secrets does not renew the token itself. Renewal cannot pass the
+# 1-year limit, so the token still has to be replaced once a year. See
+# "Connect External Secrets to Vault" in docs/argocd-setup-in-new-cluster.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-token-renewal
+  namespace: external-secrets
+spec:
+  schedule: "17 6 * * 1"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            # The vault user in the hashicorp/vault image.
+            runAsUser: 100
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: renew
+              image: docker.io/hashicorp/vault:2.1.2
+              command: ["/bin/sh", "-c"]
+              # The renew output includes the token itself, so it is discarded;
+              # only the new expiry reaches the job's log. `vault token lookup`
+              # has no -field flag, so the details come from lookup-self via
+              # `vault read`. Assigning them first makes a failed lookup fail
+              # the job instead of printing blanks.
+              args:
+                - |
+                  set -eu
+                  vault token renew -format=json > /dev/null
+                  expires=$(vault read -field=expire_time auth/token/lookup-self)
+                  issued=$(vault read -field=issue_time auth/token/lookup-self)
+                  echo "Renewed. Expires ${expires}."
+                  echo "Issued ${issued}; replace it before a year has passed."
+              env:
+                - name: VAULT_ADDR
+                  value: https://vault.apps.renci.org
+                - name: VAULT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: vault-token
+                      key: token
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

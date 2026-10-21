@@ -103,7 +103,8 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
 
 - Argo CD config lives in `deploy/argocd/`. `root.yaml` is applied by hand once
   per cluster and syncs `bootstrap/` (the `helx` AppProject, External Secrets,
-  and the ApplicationSet). The ApplicationSet makes one Application,
+  the `vault` ClusterSecretStore, its token-renewal CronJob, and the
+  ApplicationSet). The ApplicationSet makes one Application,
   `helx-<env>`, per `envs/<env>/config.yaml`, rendering the whole umbrella with
   the cluster and env files from `deploy/helm/values/` plus
   `envs/<env>/values.yaml`, and applying `envs/<env>/manifests/`.
@@ -116,6 +117,14 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   with Vault-backed ExternalSecrets or fixed values. After changing a chart or
   those values, render twice with every values file the Application uses and
   check the two outputs are identical.
+- Every ExternalSecret Argo CD renders reads Vault through the ClusterSecretStore
+  `vault` (`bootstrap/vault-cluster-secret-store.yaml`), so it must set
+  `secretStoreRef.kind: ClusterSecretStore`; the charts default to a
+  namespaced `SecretStore`, which doesn't exist. The store logs in with one
+  Vault token per cluster, held in the hand-made Secret `vault-token` in the
+  `external-secrets` namespace and never committed. Its `conditions` list the
+  namespaces allowed to use it, so a new environment's namespace goes there
+  too.
 - Migration switches (`*.migration.enabled`) need a real `helm upgrade` and
   must stay off in anything Argo CD renders. Run migrations with
   `make helm-deploy` before handing a namespace to Argo CD.

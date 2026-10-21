@@ -34,6 +34,8 @@ spec:
       - name: wait-for-postgresql
         image: "{{ with .Values.imagePostgresql.registry }}{{ . }}/{{ end }}{{ .Values.imagePostgresql.repository }}:{{ .Values.imagePostgresql.tag }}"
         imagePullPolicy: "{{ .Values.imagePostgresql.pullPolicy }}"
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         command:
           - sh
           - -c
@@ -47,6 +49,8 @@ spec:
       - name: {{ .Chart.Name }}
         image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         command: ['/bin/bash', '-c']
         args: ["{{ .Values.appstoreEntrypointArgs }}"]
         resources:
@@ -322,6 +326,8 @@ spec:
       - name: {{ .Chart.Name }}-saml-fetch
         image: "{{ .Values.fetcherImage.repository }}:{{ .Values.fetcherImage.tag }}"
         imagePullPolicy: {{ .Values.fetcherImage.pullPolicy }}
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         env:
         - name: FETCH_URL
           valueFrom:

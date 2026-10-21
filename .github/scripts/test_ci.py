@@ -1881,6 +1881,180 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.assertIn("no-app:services/api/chart/Chart.yaml", message)
 
 
+class PrivilegeEscalationTests(TempTreeTest):
+    def write_platform(self, platform: str, *environments: str) -> None:
+        self.write(f"deploy/helm/values/{platform}/defaults/values.yaml", "{}\n")
+        for environment in environments:
+            self.write(f"deploy/helm/values/{platform}/envs/{environment}/values.yaml", "{}\n")
+
+    def test_flags_unset_and_true_in_every_container_list(self) -> None:
+        documents = [
+            None,
+            {"kind": "Service", "metadata": {"name": "ignored"}, "spec": {}},
+            {
+                "kind": "Deployment",
+                "metadata": {"name": "app"},
+                "spec": {
+                    "template": {
+                        "spec": {
+                            "initContainers": [{"name": "init"}],
+                            "containers": [
+                                {
+                                    "name": "main",
+                                    "securityContext": {"allowPrivilegeEscalation": False},
+                                },
+                                {"name": "sidecar", "securityContext": None},
+                            ],
+                            "ephemeralContainers": [
+                                {
+                                    "name": "debug",
+                                    "securityContext": {"allowPrivilegeEscalation": True},
+                                }
+                            ],
+                        }
+                    }
+                },
+            },
+            {
+                "kind": "CronJob",
+                "metadata": {"name": "nightly"},
+                "spec": {
+                    "jobTemplate": {
+                        "spec": {"template": {"spec": {"containers": [{"name": "job"}]}}}
+                    }
+                },
+            },
+            {"kind": "Pod", "metadata": {"name": "test"}, "spec": {"containers": [{"name": "t"}]}},
+        ]
+        self.assertEqual(
+            ci.escalating_containers(documents),
+            [
+                "Deployment/app initContainers init",
+                "Deployment/app containers sidecar",
+                "Deployment/app ephemeralContainers debug",
+                "CronJob/nightly containers job",
+                "Pod/test containers t",
+            ],
+        )
+
+    def test_value_sets_cover_defaults_then_each_environment_in_order(self) -> None:
+        lint = self.root / "composed-lint-values.yaml"
+        render = self.write(".github/helm/render-values/helx.yaml", "{}\n")
+        self.write_platform("azure", "zeta", "alpha")
+        # Platforms the policy does not apply to are not rendered.
+        self.write_platform("sterling", "helx-test")
+        defaults = self.root / "deploy/helm/values/azure/defaults/values.yaml"
+        environments = self.root / "deploy/helm/values/azure/envs"
+
+        self.assertEqual(
+            ci.privilege_escalation_value_sets(self.root, "helx", lint),
+            [
+                ("chart defaults", [lint, render]),
+                ("azure/alpha", [lint, defaults, environments / "alpha/values.yaml", render]),
+                ("azure/zeta", [lint, defaults, environments / "zeta/values.yaml", render]),
+            ],
+        )
+
+    def test_value_sets_require_an_environment(self) -> None:
+        self.write_platform("azure")
+        with self.assertRaisesRegex(ci.CIError, "envs/<name>/values.yaml"):
+            ci.privilege_escalation_value_sets(self.root, "helx")
+
+    def test_check_names_each_offending_value_set(self) -> None:
+        chart = self.write_chart("deploy/helm/helx-chart", name="helx").parent
+        self.write_platform("azure", "good", "bad")
+
+        def render(chart_dir: Path, values_files: list[Path]) -> str:
+            self.assertEqual(chart_dir, chart)
+            unset = any(path.parent.name == "bad" for path in values_files)
+            context = "{}" if unset else "{allowPrivilegeEscalation: false}"
+            return (
+                "kind: Pod\nmetadata: {name: probe}\n"
+                f"spec: {{containers: [{{name: c, securityContext: {context}}}]}}\n"
+            )
+
+        with self.assertRaises(ci.CIError) as raised:
+            ci.check_privilege_escalation(self.root, chart, render=render)
+        message = str(raised.exception)
+        self.assertIn("azure/bad:\n  - Pod/probe containers c", message)
+        self.assertNotIn("azure/good", message)
+        self.assertNotIn("chart defaults", message)
+
+    def test_check_returns_the_value_sets_that_passed(self) -> None:
+        chart = self.write_chart("deploy/helm/helx-chart", name="helx").parent
+        self.write_platform("azure", "only")
+
+        def render(chart_dir: Path, values_files: list[Path]) -> str:
+            return "---\nkind: ConfigMap\nmetadata: {name: settings}\n"
+
+        self.assertEqual(
+            ci.check_privilege_escalation(self.root, chart, render=render),
+            ["chart defaults", "azure/only"],
+        )
+
+
+class LintValuesTests(TempTreeTest):
+    """Synthetic charts only; nothing here runs helm."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        dependencies = (
+            "dependencies:\n"
+            "  - name: app\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+            "  - name: other\n"
+            "    alias: renamed\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+            "  - name: bare\n"
+            "    version: 1.0.0\n"
+            "    repository: oci://ghcr.io/helxplatform/helm-charts\n"
+        )
+        self.umbrella = self.write_chart(
+            "deploy/helm/helx-chart", name="helx", dependencies=dependencies
+        ).parent
+        self.app = self.write_chart("services/app/chart", name="app").parent
+        self.write_chart("services/other/chart", name="other")
+        self.write_chart("services/bare/chart", name="bare")
+        self.write_chart("services/loose/chart", name="loose")
+        self.write(".github/helm/lint-values/app.yaml", "secret:\n  mode: existingSecret\n")
+        self.write(".github/helm/lint-values/other.yaml", "enabled: true\n")
+        # Not an umbrella dependency: used when linting it alone, never nested.
+        self.write(".github/helm/lint-values/loose.yaml", "x: 1\n")
+
+    def test_a_service_uses_its_own_file(self) -> None:
+        self.assertEqual(ci.lint_values(self.root, self.app), {"secret": {"mode": "existingSecret"}})
+        bare = self.root / "services/bare/chart"
+        self.assertEqual(ci.lint_values(self.root, bare), {})
+
+    def test_the_umbrella_nests_each_dependency_file_under_its_key(self) -> None:
+        self.assertEqual(
+            ci.lint_values(self.root, self.umbrella),
+            {"app": {"secret": {"mode": "existingSecret"}}, "renamed": {"enabled": True}},
+        )
+
+    def test_the_umbrella_file_applies_on_top(self) -> None:
+        self.write(
+            ".github/helm/lint-values/helx.yaml",
+            "app:\n  secret:\n    existingSecret: s\nglobal:\n  a: b\n",
+        )
+        self.assertEqual(
+            ci.lint_values(self.root, self.umbrella),
+            {
+                "app": {"secret": {"mode": "existingSecret", "existingSecret": "s"}},
+                "renamed": {"enabled": True},
+                "global": {"a": "b"},
+            },
+        )
+
+    def test_file_names_must_name_a_chart(self) -> None:
+        ci.validate_lint_values(self.root)
+        self.write(".github/helm/lint-values/ap.yaml", "{}\n")
+        with self.assertRaisesRegex(ci.CIError, "no chart is named after: ap.yaml"):
+            ci.validate_lint_values(self.root)
+
+
 class WorkflowShellSyntaxTests(unittest.TestCase):
     """Every `run:` block must be valid bash.
 

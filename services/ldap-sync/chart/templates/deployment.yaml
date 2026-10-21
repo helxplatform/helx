@@ -35,6 +35,8 @@ spec:
       initContainers:
         - name: init-db-schema
           image: postgres:15
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
           command: ["/bin/bash", "/db/init-schema.sh"]
           env:
             - name: PGHOST
@@ -93,6 +95,8 @@ spec:
         - name: {{ $hook.name }}
           image: {{ $hook.image.repository }}:{{ $hook.image.tag }}
           imagePullPolicy: Always
+          securityContext:
+            {{- toYaml $.Values.securityContext | nindent 12 }}
           {{- with $hook.args }}
           args:
             {{- toYaml . | nindent 12 }}

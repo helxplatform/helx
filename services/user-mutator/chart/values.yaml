@@ -28,7 +28,11 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
-securityContext: {}
+# -- Container securityContext, applied to every container in the pod.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+securityContext:
+  allowPrivilegeEscalation: false
   # capabilities:
   #   drop:
   #   - ALL
@@ -212,6 +216,15 @@ webhook:
       values:
         - "true"
 
+  # -- Optional objectSelector, matched against each Deployment's own labels.
+  # Empty sends every Deployment in the selected namespaces to the webhook.
+  # Tycho labels the Deployments it launches `executor: tycho`, so
+  # {matchLabels: {executor: tycho}} narrows the webhook to app launches.
+  objectSelector: {}
+
+  # -- Ignore admits a Deployment unmutated when the webhook cannot be reached.
+  # Fail rejects it instead; set objectSelector first, or an outage would also
+  # block every other Deployment in the namespace, including this chart's own.
   failurePolicy: Ignore
   reinvocationPolicy: Never
   timeoutSeconds: 10

@@ -24,6 +24,8 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - containerPort: 5555
           resources:
@@ -49,6 +51,8 @@ spec:
         - name: {{ .Chart.Name }}-monitoring
           image: "{{ .Values.monitoring.image.repository }}:{{ .Values.monitoring.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.monitoring.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.monitoring.resources | nindent 12 }}
           env:

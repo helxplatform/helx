@@ -7,8 +7,9 @@ already running. It was first carried out on the Azure AI Sandbox cluster
 October 2026. Each section records what was done there and what to change for
 another cluster.
 
-> **Status (2026-10-18):** the repository side is done: sections 2, 6, and 7
-> (the CI half), and the files in `deploy/argocd/`. Steps that change the
+> **Status (2026-10-20):** the repository side is done: sections 2, 6, and 7
+> (the CI half), and the files in `deploy/argocd/`. External Secrets is
+> installed on the Azure cluster (section 3). Steps that change the
 > cluster, Vault, ACR, or GitHub settings are marked *(not done yet)*. Update
 > each one as it is carried out. The open question is whether the cluster can
 > reach Vault at all, since Vault is only reachable over the RENCI VPN
@@ -143,14 +144,64 @@ On the Azure cluster none was enabled for `ai-sb-test`. As a safeguard,
 `appstore.secret.migration.enabled: false` explicitly, because appstore's
 chart default is `true`.
 
-## 3. Install External Secrets *(not done yet)*
+## 3. Install External Secrets
 
-Nothing to run by hand: `deploy/argocd/bootstrap/external-secrets.yaml`
-installs ESO chart 2.13.0 into the `external-secrets` namespace as soon as the
-root Application syncs (section 9). It uses server-side apply because ESO's
+`deploy/argocd/bootstrap/external-secrets.yaml` installs ESO chart 2.13.0 into
+the `external-secrets` namespace. The root Application (section 9) applies it
+along with the rest of `bootstrap/`. ESO doesn't depend on anything else in
+this procedure, though, so it can be applied on its own first. That is what
+was done on the Azure cluster, so the SecretStore could be tested before the
+bootstrap:
+
+```sh
+kubectl --context ai-sandbox apply -f deploy/argocd/bootstrap/external-secrets.yaml
+```
+
+The file already sets `namespace: argocd`. Automated sync is on, so Argo CD
+installs ESO straight away. When `root.yaml` is applied later, it takes over
+this same Application (same name in `argocd`) without reinstalling anything.
+
+That file names two namespaces. The
+Application object itself lives in `argocd` (`metadata.namespace`), because
+Argo CD only picks up Applications in its own namespace. ESO's pods and other
+resources go into `external-secrets` (`spec.destination.namespace`), which
+`CreateNamespace=true` creates on the first sync. Every Application in
+`deploy/argocd/` follows the same pattern; for example, `helx-ai-sb-test`
+lives in `argocd` and deploys into `ai-sb-test`. It uses server-side apply because ESO's
 CRDs are too large for a normal `kubectl apply`. It also ignores the CA bundles
 that ESO's cert-controller writes at runtime, which would otherwise keep the
 Application out of sync.
+
+Before applying it on a new cluster, check that nothing would conflict or be
+rejected:
+
+- no `external-secrets` namespace and no `*.external-secrets.io` CRDs yet
+  (`kubectl get crd | grep external-secrets`)
+- the cluster can pull `ghcr.io/external-secrets/external-secrets`
+- no admission policy blocks ESO. On the Azure cluster, Gatekeeper enforces
+  only "no privileged containers" and "no privilege escalation", and ESO's
+  three containers set neither; the other Azure Policy constraints there only
+  record violations:
+
+  ```sh
+  kubectl get constraints -o \
+    jsonpath='{range .items[?(@.spec.enforcementAction=="deny")]}{.kind}{"\n"}{end}'
+  ```
+
+Check that it worked:
+
+```sh
+# Synced and Healthy, at revision 2.13.0
+kubectl --context ai-sandbox -n argocd get application external-secrets
+
+# external-secrets, external-secrets-cert-controller and
+# external-secrets-webhook, each 1/1 Running
+kubectl --context ai-sandbox -n external-secrets get pods
+```
+
+ESO adds cluster-wide objects: CRDs, cluster roles, and two validating
+webhooks. The webhooks only check ESO's own objects (SecretStores and
+ExternalSecrets), so nothing else on the cluster is affected.
 
 To upgrade ESO later, change `targetRevision` in that file.
 
@@ -165,14 +216,14 @@ namespace can only read its own Vault entries.
 ### Can the cluster reach Vault?
 
 ESO runs in the cluster and connects to Vault on every refresh, so pods in the
-cluster need a network path to Vault. RENCI's Vault is only reachable over the
-VPN, so on the Azure cluster this has to be confirmed before anything else in
-this section. Run this from a throwaway pod (it only asks Vault whether it is
-up):
+cluster need a network path to Vault. RENCI's Vault is usually only reachable
+over the VPN, so on the Azure cluster this has to be confirmed before anything
+else in this section. Run this from a throwaway pod (it only asks Vault whether
+it is up):
 
 ```sh
-kubectl --context ai-sandbox -n ai-sb-test run vault-check --rm -i --restart=Never \
-  --image=curlimages/curl:8.10.1 -- \
+kubectl --context ai-sandbox -n ai-sb-test run vault-check --rm -i \ 
+  --restart=Never --image=curlimages/curl:8.10.1 -- \
   curl -sS --max-time 10 https://vault.apps.renci.org/v1/sys/health
 ```
 
@@ -184,12 +235,25 @@ kubectl --context ai-sandbox -n ai-sb-test run vault-check --rm -i --restart=Nev
   to route the cluster's outbound traffic to Vault (for example a
   site-to-site VPN or private link from the cluster's Azure network to
   RENCI). Until one of these is done, External Secrets can't fill any Secret here.
-  Everything else in this procedure is independent of the secret store, so if
-  that route can't be arranged, swap the store. Only `secret-store.yaml`
-  changes, for example to ESO's Azure Key Vault provider with workload identity.
-  The charts' ExternalSecrets, `values.yaml`, and the Vault paths stay as they
-  are; Azure Key Vault secret names can't contain `/`, so the `remoteRef`
-  values would change too.
+
+**If the cluster can never reach Vault**, keep the secret values somewhere it
+can reach instead, such as Azure Key Vault. External Secrets supports both, so
+the charts would render the same ExternalSecrets and produce the same
+Kubernetes Secrets, and sections 5–11 would still apply with a different
+place to store the values. Only two things would change:
+
+1. `manifests/secret-store.yaml`: the SecretStore's `provider` becomes
+   `azurekv` (Azure Key Vault, logging in with workload identity) instead of
+   `vault`. Keep the name `vault`, or the charts' ExternalSecrets would need
+   `secretStoreRef.name` changed as well.
+2. The name each value is stored under. Every `remoteRef` and `extract.key`
+   in `deploy/argocd/envs/<env>/values.yaml` and
+   `manifests/postgres-secrets.yaml` is a Vault path such as
+   `helx/ai-sb-test/helx-appstore-secrets`. Azure Key Vault names can't
+   contain `/`, so each would become something like
+   `helx-ai-sb-test-helx-appstore-secrets`. Each Azure Key Vault secret
+   would hold that Secret's keys as one JSON object, which ESO's `extract`
+   splits back into separate keys.
 
 ### Finding the cluster's outbound IP address
 

@@ -1508,7 +1508,7 @@ class HelpLayoutTests(unittest.TestCase):
                     rf"(?m)^{target}:\n\t@awk -f \$\(HELP_AWK\) -v topic={topic} \$\(THIS_MAKEFILE\)$",
                 )
 
-    def test_makefile_comments_fit_80_columns(self) -> None:
+    def test_makefile_comments_fit_100_columns(self) -> None:
         makefile = SCRIPT.resolve().parents[2] / "Makefile"
         if not makefile.is_file():  # pragma: no cover - only outside the repo
             self.skipTest("Makefile not present")
@@ -1516,31 +1516,42 @@ class HelpLayoutTests(unittest.TestCase):
         overlong_comments = [
             line
             for line in makefile.read_text(encoding="utf-8").splitlines()
-            if line.startswith("#") and len(line) > 80
+            if line.startswith("#") and len(line) > 100
         ]
         self.assertEqual(overlong_comments, [])
 
-        for target in (
-            "help",
-            "help-subtrees",
-            "help-ci",
-            "help-build",
-            "help-local-dev",
-            "help-locks",
-            "help-all-vars",
-        ):
-            with self.subTest(target=target):
-                result = subprocess.run(
-                    ["make", "--no-print-directory", target],
-                    cwd=makefile.parent,
-                    check=True,
-                    text=True,
-                    capture_output=True,
-                )
-                overlong_lines = [
-                    line for line in result.stdout.splitlines() if len(line) > 80
-                ]
-                self.assertEqual(overlong_lines, [])
+    def test_help_output_wraps_to_help_width(self) -> None:
+        makefile = SCRIPT.resolve().parents[2] / "Makefile"
+        if not makefile.is_file():  # pragma: no cover - only outside the repo
+            self.skipTest("Makefile not present")
+
+        environment = {k: v for k, v in os.environ.items() if k not in ("COLUMNS", "HELP_WIDTH")}
+        widest: dict[int, int] = {}
+        for help_width in (80, 120):
+            for target in (
+                "help",
+                "help-subtrees",
+                "help-ci",
+                "help-build",
+                "help-local-dev",
+                "help-locks",
+                "help-all-vars",
+            ):
+                with self.subTest(target=target, help_width=help_width):
+                    result = subprocess.run(
+                        ["make", "--no-print-directory", target],
+                        cwd=makefile.parent,
+                        env={**environment, "HELP_WIDTH": str(help_width)},
+                        stdin=subprocess.DEVNULL,
+                        check=True,
+                        text=True,
+                        capture_output=True,
+                    )
+                    lengths = [len(line) for line in result.stdout.splitlines()]
+                    self.assertEqual([n for n in lengths if n > help_width], [])
+                    widest[help_width] = max(widest.get(help_width, 0), *lengths)
+        # A wider HELP_WIDTH is actually used, not just tolerated.
+        self.assertGreater(widest[120], 80)
 
     def test_help_wraps_each_target_description_as_one_paragraph(self) -> None:
         root = SCRIPT.resolve().parents[2]

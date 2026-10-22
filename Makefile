@@ -298,6 +298,8 @@ help-all-vars:
 	@echo '  UNINSTALL_PVCS="a b"     Claims uninstall-release deletes after uninstall.'
 	@echo '  UNINSTALL_SECRETS="a"    Secrets uninstall-release also deletes.'
 	@echo '  ASSUME_YES=1             Skip confirmation prompts.'
+	@echo '  HELP_WIDTH=<columns>     Width make help wraps to.'
+	@echo '                           Default: the terminal width (60-120), else 80.'
 	@echo '  HELM_FLAGS=<flags>       Extra helm arguments, e.g. --dry-run --debug.'
 	@echo '  CHART_DIST=<dir>         Where packaged charts land. Default: dist/charts.'
 	@echo '  BASE=<ref>               Base revision for ci-check-versions.'

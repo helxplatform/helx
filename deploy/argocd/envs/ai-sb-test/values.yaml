@@ -11,8 +11,12 @@
 # default to a namespaced SecretStore, so each externalSecret below names the
 # kind as well.
 #
-# Each Vault entry is named after the Kubernetes Secret it fills, under
-# helx/ai-sb-test/, and holds exactly that Secret's keys.
+# Each Vault entry, on the `helx` KV mount, is named after the Kubernetes
+# Secret it fills and sits under the service that owns it, for example
+# dev/azure/ai-sb-test/appstore/helx-postgresql. It holds exactly that
+# Secret's keys. The dev/azure/ai-sb-test/<service> entries next to them,
+# holding secrets.yaml, are Helm values files for `make helm-deploy`; External
+# Secrets can't use those, because it copies an entry's keys as they are.
 
 appstore:
   secret:
@@ -22,7 +26,7 @@ appstore:
       secretStoreRef:
         name: vault
         kind: ClusterSecretStore
-      remoteRef: helx/ai-sb-test/helx-appstore-secrets
+      remoteRef: dev/azure/ai-sb-test/appstore/helx-appstore-secrets
     # Migration reads live Secrets, which Argo CD cannot do.
     migration:
       enabled: false
@@ -34,7 +38,7 @@ appstore:
         secretStoreRef:
           name: vault
           kind: ClusterSecretStore
-        remoteRef: helx/ai-sb-test/pgadmin-env
+        remoteRef: dev/azure/ai-sb-test/appstore/pgadmin-env
   # The bitnami subchart would generate a new admin password on every render.
   # manifests/postgres-secrets.yaml fills this Secret from Vault instead.
   postgresql:
@@ -51,7 +55,7 @@ appstore-sockets:
       secretStoreRef:
         name: vault
         kind: ClusterSecretStore
-      remoteRef: helx/ai-sb-test/helx-appstore-sockets
+      remoteRef: dev/azure/ai-sb-test/appstore-sockets/helx-appstore-sockets
 
 helx-ldap:
   secret:
@@ -61,7 +65,7 @@ helx-ldap:
       secretStoreRef:
         name: vault
         kind: ClusterSecretStore
-      remoteRef: helx/ai-sb-test/openldap-credentials
+      remoteRef: dev/azure/ai-sb-test/helx-ldap/openldap-credentials
 
 ldap-sync:
   secret:
@@ -71,7 +75,7 @@ ldap-sync:
       secretStoreRef:
         name: vault
         kind: ClusterSecretStore
-      remoteRef: helx/ai-sb-test/helx-ldap-sync-secrets
+      remoteRef: dev/azure/ai-sb-test/ldap-sync/helx-ldap-sync-secrets
   # Same as appstore's PostgreSQL: filled by manifests/postgres-secrets.yaml.
   postgres:
     auth:
@@ -87,7 +91,7 @@ user-mutator:
       secretStoreRef:
         name: vault
         kind: ClusterSecretStore
-      remoteRef: helx/ai-sb-test/helx-user-mutator-tls
+      remoteRef: dev/azure/ai-sb-test/user-mutator/helx-user-mutator-tls
   webhook:
     # The CA that signed the serving certificate in Vault; it is public, not a
     # secret. Copied from the live webhook before the takeover:
@@ -104,4 +108,4 @@ user-mutator:
         secretStoreRef:
           name: vault
           kind: ClusterSecretStore
-        remoteRef: helx/ai-sb-test/helx-user-mutator-ldap-password
+        remoteRef: dev/azure/ai-sb-test/user-mutator/helx-user-mutator-ldap-password

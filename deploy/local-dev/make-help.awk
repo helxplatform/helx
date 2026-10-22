@@ -27,8 +27,33 @@
 # Pass -v topic=<name> to print one topic, or nothing to print them all:
 #
 #     awk -f deploy/local-dev/make-help.awk -v topic=ci Makefile
+#
+# Output wraps to the terminal's width. HELP_WIDTH in the environment sets it
+# outright (`make help HELP_WIDTH=100`); otherwise $COLUMNS, then the width
+# of /dev/tty, held between 60 and 120 columns; otherwise 80.
 
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+
+function terminal_width(   command, size, parts, columns) {
+    if (ENVIRON["HELP_WIDTH"] ~ /^[0-9]+$/ && ENVIRON["HELP_WIDTH"] + 0 >= 40)
+        return ENVIRON["HELP_WIDTH"] + 0
+    if (ENVIRON["COLUMNS"] ~ /^[0-9]+$/) {
+        columns = ENVIRON["COLUMNS"] + 0
+    } else {
+        # stdout is make's pipe, not the terminal, so ask the terminal itself.
+        command = "stty size 2>/dev/null < /dev/tty"
+        if ((command | getline size) > 0 && split(size, parts, " ") == 2 &&
+            parts[2] ~ /^[0-9]+$/)
+            columns = parts[2] + 0
+        close(command)
+    }
+    if (columns == 0) return 80
+    if (columns < 60) return 60
+    if (columns > 120) return 120
+    return columns
+}
+
+BEGIN { line_width = terminal_width() }
 
 function add_row(title, label, description, padded,   i) {
     i = ++rows[title]
@@ -101,7 +126,7 @@ function print_wrapped(first_prefix, continuation_prefix, text, \
     line = prefix
     for (i = 1; i <= count; i++) {
         word = words[i]
-        if (length(line) > length(prefix) && length(line) + 1 + length(word) > 80) {
+        if (length(line) > length(prefix) && length(line) + 1 + length(word) > line_width) {
             print line
             prefix = continuation_prefix
             line = prefix word
@@ -125,10 +150,10 @@ END {
                 length(row_label[title, i]) + 2 > full_width)
                 full_width = length(row_label[title, i]) + 2
     }
-    # A required-argument usage can leave too little room to show its own
-    # description on an 80-column terminal. Show that usage alone, but align
-    # its description with every other target in the topic.
-    compact_usage = full_width > 55
+    # A required-argument usage can leave too little room (under 25 columns)
+    # for its own description. Show that usage alone, but align its
+    # description with every other target in the topic.
+    compact_usage = full_width > line_width - 25
     for (s = 1; s <= sections; s++) {
         title = order[s]
         if (topic != "" && topic != topic_of[title]) continue

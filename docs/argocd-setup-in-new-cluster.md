@@ -7,11 +7,61 @@ already running. The commands use the Azure AI Sandbox cluster (kube context
 own cluster and namespace. Where the Azure cluster needs something other
 clusters don't (pulling images from ACR), the section says so.
 
-> **Status (2026-10-21):** the repository side is done: sections 2, 6, and 7
-> (the CI half), and the files in `deploy/argocd/`. External Secrets is
-> installed on the Azure cluster (section 3) and connected to Vault
-> (section 4). Steps that change the cluster, Vault, ACR, or GitHub
-> settings are marked *(not done yet)*. Update each one as it is carried out.
+> **Status and hand-off (2026-10-23).** This block, and the *(done)* /
+> *(not done yet)* markers on the section headings, track the first run of
+> this procedure, on the Azure cluster's `ai-sb-test` namespace. Delete them
+> once that run is finished; everything else in this document is the
+> procedure itself.
+>
+> **Where it stands:**
+>
+> - **Sections 1 and 2:** done. `ai-sb-test` runs the umbrella chart as the Helm
+>   release `helx`, and no migration switch is on.
+> - **Section 3:** done. The `external-secrets` Application is Synced and
+>   Healthy.
+> - **Section 4:** done. The ClusterSecretStore `vault` is `READY`, the
+>   `vault-token` Secret exists, and `vault-token-renewal` runs every Monday
+>   at 06:17 UTC.
+> - **Section 5:** the nine entries are uploaded to the `helx` mount under
+>   `dev/azure/ai-sb-test/`. `make vault-secrets-to-helm` has been run. Still to
+>   do: the comparison in step 4 of "Taking over a running release", listing
+>   the new `dist/vault-secrets/secrets.yaml` in `LOCAL_VALUES_FILE` (kept
+>   outside `dist/`), and deleting `dist/vault-secrets/`. It holds plaintext
+>   secrets.
+> - **Section 6:** done in the repository.
+> - **Section 7:** the CI changes are on the branch `argocd-setup`, not yet
+>   merged, so they don't run yet. The ACR token and the GitHub variable and
+>   secrets (`ACR_LOGIN_SERVER`, `ACR_USERNAME`, `ACR_PASSWORD`) are not set
+>   up.
+> - **Section 8:** not done; there's no GHCR repository Secret in Argo CD.
+> - **Section 9:** waiting on the merge. `argocd-setup` is to be merged to
+>   `develop` after the next release is cut. Argo CD reads `develop`, so
+>   applying `root.yaml` before then would find nothing.
+> - **Sections 10 and 11:** not done. No HeLx Application or ExternalSecret
+>   exists yet. `ai-sb-test` is still the Helm release `helx`, chart
+>   `helx-5.1.1-local`.
+>
+> **Open questions and follow-ups:**
+>
+> - helx-common drops the final newline of a chart-managed Secret's
+>   alphabetically last value (see step 4 of "Taking over a running
+>   release"). The fix touches every chart that uses helx-common and is being
+>   done separately.
+> - Whether External Secrets takes over the existing chart-made Secrets, or
+>   refuses because it didn't create them, is only known after the first sync
+>   (section 10, step 3).
+>
+> **Ground rules for whoever continues, including an AI assistant:**
+>
+> - Treat the cluster as read-only (`get`, `describe`, `logs`); the person
+>   running the procedure applies, deletes, and execs.
+> - Never open or print the files under `dist/vault-secrets*` or any Vault
+>   values; list names and keys only.
+> - Don't write to Vault, ACR, Harbor, or GitHub settings. Test against fakes
+>   (the tests use a fake `vault` on `PATH`).
+> - Commit only when asked.
+> - Keep this document a procedure: results of a run belong in this block,
+>   not in the sections.
 
 ## How the pieces fit
 
@@ -40,6 +90,21 @@ clusters don't (pulling images from ACR), the section says so.
 - Argo CD reads `deploy/argocd/` and the values files from the `develop` branch,
   so nothing here takes effect until it is merged there.
 
+Where everything lives, outside `deploy/argocd/`:
+
+- `deploy/helm/values/<cluster>/` holds the first two values files. The Azure
+  cluster's `defaults/values.yaml` also points every image at ACR (section 7).
+- `deploy/helm/vault-secrets.yaml` maps each Secret to its Vault entry and its
+  Helm values. `.github/scripts/vault_secrets.py` and its tests, behind
+  `make helm-secrets-to-vault`, `vault-secrets-to-helm`,
+  `vault-secrets-from-cluster` and `vault-secrets-upload`, use it (section 5).
+  `make help-local-dev` describes the targets.
+- `.github/workflows/develop.yml` and `publish.yml` publish the numbered
+  candidates and copy images to ACR, using `.github/actions/mirror-image`
+  (section 7).
+- `AGENTS.md`, under "Argo CD" and "Candidate channels", has the rules for
+  changing any of this.
+
 ```
 deploy/argocd/
 ├── root.yaml                          applied by hand, once per cluster
@@ -57,7 +122,7 @@ deploy/argocd/
             └── postgres-secrets.yaml  ExternalSecrets the charts can't render
 ```
 
-## 1. Take stock of the cluster
+## 1. Take stock of the cluster *(done)*
 
 Before changing anything, record what is running. These commands only read.
 
@@ -106,7 +171,7 @@ What to look for in the output:
   section 7's ACR steps apply. Charts are different: Argo CD pulls them from
   GHCR on every cluster.
 
-## 2. Finish chart migrations before handing over
+## 2. Finish chart migrations before handing over *(done)*
 
 Several charts have one-time migration switches. All of them are off by
 default, and they stay in the charts for older deployments that still need
@@ -137,7 +202,7 @@ Each `deploy/argocd/envs/<env>/values.yaml` also sets
 `appstore.secret.migration.enabled: false` explicitly, because appstore's
 chart default is `true`.
 
-## 3. Install External Secrets
+## 3. Install External Secrets *(done)*
 
 `deploy/argocd/bootstrap/external-secrets.yaml` installs ESO chart 2.13.0 into
 the `external-secrets` namespace. The root Application (section 9) applies it
@@ -206,7 +271,8 @@ single Vault token for the whole cluster, kept in the Secret `vault-token` in
 the `external-secrets` namespace. That Secret is created by hand and never
 committed.
 
-- The token's Vault policy only allows reading entries under `helx/`.
+- The token's Vault policy only allows reading this cluster's entries on the
+  `helx` mount (`helx/data/+/azure/*`).
 - The store's `conditions` list the namespaces allowed to use it. Add a
   namespace there when you add an environment.
 - The token lasts at most a year. `bootstrap/vault-token-renewal.yaml` renews
@@ -259,9 +325,9 @@ place to store the values. Only two things would change:
 2. The name each value is stored under. Every `remoteRef` and `extract.key`
    in `deploy/argocd/envs/<env>/values.yaml` and
    `manifests/postgres-secrets.yaml` is a Vault path such as
-   `helx/ai-sb-test/helx-appstore-secrets`. Azure Key Vault names can't
-   contain `/`, so each would become something like
-   `helx-ai-sb-test-helx-appstore-secrets`. Each Azure Key Vault secret
+   `dev/azure/ai-sb-test/appstore/helx-appstore-secrets`. Azure Key Vault
+   names can't contain `/`, so each would become something like
+   `dev-azure-ai-sb-test-appstore-helx-appstore-secrets`. Each Azure Key Vault secret
    would hold that Secret's keys as one JSON object, which ESO's `extract`
    splits back into separate keys.
 
@@ -319,21 +385,25 @@ allow-list.
 
 Run these from a machine on the VPN, logged in to Vault (`vault login`).
 
-The policy lets the token read HeLx entries and nothing else. Vault's KV
-version 2 stores values under `<mount>/data/`, so the policy names
-`secret/data/helx/*` for entries such as `secret/helx/ai-sb-test/pgadmin-env`:
+HeLx entries live on the KV version 2 mount `helx`, at
+`<tier>/<cloud>/<namespace>/<service>/<Kubernetes Secret name>`, for example
+`dev/azure/ai-sb-test/appstore/helx-postgresql` (section 5). The policy lets
+the token read this cluster's entries and nothing else. KV version 2 stores
+values under `<mount>/data/`, and `+` matches any one path segment, so this
+covers every tier (`dev`, `prod`, ...) on the Azure cluster:
 
 ```sh
 vault policy write helx-eso-read - <<'POLICY'
-path "secret/data/helx/*" {
+path "helx/data/+/azure/*" {
   capabilities = ["read"]
 }
 POLICY
 ```
 
-`vault secrets list -detailed` shows the KV mount's name and version. If the
-mount isn't `secret/` (version 2), change the policy path and `path:` in
-`vault-cluster-secret-store.yaml` to match.
+`vault secrets list -detailed` shows each mount's name and KV version. If the
+entries are on a different mount, change the policy path and `path:` in
+`vault-cluster-secret-store.yaml` to match. A policy change applies to
+existing tokens straight away, so it never needs a new token.
 
 Create the token:
 
@@ -375,8 +445,8 @@ should print the entry (once section 5 has filled it) and the second should
 fail with "permission denied":
 
 ```sh
-VAULT_TOKEN='<new token>' vault kv get -mount=secret helx/ai-sb-test/helx-postgresql
-VAULT_TOKEN='<new token>' vault kv put -mount=secret helx/ai-sb-test/test x=1
+VAULT_TOKEN='<new token>' vault kv get -mount=helx -format=json dev/azure/ai-sb-test/appstore/helx-postgresql | jq '.data.data | keys'
+VAULT_TOKEN='<new token>' vault kv put -mount=helx dev/azure/ai-sb-test/test x=1
 ```
 
 ### Put the token in the cluster
@@ -462,54 +532,137 @@ Vault-side setup (an auth mount and a role per namespace). Kubernetes login
 also needs Vault to reach the cluster's API server. Only
 `vault-cluster-secret-store.yaml` would change to use either.
 
-## 5. Move each secret into Vault *(not done yet)*
+## 5. Move each secret into Vault *(entries uploaded; check and clean-up left)*
 
-Every Secret that the chart used to create gets one Vault entry with the same
-name and the same keys, under `helx/<env>/`. The values files in section 6
-already point at these paths. For `ai-sb-test`:
+Every Secret that the chart used to create gets one Vault entry, on the
+`helx` mount, with the same name and the same keys. Each sits under the
+service that owns it, at `<tier>/<cloud>/<namespace>/<service>/<Secret name>`.
+The values files in section 6 already point at these paths. For `ai-sb-test`
+(tier `dev`, cloud `azure`):
 
-| Kubernetes Secret                 | Vault entry (in the KV mount)               | Written by                                        |
-| --------------------------------- | ------------------------------------------- | ------------------------------------------------- |
-| `helx-appstore-secrets`           | `helx/ai-sb-test/helx-appstore-secrets`     | appstore chart (ExternalSecret `helx-appstore`)   |
-| `pgadmin-env`                     | `helx/ai-sb-test/pgadmin-env`               | appstore chart                                    |
-| `helx-postgresql`                 | `helx/ai-sb-test/helx-postgresql`           | `manifests/postgres-secrets.yaml`                 |
-| `helx-appstore-sockets`           | `helx/ai-sb-test/helx-appstore-sockets`     | appstore-sockets chart                            |
-| `openldap-credentials`            | `helx/ai-sb-test/openldap-credentials`      | helx-ldap chart (ExternalSecret `helx-helx-ldap`) |
-| `helx-ldap-sync-secrets`          | `helx/ai-sb-test/helx-ldap-sync-secrets`    | ldap-sync chart (ExternalSecret `helx-ldap-sync`) |
-| `helx-ldap-sync-postgres`         | `helx/ai-sb-test/helx-ldap-sync-postgres`   | `manifests/postgres-secrets.yaml`                 |
-| `helx-user-mutator-tls`           | `helx/ai-sb-test/helx-user-mutator-tls`     | user-mutator chart                                |
-| `helx-user-mutator-ldap-password` | `helx/ai-sb-test/helx-user-mutator-ldap-password` | user-mutator chart                          |
+| Kubernetes Secret                 | Vault entry on the `helx` mount                                | Keys |
+| --------------------------------- | -------------------------------------------------------------- | ---- |
+| `helx-appstore-secrets`           | `dev/azure/ai-sb-test/appstore/helx-appstore-secrets`           | `SECRET_KEY`, `APPSTORE_DJANGO_USERNAME`, `APPSTORE_DJANGO_PASSWORD`, `PG_DB_PASSWORD` |
+| `pgadmin-env`                     | `dev/azure/ai-sb-test/appstore/pgadmin-env`                     | `PGADMIN_DEFAULT_PASSWORD`, `PGADMIN_DEFAULT_EMAIL`, `HELX_DB_HOSTNAME`, other `PGADMIN_*` settings |
+| `helx-postgresql`                 | `dev/azure/ai-sb-test/appstore/helx-postgresql`                 | `password` (appstore's database user), `postgres-password` (admin) |
+| `helx-appstore-sockets`           | `dev/azure/ai-sb-test/appstore-sockets/helx-appstore-sockets`   | `PUBLISHER_SECRET` |
+| `openldap-credentials`            | `dev/azure/ai-sb-test/helx-ldap/openldap-credentials`           | `LDAP_ADMIN_PASSWORD`, `LDAP_CONFIG_ADMIN_PASSWORD` |
+| `helx-ldap-sync-secrets`          | `dev/azure/ai-sb-test/ldap-sync/helx-ldap-sync-secrets`         | `SOURCE_BIND_PASSWORD`, `TARGET_BIND_PASSWORD` |
+| `helx-ldap-sync-postgres`         | `dev/azure/ai-sb-test/ldap-sync/helx-ldap-sync-postgres`        | `postgres-password`, `database`, `host`, `port`, `uri`, `username` |
+| `helx-user-mutator-tls`           | `dev/azure/ai-sb-test/user-mutator/helx-user-mutator-tls`       | `tls.crt`, `tls.key`, `ca.crt` |
+| `helx-user-mutator-ldap-password` | `dev/azure/ai-sb-test/user-mutator/helx-user-mutator-ldap-password` | `password` |
 
-When taking over a running release, copy the **live** values; don't generate
-new ones. The databases were initialised with the live passwords, and the
-webhook's CA bundle in `values.yaml` matches the live certificate. This loop
-copies each Secret's decoded data straight into Vault, without printing it.
-Run it from a machine on the VPN, logged in to Vault (`vault login`) with
-write access to `secret/helx/ai-sb-test/`:
+The entries must hold these keys directly, one value per key. External
+Secrets copies an entry's keys into the Kubernetes Secret exactly as they are
+and doesn't read YAML, so an entry holding a Helm values file would produce a
+Secret with the single key `secrets.yaml` instead of `SECRET_KEY` and the rest.
+
+### Converting between `secrets.yaml` and Vault entries
+
+A `secrets.yaml` for `make helm-deploy` and the Vault entries above hold the
+same values in two shapes. Three Make targets convert between them, and a
+fourth uploads the result, using
+`deploy/helm/vault-secrets.yaml`, which records each Secret's service and
+where each of its keys lives in the Helm values:
+
+- **`make helm-secrets-to-vault`** renders the chart that
+  `make build-helx-chart` packaged, with your values files, and writes each
+  Secret the chart would create as `<service>/<Secret name>.json` under
+  `dist/vault-secrets/`. It uses the files listed in `LOCAL_VALUES_FILE`
+  (after a y/n prompt; `ASSUME_YES=1` skips it), followed by any `VALUES=`.
+  If `LOCAL_VALUES_FILE` doesn't exist, it uses `VALUES=` alone. It renders
+  twice and refuses to write anything if a value differs between the two,
+  listing the values paths to add to `secrets.yaml`. A value that differs is
+  one the chart generates, which Argo CD would replace on every sync.
+- **`make vault-secrets-to-helm`** turns those JSON files back into one
+  combined `secrets.yaml` (`dist/vault-secrets/secrets.yaml`) for
+  `make helm-deploy`.
+- **`make vault-secrets-from-cluster`** copies the live Secrets of a running
+  release into the same JSON files. It only reads from the cluster. It is the
+  only source for values the charts generated, which no `secrets.yaml` holds.
+  If any file it would write already exists, it lists them and asks y/n
+  before overwriting (`ASSUME_YES=1` skips the question).
+- **`make vault-secrets-upload VAULT_PATH=<prefix>`** writes those JSON files
+  to Vault, one entry per file at `<VAULT_PATH>/<service>/<Secret name>` on
+  the `helx` mount, using the `vault` CLI. It lists every entry it will write,
+  and the Vault address, then asks y/n (`ASSUME_YES=1` skips it). It stops at
+  the first failure and says which entries were written. It needs `VAULT_ADDR`
+  set and a `vault login`. Each upload adds a new version of an entry; KV
+  version 2 keeps the earlier ones.
+
+`VAULT_PATH` is the path prefix, on the `helx` mount, under which all of a
+namespace's secrets are stored: `dev/azure/ai-sb-test` for `ai-sb-test`. The
+JSON targets also print a `vault kv put` command per file, for uploading by
+hand. These use `$VAULT_PATH` from your shell unless you passed
+`VAULT_PATH=` to Make. Every file holds plaintext secrets and is created
+readable by its owner only; `dist/` is ignored by Git. Delete the files once
+they are uploaded. `make help-local-dev` lists the variables each target
+takes.
+
+### Taking over a running release
+
+Copy the **live** values; don't make new ones. The databases were initialised
+with the live passwords, and the webhook's CA bundle in `values.yaml` matches
+the live certificate.
+
+1. Copy the live Secrets to JSON:
+
+   ```sh
+   make vault-secrets-from-cluster NAMESPACE=ai-sb-test
+   ```
+
+2. Upload them, from a machine on the VPN, logged in to Vault with write
+   access to `helx/dev/azure/ai-sb-test/`:
+
+   ```sh
+   export VAULT_ADDR=https://vault.apps.renci.org
+   vault login
+   make vault-secrets-upload VAULT_PATH=dev/azure/ai-sb-test
+   ```
+3. Turn the same JSON into a complete `secrets.yaml`, including the values the
+   charts used to generate:
+
+   ```sh
+   make vault-secrets-to-helm
+   ```
+
+   Keep `dist/vault-secrets/secrets.yaml` wherever you keep secrets files (it
+   replaces the per-service `secrets.yaml` files) and list it in
+   `LOCAL_VALUES_FILE` in their place.
+4. Check that the new `secrets.yaml` describes the same Secrets, by rendering
+   it back to JSON in a second folder and comparing:
+
+   ```sh
+   make helm-secrets-to-vault NAMESPACE=ai-sb-test VAULT_SECRETS_DIR=dist/vault-secrets-check
+   diff -r -x secrets.yaml dist/vault-secrets dist/vault-secrets-check
+   ```
+
+   The only expected difference is a missing final newline at the end of
+   `tls.key` in `helx-user-mutator-tls.json`. When the chart builds a Secret
+   from values, helx-common drops the final newline of its alphabetically last
+   key. A PEM key loads the same either way.
+5. Delete both folders: `rm -rf dist/vault-secrets dist/vault-secrets-check`.
+
+Check what landed in Vault (key names only) with, for example:
 
 ```sh
-CONTEXT=ai-sandbox
-NAMESPACE=ai-sb-test
-MOUNT=secret
-for name in helx-appstore-secrets pgadmin-env helx-postgresql \
-            helx-appstore-sockets openldap-credentials helx-ldap-sync-secrets \
-            helx-ldap-sync-postgres helx-user-mutator-tls \
-            helx-user-mutator-ldap-password; do
-  kubectl --context "$CONTEXT" -n "$NAMESPACE" get secret "$name" -o json \
-    | jq '.data | map_values(@base64d)' \
-    | vault kv put -mount="$MOUNT" "helx/$NAMESPACE/$name" -
-done
+vault kv get -mount=helx -format=json dev/azure/ai-sb-test/appstore/helx-postgresql | jq '.data.data | keys'
 ```
 
-Check that each entry has the right keys (this lists key names only):
+### A new environment, or changing a secret later
+
+Edit the environment's `secrets.yaml`, then run
+`make helm-secrets-to-vault NAMESPACE=<namespace>`, then
+`make vault-secrets-upload VAULT_PATH=<prefix>`. The namespace matters: some
+values the charts derive, such as ldap-sync's database `host` and `uri`,
+contain it. For a new environment, its error message lists
+every value the charts would otherwise generate; add each to `secrets.yaml`.
+External Secrets picks up changed entries within an hour (`refreshInterval`),
+or straight away with:
 
 ```sh
-vault kv get -mount="$MOUNT" -format=json "helx/$NAMESPACE/helx-postgresql" | jq '.data.data | keys'
+kubectl -n <namespace> annotate externalsecret <name> force-sync="$(date +%s)" --overwrite
 ```
-
-For a brand-new environment with nothing to copy, create each entry with the
-keys the chart requires. Each chart's `values.yaml` lists them under its
-`secret.values` comments.
 
 ## 6. Make the chart values safe for Argo CD *(done in the repository)*
 
@@ -580,7 +733,7 @@ ExternalSecrets and the webhook's `caBundle`, which matches the live one.
 No Deployment or StatefulSet template changes, so the takeover itself restarts
 nothing. Pods do roll when the first ACR candidate changes the image tags.
 
-## 7. Publish a chart Argo CD can follow, and images the cluster can pull *(CI done; ACR setup not done yet)*
+## 7. Publish a chart Argo CD can follow, and images the cluster can pull *(CI on the branch, not merged; ACR setup not done yet)*
 
 ### The chart: numbered candidates on GHCR
 
@@ -698,8 +851,8 @@ Before this step, check that:
 - the GHCR repository Secret exists (section 8)
 
 The bootstrap reads `develop`, so `deploy/argocd/` and the env's values must
-be merged there first. To try it
-from a branch before merging, change `targetRevision` in `root.yaml`,
+be merged there first. To try it from a branch before merging, change
+`targetRevision` in `root.yaml`,
 `revision` in `bootstrap/applicationset-helx.yaml`, and `valuesRef` in the
 env's `config.yaml` to the branch, and change them back before merging.
 

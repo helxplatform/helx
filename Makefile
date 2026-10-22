@@ -155,6 +155,18 @@ UNINSTALL_SECRETS               ?= $(RELEASE)-appstore-secrets \
                                    $(RELEASE)-postgresql \
                                    openldap-credentials \
                                    pgadmin-env
+# The vault-secrets targets: the Secret map they read, where they put the one-JSON-file-per-Secret
+# output (and read it back from), and the secrets.yaml vault-secrets-to-helm writes. Both hold
+# plaintext secrets; dist/ is ignored by Git, and the files are readable by their owner only.
+VAULT_SECRETS_SCRIPT            ?= .github/scripts/vault_secrets.py
+VAULT_SECRETS_MAP               ?= deploy/helm/vault-secrets.yaml
+VAULT_SECRETS_DIR               ?= dist/vault-secrets
+VAULT_SECRETS_YAML              ?= $(VAULT_SECRETS_DIR)/secrets.yaml
+# Where vault-secrets-upload (and the printed upload commands) put each entry: the KV mount, and
+# VAULT_PATH, the path prefix under which all of a namespace's secrets are stored on that mount,
+# e.g. VAULT_PATH=dev/azure/ai-sb-test.
+VAULT_MOUNT                     ?= helx
+VAULT_PATH                      ?=
 # make help and its topic targets are generated from the comments above each
 # target, so documentation cannot drift from what it documents. See the header
 # of $(HELP_AWK) for the markers involved.
@@ -222,6 +234,10 @@ CLUSTER_NAME                    ?=
         push-helx-images \
         helm-deploy \
         uninstall-release \
+        helm-secrets-to-vault \
+        vault-secrets-to-helm \
+        vault-secrets-from-cluster \
+        vault-secrets-upload \
         docker-build \
         pre-push \
         install-hooks
@@ -274,13 +290,13 @@ help-locks:
 #help-all-vars: Show every variable the targets accept
 help-all-vars:
 	@echo 'Environment variables:'
-	@echo '  PYTHON=<path>           Interpreter to use.'
+	@echo '  PYTHON=<path>            Interpreter to use.'
 	@echo '                           Default: $(VENV_PYTHON); skips venv setup.'
-	@echo '  VENV=<dir>              Virtualenv location. Default: .venv.'
+	@echo '  VENV=<dir>               Virtualenv location. Default: .venv.'
 	@echo '  BOOTSTRAP_PYTHON=<path>  Python used to create the virtualenv.'
 	@echo '                           Default: python3.'
 	@echo '  SERVICE=<name>           Required by per-service targets (make help-build).'
-	@echo '  SERVICES="a b"          Services rebuilt locally; only these get pinned.'
+	@echo '  SERVICES="a b"           Services rebuilt locally; only these get pinned.'
 	@echo '  SERVICES=all             Every service that builds an image.'
 	@echo '  TAG=<tag>                Image tag to build, push, and pin.'
 	@echo '                           Default: test-<short-sha>.'
@@ -293,13 +309,22 @@ help-all-vars:
 	@echo '                           Default: helx; required by uninstall-release.'
 	@echo '  NAMESPACE=<ns>           Namespace to deploy into or uninstall from.'
 	@echo '                           Default: current kubectl context namespace.'
-	@echo '  VALUES="a.yaml b.yaml"  Extra helm-deploy values files, applied last.'
+	@echo '  VALUES="a.yaml b.yaml"   Extra helm-deploy values files, applied last.'
 	@echo '  LOCAL_VALUES_FILE=<f>    Untracked list of values files, one path per line.'
 	@echo '  UNINSTALL_PVCS="a b"     Claims uninstall-release deletes after uninstall.'
 	@echo '  UNINSTALL_SECRETS="a"    Secrets uninstall-release also deletes.'
 	@echo '  ASSUME_YES=1             Skip confirmation prompts.'
 	@echo '  HELP_WIDTH=<columns>     Width make help wraps to.'
 	@echo '                           Default: the terminal width (60-120), else 80.'
+	@echo '  VAULT_SECRETS_DIR=<dir>  Output directory of JSON files for Vault secrets,'
+	@echo '                           one per Secret.'
+	@echo '                           Default: dist/vault-secrets.'
+	@echo '  VAULT_SECRETS_YAML=<f>   secrets.yaml vault-secrets-to-helm writes.'
+	@echo '                           Default: $$(VAULT_SECRETS_DIR)/secrets.yaml.'
+	@echo '  VAULT_SECRETS_MAP=<f>    Secret map. Default: deploy/helm/vault-secrets.yaml.'
+	@echo '  VAULT_PATH=<path>        Path prefix under which all of a namespace'"'"'s'
+	@echo '                           secrets are stored, e.g. dev/azure/ai-sb-test.'
+	@echo '  VAULT_MOUNT=<mount>      Vault KV mount. Default: helx.'
 	@echo '  HELM_FLAGS=<flags>       Extra helm arguments, e.g. --dry-run --debug.'
 	@echo '  CHART_DIST=<dir>         Where packaged charts land. Default: dist/charts.'
 	@echo '  BASE=<ref>               Base revision for ci-check-versions.'
@@ -313,41 +338,41 @@ help-all-vars:
 	@echo '  FORCE=1                  Let chart mirrors overwrite uncommitted work.'
 	@echo
 	@echo 'Subtree configuration (defaults are at the top of this Makefile):'
-	@echo '  MAX_SUBTREE_BLOB_BYTES=<bytes>  Maximum incoming subtree file size.'
-	@echo '  REMOTE=<name>            Required by pull-subtree.'
-	@echo '  PREFIX=<path>            Required by pull-subtree.'
-	@echo '  BRANCH=<branch>          Required by pull-subtree.'
-	@echo '  APPSTORE_URL=<url>       appstore remote URL.'
-	@echo '  APPSTORE_PREFIX=<path>   appstore local subtree path.'
-	@echo '  APPSTORE_BRANCH=<branch> appstore branch to add or pull.'
-	@echo '  APPSTORE_CHART_URL=<url>       appstore-chart remote URL.'
-	@echo '  APPSTORE_CHART_PREFIX=<path>   appstore-chart local subtree path.'
-	@echo '  APPSTORE_CHART_BRANCH=<branch> appstore-chart branch to add or pull.'
+	@echo '  MAX_SUBTREE_BLOB_BYTES=<bytes>     Maximum incoming subtree file size.'
+	@echo '  REMOTE=<name>                      Required by pull-subtree.'
+	@echo '  PREFIX=<path>                      Required by pull-subtree.'
+	@echo '  BRANCH=<branch>                    Required by pull-subtree.'
+	@echo '  APPSTORE_URL=<url>                 appstore remote URL.'
+	@echo '  APPSTORE_PREFIX=<path>             appstore local subtree path.'
+	@echo '  APPSTORE_BRANCH=<branch>           appstore branch to add or pull.'
+	@echo '  APPSTORE_CHART_URL=<url>           appstore-chart remote URL.'
+	@echo '  APPSTORE_CHART_PREFIX=<path>       appstore-chart local subtree path.'
+	@echo '  APPSTORE_CHART_BRANCH=<branch>     appstore-chart branch to add or pull.'
 	@echo '  APPSTORE_PREPULLER_URL=<url>       appstore-prepuller remote URL.'
 	@echo '  APPSTORE_PREPULLER_PREFIX=<path>   appstore-prepuller local subtree path.'
 	@echo '  APPSTORE_PREPULLER_BRANCH=<branch> appstore-prepuller branch to add or pull.'
-	@echo '  APPSTORE_SOCKETS_URL=<url>       appstore-sockets remote URL.'
-	@echo '  APPSTORE_SOCKETS_PREFIX=<path>   appstore-sockets local subtree path.'
-	@echo '  APPSTORE_SOCKETS_BRANCH=<branch> appstore-sockets branch to add or pull.'
-	@echo '  APPSTORE_SOCKETS_CHART_URL=<url>       appstore-sockets-chart remote URL.'
+	@echo '  APPSTORE_SOCKETS_URL=<url>         appstore-sockets remote URL.'
+	@echo '  APPSTORE_SOCKETS_PREFIX=<path>     appstore-sockets local subtree path.'
+	@echo '  APPSTORE_SOCKETS_BRANCH=<branch>   appstore-sockets branch to add or pull.'
+	@echo '  APPSTORE_SOCKETS_CHART_URL=<url>   appstore-sockets-chart remote URL.'
 	@echo '  APPSTORE_SOCKETS_CHART_PREFIX=<path>   appstore-sockets-chart subtree path.'
 	@echo '  APPSTORE_SOCKETS_CHART_BRANCH=<branch> appstore-sockets-chart branch.'
-	@echo '  HELX_LDAP_URL=<url>       helx-ldap remote URL.'
-	@echo '  HELX_LDAP_PREFIX=<path>   helx-ldap local subtree path.'
-	@echo '  HELX_LDAP_BRANCH=<branch> helx-ldap branch to add or pull.'
-	@echo '  LDAP_SYNC_URL=<url>       ldap-sync remote URL.'
-	@echo '  LDAP_SYNC_PREFIX=<path>   ldap-sync local subtree path.'
-	@echo '  LDAP_SYNC_BRANCH=<branch> ldap-sync branch to add or pull.'
-	@echo '  UI_URL=<url>              UI remote URL.'
-	@echo '  UI_PREFIX=<path>          UI local subtree path.'
-	@echo '  UI_BRANCH=<branch>        UI branch to add or pull.'
-	@echo '  UI_CHART_URL=<url>        UI chart remote URL.'
-	@echo '  UI_CHART_PREFIX=<path>    UI chart local subtree path.'
-	@echo '  UI_CHART_BRANCH=<branch>  UI chart branch to add or pull.'
-	@echo '  USER_MUTATOR_URL=<url>       user-mutator remote URL.'
-	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
-	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
-	@echo '  RECORD=1                     check-subtree-sync prints MIGRATION.md rows.'
+	@echo '  HELX_LDAP_URL=<url>            helx-ldap remote URL.'
+	@echo '  HELX_LDAP_PREFIX=<path>        helx-ldap local subtree path.'
+	@echo '  HELX_LDAP_BRANCH=<branch>      helx-ldap branch to add or pull.'
+	@echo '  LDAP_SYNC_URL=<url>            ldap-sync remote URL.'
+	@echo '  LDAP_SYNC_PREFIX=<path>        ldap-sync local subtree path.'
+	@echo '  LDAP_SYNC_BRANCH=<branch>      ldap-sync branch to add or pull.'
+	@echo '  UI_URL=<url>                   UI remote URL.'
+	@echo '  UI_PREFIX=<path>               UI local subtree path.'
+	@echo '  UI_BRANCH=<branch>             UI branch to add or pull.'
+	@echo '  UI_CHART_URL=<url>             UI chart remote URL.'
+	@echo '  UI_CHART_PREFIX=<path>         UI chart local subtree path.'
+	@echo '  UI_CHART_BRANCH=<branch>       UI chart branch to add or pull.'
+	@echo '  USER_MUTATOR_URL=<url>         user-mutator remote URL.'
+	@echo '  USER_MUTATOR_PREFIX=<path>     user-mutator local subtree path.'
+	@echo '  USER_MUTATOR_BRANCH=<branch>   user-mutator branch to add or pull.'
+	@echo '  RECORD=1                       check-subtree-sync prints MIGRATION.md rows.'
 	@echo
 	@echo 'Vendored chart configuration (ambassador, pod-reaper, resty):'
 	@echo '  HELX_CHART_URL=<url>      helx-chart remote URL.'
@@ -1357,3 +1382,89 @@ uninstall-release:
 ##> A claim can sit in Terminating until its pods are gone; kubectl waits it
 ##> out. Anything the charts did not create is left alone. PersistentVolumes
 ##> included: a Retain volume outlives its claim and is yours to delete.
+
+##@ local-dev Moving secrets between Helm and Vault
+# helm-secrets-to-vault: Render the chart build-helx-chart packaged with your values files, and
+# write each Secret it would create as one JSON file per Secret under VAULT_SECRETS_DIR, ready to
+# upload to Vault. Uses LOCAL_VALUES_FILE (after a y/n prompt) then VALUES, or VALUES alone when
+# that file does not exist. Fails if any value is generated by a chart.
+# [RELEASE, NAMESPACE, VALUES, LOCAL_VALUES_FILE, ASSUME_YES, VAULT_PATH, VAULT_MOUNT,
+#  VAULT_SECRETS_DIR, CHART_DIST, PYTHON, VENV]
+helm-secrets-to-vault: $(PYTHON_READY)
+	@set -euo pipefail; \
+	pointer="$(UMBRELLA_PACKAGE_POINTER)"; \
+	if test ! -f "$$pointer"; then \
+		echo "No packaged umbrella chart at $$pointer."; \
+		echo 'Run: make build-helx-chart'; \
+		exit 1; \
+	fi; \
+	package=$$(cat "$$pointer"); \
+	if test ! -f "$$package"; then \
+		echo "$$pointer names $$package, which no longer exists."; \
+		echo 'Run: make build-helx-chart to package it again.'; \
+		exit 1; \
+	fi; \
+	namespace="$(NAMESPACE)"; \
+	if test -z "$$namespace"; then \
+		namespace=$$(kubectl config view --minify --output jsonpath='{..namespace}' 2>/dev/null); \
+		if test -z "$$namespace"; then \
+			echo 'No namespace to render for: NAMESPACE is unset and the kubectl'; \
+			echo 'context selects none. Some values (e.g. service hostnames)'; \
+			echo 'contain it, so name one:'; \
+			echo '  make helm-secrets-to-vault NAMESPACE=<ns>'; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "Rendering for release $(RELEASE) in namespace $$namespace"; \
+	$(PYTHON) $(VAULT_SECRETS_SCRIPT) --map "$(VAULT_SECRETS_MAP)" \
+		--release "$(RELEASE)" to-vault --chart "$$package" \
+		--namespace "$$namespace" --values-list "$(LOCAL_VALUES_FILE)" \
+		--values $(VALUES) $(if $(ASSUME_YES),--assume-yes) \
+		--out "$(VAULT_SECRETS_DIR)" --vault-mount "$(VAULT_MOUNT)" \
+		--vault-path "$(VAULT_PATH)"
+
+# vault-secrets-to-helm: Turn the JSON files under VAULT_SECRETS_DIR back into one secrets.yaml
+# (VAULT_SECRETS_YAML) for make helm-deploy.
+# [RELEASE, VAULT_SECRETS_DIR, VAULT_SECRETS_YAML, PYTHON, VENV]
+vault-secrets-to-helm: $(PYTHON_READY)
+	@$(PYTHON) $(VAULT_SECRETS_SCRIPT) --map "$(VAULT_SECRETS_MAP)" \
+		--release "$(RELEASE)" to-helm --in "$(VAULT_SECRETS_DIR)" \
+		--out-file "$(VAULT_SECRETS_YAML)"
+
+# vault-secrets-from-cluster: Copy the live Secrets of RELEASE in NAMESPACE into the same JSON files
+# as helm-secrets-to-vault, generated values included. Only reads from the cluster. Asks first if
+# any file it would write already exists.
+# [RELEASE, NAMESPACE, VAULT_PATH, VAULT_MOUNT, VAULT_SECRETS_DIR, ASSUME_YES, PYTHON, VENV]
+vault-secrets-from-cluster: $(PYTHON_READY)
+	@set -euo pipefail; \
+	context=$$(kubectl config current-context 2>/dev/null || echo '<none>'); \
+	namespace="$(NAMESPACE)"; \
+	if test -z "$$namespace"; then \
+		namespace=$$(kubectl config view --minify --output jsonpath='{..namespace}' 2>/dev/null); \
+		if test -z "$$namespace"; then \
+			echo "No namespace to read from: NAMESPACE is unset and context"; \
+			echo "$$context selects none. Name one:"; \
+			echo '  make vault-secrets-from-cluster NAMESPACE=<ns>'; \
+			exit 1; \
+		fi; \
+	fi; \
+	echo "Reading Secrets of release $(RELEASE) in $$namespace, context $$context"; \
+	$(PYTHON) $(VAULT_SECRETS_SCRIPT) --map "$(VAULT_SECRETS_MAP)" \
+		--release "$(RELEASE)" from-cluster --namespace "$$namespace" \
+		--out "$(VAULT_SECRETS_DIR)" --vault-mount "$(VAULT_MOUNT)" \
+		--vault-path "$(VAULT_PATH)" $(if $(ASSUME_YES),--assume-yes)
+
+# vault-secrets-upload VAULT_PATH=<prefix>: Write the JSON files under VAULT_SECRETS_DIR to Vault,
+# one entry per file at <VAULT_PATH>/<service>/<Secret name> on VAULT_MOUNT, using the vault CLI.
+# Lists the entries and asks first. Needs VAULT_ADDR set and a vault login.
+# [VAULT_PATH, VAULT_MOUNT, VAULT_SECRETS_DIR, ASSUME_YES, RELEASE, PYTHON, VENV]
+vault-secrets-upload: $(PYTHON_READY)
+	@$(PYTHON) $(VAULT_SECRETS_SCRIPT) --map "$(VAULT_SECRETS_MAP)" \
+		--release "$(RELEASE)" upload --in "$(VAULT_SECRETS_DIR)" \
+		--vault-mount "$(VAULT_MOUNT)" --vault-path "$(VAULT_PATH)" \
+		$(if $(ASSUME_YES),--assume-yes)
+
+##> For a running release: vault-secrets-from-cluster, then
+##> vault-secrets-upload, then vault-secrets-to-helm for a complete
+##> secrets.yaml, then helm-secrets-to-vault with that file to check it
+##> renders the same JSON. See section 5 of docs/argocd-setup-in-new-cluster.md.

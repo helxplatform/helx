@@ -125,6 +125,17 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `external-secrets` namespace and never committed. Its `conditions` list the
   namespaces allowed to use it, so a new environment's namespace goes there
   too.
+- `deploy/helm/vault-secrets.yaml` maps each Secret those ExternalSecrets fill
+  to its service and to where each key lives in the Helm values. The
+  `helm-secrets-to-vault`, `vault-secrets-to-helm`, and
+  `vault-secrets-from-cluster` targets (`.github/scripts/vault_secrets.py`)
+  convert with it between a `secrets.yaml` for `make helm-deploy` and one JSON
+  file per Secret for Vault, and `vault-secrets-upload` writes those files to
+  Vault (after listing them and asking). A chart that gains such a Secret, or
+  a key that isn't under a `values` block, needs an entry there too. Only the
+  upload target touches Vault, none touch Git, and their output is plaintext
+  secrets under the ignored `dist/`. Never run the upload target from an
+  agent; test it with a fake `vault` on `PATH`, as its unit tests do.
 - Migration switches (`*.migration.enabled`) need a real `helm upgrade` and
   must stay off in anything Argo CD renders. Run migrations with
   `make helm-deploy` before handing a namespace to Argo CD.

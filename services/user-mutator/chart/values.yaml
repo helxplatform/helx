@@ -184,7 +184,11 @@ webhook:
   # scoped object; it stores the manifest in a ConfigMap of the same name in
   # the release namespace, under mutating-webhook-configuration.yaml, for a
   # cluster admin to apply later. The chart then needs only namespace access.
-  mode: saveToConfigMap
+  # The default is create on purpose: an environment that forgets
+  # saveToConfigMap fails on permissions. With saveToConfigMap as the
+  # default, an environment that lost `mode: create` would have its live
+  # configuration deleted by the next upgrade, with no error.
+  mode: create
 
   # -- Name of the configuration. Defaults to <fullname>-webhook-<namespace>.
   # The release qualifier keeps two releases in one namespace apart, and the

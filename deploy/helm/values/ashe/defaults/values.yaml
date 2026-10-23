@@ -260,6 +260,11 @@ ui:
           headers:
           - Content-Type
 user-mutator:
+  webhook:
+    # The deployer has only namespace access, so a cluster admin applies the
+    # saved manifest. Leaving this out makes the chart default to create,
+    # which fails the deploy on permissions.
+    mode: saveToConfigMap
   config:
     features:
       ldap:

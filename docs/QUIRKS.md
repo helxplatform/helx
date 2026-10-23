@@ -30,6 +30,14 @@ consequences:
   it doesn't own, so delete the applied configuration (same command as above)
   before switching `webhook.mode` back to `create`.
 
+The chart default is `create`, so every environment that needs this mode has
+to set it. If it's left out, the chart tries to create the configuration. A
+deployer with only namespace access gets a permissions error, which is the
+point. Whoever does have cluster permission, such as a cluster admin running
+Helm by hand or an Argo CD project that allows cluster-scoped resources, would
+create the webhook without any error. Under Argo CD, give namespace-only
+environments a project with an empty `clusterResourceWhitelist`.
+
 See "Deploying without cluster-level permission" in
 [`services/user-mutator/chart/README.md`](../services/user-mutator/chart/README.md)
 for how the mode works and the command the admin runs.

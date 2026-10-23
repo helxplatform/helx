@@ -273,6 +273,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # Only success passes. No job here skips on purpose: the chart matrix
+      # always lists every service chart, and the image matrix falls back to a
+      # "No images to build" entry. So a skipped job means something it needs
+      # failed, or a condition skipped it by mistake, and a gate that let that
+      # through would pass a run that checked nothing. A run cancelled because
+      # a newer one replaced it does not reach this step: !cancelled() above
+      # skips the gate itself.
       - name: Require every CI job to pass
         shell: bash
         env:
@@ -299,7 +306,7 @@ jobs:
             name=${status%%|*}
             result=${status#*|}
             printf '%-28s %s\n' "$name" "$result"
-            if [[ "$result" != success && "$result" != skipped ]]; then
+            if [[ "$result" != success ]]; then
               echo "::error::$name finished with result: $result"
               failed=1
             fi

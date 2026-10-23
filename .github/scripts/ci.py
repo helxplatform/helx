@@ -246,6 +246,17 @@ def metadata_value(data: dict[str, Any], field: str, label: str) -> str:
     return str(value).strip()
 
 
+def optional_metadata_value(data: dict[str, Any], field: str, label: str) -> str | None:
+    """Return a scalar metadata field, or None when it is absent or blank.
+
+    A value that is present but not a scalar is still an error.
+    """
+    value = data.get(field)
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        return None
+    return metadata_value(data, field, label)
+
+
 def chart_file(chart: str | Path) -> Path:
     """Return the Chart.yaml path for a chart directory or file path."""
     path = Path(chart)
@@ -1157,7 +1168,7 @@ def last_released_version(root: Path) -> str | None:
 
 def _require_above_release(
     current: str,
-    base_version: str,
+    base_version: str | None,
     released: str | None,
     label: str,
     hint: str,
@@ -1167,7 +1178,8 @@ def _require_above_release(
 
     Standing still across merges is fine, going backwards is not: a regression
     against the base is almost always a merge conflict resolved the wrong way.
-    With nothing released there is nothing to sit above.
+    With no base version (an image new to its chart) there is nothing to
+    regress against, and with nothing released there is nothing to sit above.
 
     Equal to the release is allowed when matches_release says the artifact's
     files are identical to what was released, which is what merging a hotfix
@@ -1175,7 +1187,8 @@ def _require_above_release(
     content under the same version is not a second artifact. It is only asked
     when the versions are equal, because it costs a diff.
     """
-    _require_increase(current, base_version, label, allow_equal=True)
+    if base_version is not None:
+        _require_increase(current, base_version, label, allow_equal=True)
     if released is None:
         return
     if SemVer.parse(current, label) == SemVer.parse(released, label) and matches_release():
@@ -1219,11 +1232,16 @@ class _ReleasedCharts:
         return _base_chart(self.root, self.ref, chart_dir)
 
     def field(self, chart_dir: Path, field: str) -> str | None:
-        """Return a released field, or None when the chart was never released."""
+        """Return a released field, or None when nothing was released under it.
+
+        That is either a chart absent from the ref, or one without the field:
+        a chart-only service released without appVersion has never published
+        an image, so an image added since has no floor.
+        """
         released = self.chart(chart_dir)
         if released is None:
             return None
-        return metadata_value(
+        return optional_metadata_value(
             released, field, f"{self.ref}:{relative_path(self.root, chart_dir)}/Chart.yaml"
         )
 
@@ -1248,7 +1266,8 @@ def check_versions(
 
     "Released" means the last v* tag for the umbrella, and for a service chart
     its version (or, for its images, its appVersion) on release_ref. A chart
-    absent from release_ref has never been released and is unconstrained. A
+    absent from release_ref has never been released and is unconstrained, and
+    so are the images of a chart released there without an appVersion. A
     version equal to the release passes only when the packaged chart (or image
     sources) are identical to that release, as after merging a hotfix back.
 
@@ -1270,42 +1289,40 @@ def check_versions(
     released_charts = _ReleasedCharts(root, release_ref)
     release_diffs: dict[str, list[str]] = {}
     chart_dirs = discover_chart_dirs(root)
+    # Every chart and image is checked inside its own try, so an unreadable
+    # field is reported alongside the other errors instead of hiding them.
     for chart_dir in chart_dirs:
         relative_dir = relative_path(root, chart_dir)
         if not packaged_change(root, chart_dir, paths):
             continue
-        previous = _base_chart(root, base, chart_dir)
-        if previous is None:  # New or moved chart.
-            continue
-        current = read_yaml(chart_dir / "Chart.yaml")
-        is_umbrella = chart_dir.resolve() == (root / UMBRELLA_DIR).resolve()
-        current_version = metadata_value(current, "version", str(chart_dir / "Chart.yaml"))
-        chart_name = metadata_value(current, "name", str(chart_dir / "Chart.yaml"))
-        base_version = metadata_value(
-            previous, "version", f"{base}:{relative_dir}/Chart.yaml"
-        )
-        if above_release:
-            if is_umbrella:
-                released = last_released_version(root)
-                release_tree = f"v{released}"
-                hint = (
-                    ". It must sit above the last published release unless its packaged "
-                    f"files are identical to {release_tree}'s, so this pull request needs "
-                    "to choose the next version"
-                )
-            else:
-                try:
+        try:
+            previous = _base_chart(root, base, chart_dir)
+            if previous is None:  # New or moved chart.
+                continue
+            current = read_yaml(chart_dir / "Chart.yaml")
+            is_umbrella = chart_dir.resolve() == (root / UMBRELLA_DIR).resolve()
+            current_version = metadata_value(current, "version", str(chart_dir / "Chart.yaml"))
+            chart_name = metadata_value(current, "name", str(chart_dir / "Chart.yaml"))
+            base_version = metadata_value(
+                previous, "version", f"{base}:{relative_dir}/Chart.yaml"
+            )
+            if above_release:
+                if is_umbrella:
+                    released = last_released_version(root)
+                    release_tree = f"v{released}"
+                    hint = (
+                        ". It must sit above the last published release unless its packaged "
+                        f"files are identical to {release_tree}'s, so this pull request needs "
+                        "to choose the next version"
+                    )
+                else:
                     released = released_charts.field(chart_dir, "version")
-                except CIError as exc:
-                    errors.append(str(exc))
-                    continue
-                release_tree = release_ref
-                hint = (
-                    f". It must sit above the version {release_ref} has published unless "
-                    f"its packaged files are identical to {release_ref}'s, so this pull "
-                    "request needs to choose the next version"
-                )
-            try:
+                    release_tree = release_ref
+                    hint = (
+                        f". It must sit above the version {release_ref} has published unless "
+                        f"its packaged files are identical to {release_ref}'s, so this pull "
+                        "request needs to choose the next version"
+                    )
                 _require_above_release(
                     current_version, base_version, released,
                     f"{relative_dir} chart version", hint,
@@ -1314,13 +1331,12 @@ def check_versions(
                         _paths_changed_since(root, release_tree, include_untracked, release_diffs),
                     ),
                 )
-            except CIError as exc:
-                errors.append(str(exc))
-            continue
-        try:
-            _require_increase(current_version, base_version, f"{relative_dir} chart version")
-        except CIError as exc:
-            if current_version == base_version:
+                continue
+            try:
+                _require_increase(current_version, base_version, f"{relative_dir} chart version")
+            except CIError:
+                if current_version != base_version:
+                    raise
                 errors.append(
                     version_convergence_message(
                         root,
@@ -1331,8 +1347,8 @@ def check_versions(
                         current_version,
                     )
                 )
-            else:
-                errors.append(str(exc))
+        except CIError as exc:
+            errors.append(str(exc))
 
     config = load_images_config(config_path or root / IMAGES_FILE)
     checked_components: set[tuple[str, str]] = set()
@@ -1343,15 +1359,20 @@ def check_versions(
         if key in checked_components:
             continue
         checked_components.add(key)
-        chart_dir = _configured_path(root, image["chart"], f"{image['name']}.chart")
-        previous = _base_chart(root, base, chart_dir)
-        if previous is None:
-            continue
-        current = read_yaml(chart_file(chart_dir))
-        current_app = metadata_value(current, "appVersion", str(chart_file(chart_dir)))
-        base_app = metadata_value(previous, "appVersion", f"{base}:{image['chart']}/Chart.yaml")
         label = f"{image['component']} appVersion"
         try:
+            chart_dir = _configured_path(root, image["chart"], f"{image['name']}.chart")
+            previous = _base_chart(root, base, chart_dir)
+            if previous is None:
+                continue
+            current = read_yaml(chart_file(chart_dir))
+            current_app = metadata_value(current, "appVersion", str(chart_file(chart_dir)))
+            # A base without appVersion had no image, so there is nothing to
+            # increase over: adding an image to a chart-only service is like
+            # adding a new chart.
+            base_app = optional_metadata_value(
+                previous, "appVersion", f"{base}:{image['chart']}/Chart.yaml"
+            )
             if above_release:
                 released_app = released_charts.field(chart_dir, "appVersion")
                 _require_above_release(
@@ -1370,7 +1391,7 @@ def check_versions(
                         root,
                     ),
                 )
-            else:
+            elif base_app is not None:
                 _require_increase(current_app, base_app, label)
         except CIError as exc:
             errors.append(str(exc))

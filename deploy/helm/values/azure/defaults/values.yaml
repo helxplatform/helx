@@ -185,33 +185,6 @@ ui:
     requests:
       cpu: 0.5
       memory: 1Gi
-  service:
-    annotations:
-      getambassador.io/config: |
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: helx-ui
-        prefix: /helx
-        service: helx-ui:80
-        rewrite: /helx
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: ui-static
-        prefix: /static/frontend
-        service: helx-ui:80
-        rewrite: /static/frontend
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
 user-mutator:
   config:
     features:

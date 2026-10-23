@@ -42,6 +42,7 @@ Then open {{ $protocol }}://<address>, with Django admin at /admin.
 
 {{- if index .Values "user-mutator" "enabled" }}
 {{- with include "user-mutator.notes.webhookConfigMap" $userMutator }}
+
 -- User Mutator --
 {{ . }}
 {{- end }}

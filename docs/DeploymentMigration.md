@@ -51,11 +51,11 @@ Neither Secret contract carries a historical default. `secret.existingSecret` an
 ```yaml
 user-mutator:
   secret:
-    generate:
-      enabled: false
+    mode: existingSecret
     existingSecret: user-mutator-cert-tls
   ldap:
     secret:
+      mode: existingSecret
       existingSecret: user-mutator-ldap-password
 ```
 
@@ -82,11 +82,13 @@ Leaving it in place is the thing to avoid. These objects are cluster-scoped and 
 
 ### Service naming under the umbrella
 
-A subchart's fullname is release-qualified, so a `helx` release yields `helx-user-mutator` where the standalone chart yielded `user-mutator`. That matters only when keeping a TLS Secret whose certificate SANs were issued for the old Service name: pin it with `user-mutator.fullnameOverride: user-mutator`. Letting the chart generate the certificate makes the difference irrelevant, since it issues SANs for whatever Service it renders.
+The Service is named `user-mutator` whether the chart is installed standalone or under the umbrella, so the address the webhook configuration calls does not depend on the release name. Everything else, including the Deployment, the `<fullname>-tls` Secret, and the webhook configuration, keeps the release-qualified fullname, which a `helx` release makes `helx-user-mutator`. `fullnameOverride` replaces both names.
+
+That matters only when keeping a TLS Secret: its certificate SANs have to cover `user-mutator`, as one issued for the old standalone Service already does. For a certificate issued for any other name, pin `user-mutator.fullnameOverride` to that name. Letting the chart generate the certificate makes this irrelevant, since it issues SANs for the Service it renders.
 
 ### The make targets still work
 
-`services/user-mutator` keeps `ca-key-cert`, `key-cert-secret`, `mutate-config`, `enable-mutate-in-namespace`, and `deploy-all`. `make deploy-webhook-server` passes `secret.generate.enabled=false` and `webhook.enabled=false`, so that flow is unchanged and continues to own the certificate and the webhook configuration.
+`services/user-mutator` keeps `ca-key-cert`, `key-cert-secret`, `mutate-config`, `enable-mutate-in-namespace`, and `deploy-all`. `make deploy-webhook-server` passes `secret.mode=existingSecret` and `webhook.enabled=false`, so that flow is unchanged and continues to own the certificate and the webhook configuration.
 
 ## Appstore
 

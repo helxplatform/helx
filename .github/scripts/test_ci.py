@@ -1867,6 +1867,26 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
         self.assertIn("no-app:services/api/chart/Chart.yaml", message)
 
+    def test_an_unreadable_app_version_is_listed_with_other_errors(self) -> None:
+        self.regress_umbrella()
+        self.write_chart("services/api/chart", name="api", version="6.0.5")
+        self.touch_image()
+        with self.assertRaises(ci.CIError) as raised:
+            self.check(above_release=True)
+        message = str(raised.exception)
+        self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
+        self.assertIn("services/api/chart/Chart.yaml is missing top-level 'appVersion'", message)
+
+    def test_a_base_without_app_version_has_nothing_to_increase_over(self) -> None:
+        # api was chart-only on the base, and this pull request adds its image.
+        self.write_chart("services/api/chart", name="api", version="6.0.5")
+        self.commit("api without an image")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.set_api(version="6.0.6", app_version="6.0.5")
+        self.touch_image()
+        self.check()
+        self.check(above_release=True)
+
 
 class PrivilegeEscalationTests(TempTreeTest):
     def write_platform(self, platform: str, *environments: str) -> None:

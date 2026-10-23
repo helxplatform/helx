@@ -38,7 +38,7 @@ intentional, for two reasons:
   the service charts, so none of them can build while it is broken. During a
   build the library is packaged from this tree, not pulled from the registry,
   because each service chart pins exactly the in-tree version (`appstore` pins
-  `helx-common` `0.2.0`, which is what `deploy/helm/helx-common/chart` contains).
+  `helx-common` `0.2.1`, which is what `deploy/helm/helx-common/chart` contains).
 - Those service charts still name `oci://ghcr.io/helxplatform/helm-charts` as
   where `helx-common` comes from. On `main` the library is published there
   first, so the version a service chart names already exists in the registry by

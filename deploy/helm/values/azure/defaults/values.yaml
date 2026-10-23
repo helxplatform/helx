@@ -213,12 +213,6 @@ ui:
           headers:
           - Content-Type
 user-mutator:
-  webhook:
-    # Keep `create`. App launches get their user identity and volumes from this
-    # webhook, and with saveToConfigMap nothing is mutated until a cluster admin
-    # applies the saved manifest. The deployer needs create, get, update and
-    # delete on admissionregistration.k8s.io mutatingwebhookconfigurations.
-    mode: create
   config:
     features:
       ldap:

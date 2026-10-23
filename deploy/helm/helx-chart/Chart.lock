@@ -27,4 +27,4 @@ dependencies:
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.2.3
 digest: sha256:b1606c07bcf9781f7dcd35f94ba4b6f88f9fd61d134a3bf8148c28a307e05534
-generated: '2026-10-21T14:00:19.119950+00:00'
+generated: '2026-10-23T20:26:18.930333+00:00'

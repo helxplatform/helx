@@ -4,7 +4,7 @@
 Under `make helm-deploy`, a chart builds each Kubernetes Secret from Helm
 values, typically a hand-kept secrets.yaml. Under Argo CD, External Secrets
 builds it from a Vault entry instead, copying the entry's keys as they are. The
-two hold the same information in different shapes; deploy/helm/vault-secrets.yaml
+two hold the same information in different shapes; deploy/helm/vault-secrets-map.yaml
 records how one maps onto the other, and the commands here convert:
 
   to-vault      Render the umbrella chart with the given values files and write
@@ -41,7 +41,7 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-MAP_FILE = Path("deploy/helm/vault-secrets.yaml")
+MAP_FILE = Path("deploy/helm/vault-secrets-map.yaml")
 DEFAULT_VAULT_MOUNT = "helx"
 
 ValuesPath = tuple[str, ...]
@@ -63,7 +63,7 @@ def split_path(text: str, where: str) -> ValuesPath:
 
 @dataclass(frozen=True)
 class SecretSpec:
-    """One entry of deploy/helm/vault-secrets.yaml."""
+    """One entry of deploy/helm/vault-secrets-map.yaml."""
 
     name_template: str
     service: str
@@ -92,7 +92,7 @@ class SecretSpec:
 
 
 def load_map(path: Path) -> list[SecretSpec]:
-    """Read and check deploy/helm/vault-secrets.yaml."""
+    """Read and check deploy/helm/vault-secrets-map.yaml."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -172,57 +172,114 @@ def read_values_list(list_file: Path, root: Path, home: Path) -> tuple[list[Path
             files.append(path)
         else:
             warnings.append(f"{list_file} line {number} names {entry}, which does not exist")
-    if not files and not warnings:
-        warnings.append(f"{list_file} names no values files")
     return files, warnings
 
 
-def choose_values_files(
-    list_file: Path,
-    extra: Sequence[str],
-    *,
-    root: Path,
-    home: Path,
-    assume_yes: bool,
-    confirm: Callable[[str], bool],
-    report: Callable[[str], None],
-) -> list[Path]:
-    """Decide which values files to render with.
+@dataclass
+class ValuesFiles:
+    """The values files to render with, and where each came from."""
+
+    list_file: Path
+    from_list: list[Path]
+    list_warnings: list[str]
+    from_values: list[Path]
+
+    @property
+    def uses_list(self) -> bool:
+        """True when LOCAL_VALUES_FILE exists and lists at least one file."""
+        return bool(self.from_list or self.list_warnings)
+
+    @property
+    def files(self) -> list[Path]:
+        return self.from_list + self.from_values
+
+
+def choose_values_files(list_file: Path, extra: Sequence[str], *, root: Path, home: Path) -> ValuesFiles:
+    """Decide which values files to render with, without asking anything.
 
     LOCAL_VALUES_FILE's entries come first and VALUES after them, as in
-    helm-deploy, and using the list file always needs a yes. Without the list
-    file, VALUES alone is used as given; with neither, there is nothing to do.
+    helm-deploy. A list file that is missing, or lists nothing, is ignored, so
+    VALUES alone is used; with nothing from either, there is nothing to do.
     """
     extra_paths = [expand_entry(entry, root, home) for entry in extra]
     missing_extra = [str(path) for path in extra_paths if not path.is_file()]
     if missing_extra:
         raise SecretsError("VALUES names files that do not exist: " + ", ".join(missing_extra))
 
-    if not list_file.is_file():
-        if not extra_paths:
+    from_list: list[Path] = []
+    warnings: list[str] = []
+    if list_file.is_file():
+        from_list, warnings = read_values_list(list_file, root, home)
+    chosen = ValuesFiles(list_file, from_list, warnings, extra_paths)
+    if not chosen.files:
+        if chosen.uses_list:
             raise SecretsError(
-                f"No values files to render with: {list_file} does not exist and VALUES is "
-                "empty.\nEither create that file, with one values-file path per line, or "
-                'pass the files directly: VALUES="a.yaml b.yaml".'
+                f"No values files to render with: none of the files {list_file} lists exist, "
+                "and VALUES is empty.\n" + "\n".join(warnings)
             )
-        report(f"{list_file} does not exist; using VALUES only.")
-        return extra_paths
-
-    files, warnings = read_values_list(list_file, root, home)
-    chosen = files + extra_paths
-    report(f"Values files from {list_file}" + (" and VALUES" if extra_paths else "") + ":")
-    for path in chosen:
-        report(f"  {path}")
-    for warning in warnings:
-        report(f"WARNING: {warning}; its values will not be used.")
-    if not chosen:
-        raise SecretsError("No values files to render with.")
-    if assume_yes:
-        report("ASSUME_YES is set; continuing without asking.")
-        return chosen
-    if not confirm("Render with these values files? [y/N] "):
-        raise SecretsError("Cancelled; nothing was written.")
+        raise SecretsError(
+            f"No values files to render with: {list_file} does not exist or lists no files, "
+            "and VALUES is empty.\nEither list your values files there, one path per line, "
+            'or pass them directly: VALUES="a.yaml b.yaml".'
+        )
     return chosen
+
+
+def describe_output_dir(out: Path, origin: str) -> str:
+    """Say which VAULT_SECRETS_DIR is in use, in terms of where Make got it."""
+    where = {
+        "file": "the default VAULT_SECRETS_DIR",
+        "command line": "VAULT_SECRETS_DIR, set on the command line",
+        "environment": "VAULT_SECRETS_DIR, from the environment",
+        "environment override": "VAULT_SECRETS_DIR, from the environment",
+    }.get(origin, "VAULT_SECRETS_DIR")
+    return f"{out} ({where})"
+
+
+def to_vault_summary(
+    *,
+    chart: str,
+    release: str,
+    namespace: str,
+    values: ValuesFiles,
+    out: Path,
+    out_origin: str,
+    count: int,
+    overwrites: Sequence[Path],
+) -> list[str]:
+    """What helm-secrets-to-vault is about to do, for its one confirmation.
+
+    Laid out like helm-deploy's: warnings first, then a header and one aligned
+    line per setting, with further values on continuation lines.
+    """
+    lines: list[str] = []
+    for warning in values.list_warnings:
+        lines.append(f"WARNING: {warning}.")
+        lines.append("         That file's values will not be rendered.")
+    lines.append(f"Rendering {chart} into one JSON file per Secret")
+
+    def field(label: str, entries: Sequence[object]) -> None:
+        for index, entry in enumerate(entries):
+            lines.append(f"  {label if index == 0 else '':<10}{entry}")
+
+    def shown(path: Path) -> str:
+        """A file inside the repository, relative to its root, as helm-deploy shows them."""
+        try:
+            return str(path.relative_to(ROOT))
+        except ValueError:
+            return str(path)
+
+    field("release", [release])
+    if namespace:
+        field("namespace", [namespace])
+    if values.uses_list:
+        field("list", [values.list_file])
+    field("values", [shown(path) for path in values.files])
+    field("output", [describe_output_dir(out, out_origin)])
+    field("files", [f"{count} JSON file" + ("" if count == 1 else "s")])
+    if overwrites:
+        field("overwrite", overwrites)
+    return lines
 
 
 def confirm_on_tty(prompt: str, tty_path: str = "/dev/tty") -> bool:
@@ -497,18 +554,23 @@ def kubectl_secret(name: str, namespace: str, context: str) -> dict[str, Any] | 
 
 
 def command_to_vault(args: argparse.Namespace, specs: Sequence[SecretSpec], report) -> None:
+    if not args.namespace:
+        raise SecretsError(
+            "NAMESPACE is required: the namespace whose secrets you are rendering, e.g.\n"
+            "  make helm-secrets-to-vault NAMESPACE=ai-sb-test\n"
+            "It is not taken from your kubectl context. Some values the charts derive, "
+            "such as ldap-sync's database host and uri, contain it."
+        )
     values = choose_values_files(
         Path(args.values_list) if Path(args.values_list).is_absolute() else ROOT / args.values_list,
         args.values,
         root=ROOT,
         home=Path.home(),
-        assume_yes=args.assume_yes,
-        confirm=confirm_on_tty,
-        report=report,
     )
-    report(f"Rendering {args.chart} twice as release {args.release}.")
-    first = rendered_secrets(helm_template(args.chart, args.release, args.namespace, values))
-    second = rendered_secrets(helm_template(args.chart, args.release, args.namespace, values))
+    # Rendering only reads, and it decides which files would be written, so it
+    # comes before the question.
+    first = rendered_secrets(helm_template(args.chart, args.release, args.namespace, values.files))
+    second = rendered_secrets(helm_template(args.chart, args.release, args.namespace, values.files))
     problems = generated_keys(first, second, specs, args.release)
     if problems:
         raise SecretsError(
@@ -517,11 +579,29 @@ def command_to_vault(args: argparse.Namespace, specs: Sequence[SecretSpec], repo
             "(for a running release, take them from `make vault-secrets-from-cluster` "
             "and `make vault-secrets-to-helm`):\n" + "\n".join(problems)
         )
+    out = Path(args.out)
+    targets = [json_path(out, spec, args.release) for spec in specs if spec.name(args.release) in first]
+    summary = to_vault_summary(
+        chart=args.chart,
+        release=args.release,
+        namespace=args.namespace,
+        values=values,
+        out=out,
+        out_origin=args.out_origin,
+        count=len(targets),
+        overwrites=[path for path in targets if path.exists()],
+    )
+    for line in summary:
+        report(line)
+    if args.assume_yes:
+        report("ASSUME_YES is set; continuing without asking.")
+    elif not confirm_on_tty("Proceed? [y/N] "):
+        raise SecretsError("Cancelled; no files were changed.")
     write_secret_files(
         first,
         specs,
         release=args.release,
-        out=Path(args.out),
+        out=out,
         mount=args.vault_mount,
         vault_path=args.vault_path,
         report=report,
@@ -531,6 +611,7 @@ def command_to_vault(args: argparse.Namespace, specs: Sequence[SecretSpec], repo
 def command_to_helm(args: argparse.Namespace, specs: Sequence[SecretSpec], report) -> None:
     secrets = read_secret_files(Path(args.input), specs, args.release, report)
     out = Path(args.out_file)
+    confirm_overwrite([out], assume_yes=args.assume_yes, confirm=confirm_on_tty, report=report)
     write_private(out, helm_values_yaml(helm_values(secrets, specs, args.release), args.input))
     report(f"Wrote {out} from {len(secrets)} Secrets.")
     report(f"Use it with: make helm-deploy VALUES={out}")
@@ -547,13 +628,15 @@ def confirm_overwrite(
     existing = [file for file in files if file.exists()]
     if not existing:
         return
-    report("These files already exist and would be overwritten:")
+    one = len(existing) == 1
+    report("This file already exists and would be overwritten:" if one
+           else "These files already exist and would be overwritten:")
     for file in existing:
         report(f"  {file}")
     if assume_yes:
         report("ASSUME_YES is set; overwriting without asking.")
         return
-    if not confirm("Overwrite them? [y/N] "):
+    if not confirm("Overwrite it? [y/N] " if one else "Overwrite them? [y/N] "):
         raise SecretsError("Cancelled; no files were changed.")
 
 
@@ -636,6 +719,15 @@ def command_upload(args: argparse.Namespace, specs: Sequence[SecretSpec], report
     report(f"Wrote {len(done)} entries. Delete the files under {directory} once you no longer need them.")
 
 
+def user_path(text: str) -> str:
+    """Expand a leading ~ in a path argument.
+
+    The shell would normally do it, but zsh leaves a ~ that follows `=` alone,
+    so `make ... VAULT_SECRETS_YAML=~/x.yaml` arrives here as a literal ~.
+    """
+    return str(Path(text).expanduser()) if text else text
+
+
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--map", default=str(MAP_FILE), help="the Secret map (default: %(default)s)")
@@ -643,21 +735,26 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     commands = parser.add_subparsers(dest="command", required=True)
 
     def add_output(sub: argparse.ArgumentParser) -> None:
-        sub.add_argument("--out", required=True, help="directory for the JSON files")
+        sub.add_argument("--out", required=True, type=user_path, help="directory for the JSON files")
         sub.add_argument("--vault-mount", default=DEFAULT_VAULT_MOUNT)
         sub.add_argument("--vault-path", default="", help="e.g. dev/azure/ai-sb-test")
 
     to_vault = commands.add_parser("to-vault", help="values files -> JSON per Secret")
     to_vault.add_argument("--chart", required=True, help="packaged umbrella chart or chart directory")
     to_vault.add_argument("--namespace", default="")
-    to_vault.add_argument("--values-list", required=True, help="LOCAL_VALUES_FILE")
+    to_vault.add_argument("--values-list", required=True, type=user_path, help="LOCAL_VALUES_FILE")
     to_vault.add_argument("--values", nargs="*", default=[], help="VALUES files")
     to_vault.add_argument("--assume-yes", action="store_true")
+    to_vault.add_argument(
+        "--out-origin", default="",
+        help="where Make got VAULT_SECRETS_DIR ($(origin VAULT_SECRETS_DIR)), to say so in the prompt",
+    )
     add_output(to_vault)
 
     to_helm = commands.add_parser("to-helm", help="JSON per Secret -> one secrets.yaml")
-    to_helm.add_argument("--in", dest="input", required=True, help="directory of JSON files")
-    to_helm.add_argument("--out-file", required=True, help="secrets.yaml to write")
+    to_helm.add_argument("--in", dest="input", required=True, type=user_path, help="directory of JSON files")
+    to_helm.add_argument("--out-file", required=True, type=user_path, help="secrets.yaml to write")
+    to_helm.add_argument("--assume-yes", action="store_true", help="overwrite without asking")
 
     from_cluster = commands.add_parser("from-cluster", help="live Secrets -> JSON per Secret")
     from_cluster.add_argument("--namespace", default="")
@@ -666,7 +763,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     add_output(from_cluster)
 
     upload = commands.add_parser("upload", help="JSON per Secret -> Vault entries")
-    upload.add_argument("--in", dest="input", required=True, help="directory of JSON files")
+    upload.add_argument("--in", dest="input", required=True, type=user_path, help="directory of JSON files")
     upload.add_argument("--vault-mount", default=DEFAULT_VAULT_MOUNT)
     upload.add_argument("--vault-path", default="", help="e.g. dev/azure/ai-sb-test")
     upload.add_argument("--assume-yes", action="store_true")

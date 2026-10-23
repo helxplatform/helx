@@ -369,23 +369,19 @@ Values files come from two places, applied in this order:
 1. every path listed in `deploy/local-dev/local-values-files.env`
 2. every path in `VALUES="a.yaml b.yaml"`, so those win on any shared key
 
-That first file is a useful place to enumerate local values files. Local
-deploys usually need several values files, including ones holding secrets,
-and retyping `--values` for each of them every time is how they get
-forgotten. It is one path per line, each relative to the repository root,
-with `~/` expanded for you; blank lines and `#` comments are ignored. It
-is gitignored, so your cluster's paths and secrets stay out of the
-repository. For example:
+That first file is a useful place to enumerate local values files.
+Deployments from your local machine usually need at least three values files,
+including one or more holding secrets, and retyping `--values` for each of
+them every time is how they get forgotten. It is one path per line, each
+relative to the repository root, with `~/` expanded for you; blank lines and
+`#` comments are ignored. It is gitignored, so your cluster's paths and
+secrets stay out of the repository. For example:
 
 ```text
 # deploy/local-dev/local-values-files.env
 deploy/helm/values/azure/defaults/values.yaml
 deploy/helm/values/azure/envs/ai-sb-test/values.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/appstore/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/appstore-sockets/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/helx-ldap/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/ldap-sync/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/user-mutator/secrets.yaml
+~/helm-values/ai-sandbox/ai-sb-test-modern/helx/secrets.yaml
 ...
 ```
 

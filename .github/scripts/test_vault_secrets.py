@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import stat
@@ -20,7 +22,7 @@ vs = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = vs
 SPEC.loader.exec_module(vs)
 
-REPO_MAP = SCRIPT.resolve().parents[2] / "deploy/helm/vault-secrets.yaml"
+REPO_MAP = SCRIPT.resolve().parents[2] / "deploy/helm/vault-secrets-map.yaml"
 
 MAP = """
 secrets:
@@ -109,31 +111,30 @@ class MapTests(TempDirTest):
 
 
 class ValuesFileChoiceTests(TempDirTest):
-    def choose(self, list_file: Path, extra: list[str], *, assume_yes: bool = False, answer: bool = True):
-        asked: list[str] = []
-        reported: list[str] = []
-
-        def confirm(prompt: str) -> bool:
-            asked.append(prompt)
-            return answer
-
-        result = vs.choose_values_files(
-            list_file, extra, root=self.tmp, home=self.tmp / "home",
-            assume_yes=assume_yes, confirm=confirm, report=reported.append,
-        )
-        return result, asked, reported
+    def choose(self, list_file: Path, extra: list[str]):
+        return vs.choose_values_files(list_file, extra, root=self.tmp, home=self.tmp / "home")
 
     def test_no_list_file_and_no_values_is_an_error_naming_both_options(self) -> None:
-        with self.assertRaisesRegex(vs.SecretsError, r"does not exist and VALUES is\s+empty"):
+        with self.assertRaisesRegex(vs.SecretsError, r"does not exist or lists no files, and VALUES is empty"):
             self.choose(self.tmp / "missing.env", [])
 
-    def test_no_list_file_uses_values_without_asking(self) -> None:
+    def test_no_list_file_uses_values_and_does_not_use_the_list(self) -> None:
         (self.tmp / "a.yaml").write_text("{}")
-        files, asked, _ = self.choose(self.tmp / "missing.env", ["a.yaml"])
-        self.assertEqual(files, [self.tmp / "a.yaml"])
-        self.assertEqual(asked, [])
+        chosen = self.choose(self.tmp / "missing.env", ["a.yaml"])
+        self.assertEqual(chosen.files, [self.tmp / "a.yaml"])
+        self.assertFalse(chosen.uses_list)
 
-    def test_list_file_entries_come_first_and_need_a_yes(self) -> None:
+    def test_list_file_listing_nothing_is_ignored(self) -> None:
+        (self.tmp / "a.yaml").write_text("{}")
+        listing = self.tmp / "list.env"
+        listing.write_text("# only a comment\n\n")
+        chosen = self.choose(listing, ["a.yaml"])
+        self.assertFalse(chosen.uses_list)
+        self.assertEqual(chosen.files, [self.tmp / "a.yaml"])
+        with self.assertRaisesRegex(vs.SecretsError, "lists no files"):
+            self.choose(listing, [])
+
+    def test_list_file_entries_come_first_and_missing_ones_are_reported(self) -> None:
         home = self.tmp / "home"
         home.mkdir()
         (home / "secrets.yaml").write_text("{}")
@@ -141,20 +142,17 @@ class ValuesFileChoiceTests(TempDirTest):
         (self.tmp / "extra.yaml").write_text("{}")
         listing = self.tmp / "list.env"
         listing.write_text("# comment\n\nenv.yaml\n~/secrets.yaml\nmissing.yaml\n")
-        files, asked, reported = self.choose(listing, ["extra.yaml"])
-        self.assertEqual(files, [self.tmp / "env.yaml", home / "secrets.yaml", self.tmp / "extra.yaml"])
-        self.assertEqual(len(asked), 1)
-        self.assertTrue(any("line 5 names missing.yaml" in line for line in reported))
+        chosen = self.choose(listing, ["extra.yaml"])
+        self.assertTrue(chosen.uses_list)
+        self.assertEqual(chosen.files, [self.tmp / "env.yaml", home / "secrets.yaml", self.tmp / "extra.yaml"])
+        self.assertEqual(len(chosen.list_warnings), 1)
+        self.assertIn("line 5 names missing.yaml", chosen.list_warnings[0])
 
-    def test_list_file_answer_no_cancels_and_assume_yes_skips_the_prompt(self) -> None:
-        (self.tmp / "env.yaml").write_text("{}")
+    def test_list_naming_only_missing_files_and_no_values_is_an_error(self) -> None:
         listing = self.tmp / "list.env"
-        listing.write_text("env.yaml\n")
-        with self.assertRaisesRegex(vs.SecretsError, "Cancelled"):
-            self.choose(listing, [], answer=False)
-        files, asked, _ = self.choose(listing, [], assume_yes=True)
-        self.assertEqual(files, [self.tmp / "env.yaml"])
-        self.assertEqual(asked, [])
+        listing.write_text("gone.yaml\n")
+        with self.assertRaisesRegex(vs.SecretsError, "none of the files .* lists exist"):
+            self.choose(listing, [])
 
     def test_missing_values_file_is_an_error(self) -> None:
         with self.assertRaisesRegex(vs.SecretsError, "do not exist"):
@@ -429,14 +427,161 @@ class CommandTests(TempDirTest):
                         secret_doc("helx-db", data={"postgres-password": "b"})])
         (self.tmp / "v.yaml").write_text("{}")
         args = vs.parse_args([
+            "--map", str(self.tmp / "map.yaml"), "to-vault", "--chart", "chart", "--namespace", "ns",
+            "--values-list", str(self.tmp / "none.env"), "--values", str(self.tmp / "v.yaml"),
+            "--out", str(self.tmp / "o"),
+        ])
+        def refuse(_: str) -> bool:
+            raise AssertionError("asked before finding the generated value")
+
+        with patch.object(vs, "helm_template", lambda *a: next(renders)), \
+                patch.object(vs, "confirm_on_tty", refuse):
+            with self.assertRaisesRegex(vs.SecretsError, "app.db.auth.postgresPassword"):
+                vs.command_to_vault(args, self.specs, lambda _: None)
+        self.assertFalse((self.tmp / "o").exists())
+
+    def test_to_vault_requires_a_namespace_and_never_renders_without_one(self) -> None:
+        (self.tmp / "v.yaml").write_text("{}")
+        args = vs.parse_args([
             "--map", str(self.tmp / "map.yaml"), "to-vault", "--chart", "chart",
             "--values-list", str(self.tmp / "none.env"), "--values", str(self.tmp / "v.yaml"),
             "--out", str(self.tmp / "o"),
         ])
-        with patch.object(vs, "helm_template", lambda *a: next(renders)):
-            with self.assertRaisesRegex(vs.SecretsError, "app.db.auth.postgresPassword"):
+
+        def no_render(*_):
+            raise AssertionError("rendered without a namespace")
+
+        with patch.object(vs, "helm_template", no_render):
+            with self.assertRaisesRegex(vs.SecretsError, "(?s)NAMESPACE is required.*not taken from your kubectl context"):
                 vs.command_to_vault(args, self.specs, lambda _: None)
         self.assertFalse((self.tmp / "o").exists())
+
+    def run_to_vault(self, *extra: str, list_body: str | None = None, answer: bool = True,
+                     assume_yes: bool = False):
+        """Run to-vault with a fixed render; return what it printed and the prompts it showed."""
+        render = secret_doc("helx-app-secrets", data={"K": "new"}) + "---\n" + \
+            secret_doc("helx-db", data={"postgres-password": "p"})
+        (self.tmp / "v.yaml").write_text("{}")
+        listing = self.tmp / "list.env"
+        if list_body is not None:
+            listing.write_text(list_body)
+        argv = ["--map", str(self.tmp / "map.yaml"), "to-vault", "--chart", "chart.tgz",
+                "--namespace", "ns", "--values-list", str(listing),
+                "--values", str(self.tmp / "v.yaml"), "--out", str(self.tmp / "o"), *extra]
+        if assume_yes:
+            argv.append("--assume-yes")
+        reported: list[str] = []
+        asked: list[str] = []
+        with patch.object(vs, "helm_template", lambda *a: render), \
+                patch.object(vs, "confirm_on_tty", lambda prompt: asked.append(prompt) or answer):
+            vs.command_to_vault(vs.parse_args(argv), self.specs, reported.append)
+        return "\n".join(reported), asked
+
+    def summary_of(self, text: str) -> str:
+        """Everything printed before writing starts: the summary itself."""
+        lines = []
+        for line in text.splitlines():
+            if line.startswith(("Skipped ", "Wrote ", "ASSUME_YES")):
+                break
+            lines.append(line)
+        return "\n".join(lines)
+
+    def test_to_vault_asks_once_with_a_helm_deploy_style_summary(self) -> None:
+        text, asked = self.run_to_vault("--out-origin", "file")
+        self.assertEqual(asked, ["Proceed? [y/N] "])
+        self.assertEqual(
+            self.summary_of(text).splitlines(),
+            [
+                "Rendering chart.tgz into one JSON file per Secret",
+                "  release   helx",
+                "  namespace ns",
+                f"  values    {self.tmp / 'v.yaml'}",
+                f"  output    {self.tmp / 'o'} (the default VAULT_SECRETS_DIR)",
+                "  files     2 JSON files",
+            ],
+        )
+
+    def test_to_vault_says_when_the_output_folder_was_set_by_the_user(self) -> None:
+        text, _ = self.run_to_vault("--out-origin", "command line")
+        self.assertIn("(VAULT_SECRETS_DIR, set on the command line)", text)
+
+    def test_to_vault_mentions_the_list_file_only_when_it_lists_files(self) -> None:
+        (self.tmp / "env.yaml").write_text("{}")
+        text, _ = self.run_to_vault(list_body=f"{self.tmp / 'env.yaml'}\nmissing.yaml\n")
+        summary = self.summary_of(text).splitlines()
+        self.assertIn(f"  list      {self.tmp / 'list.env'}", summary)
+        # The list's files come first, then VALUES, continuing the one "values" field.
+        start = summary.index(f"  values    {self.tmp / 'env.yaml'}")
+        self.assertEqual(summary[start + 1], f"            {self.tmp / 'v.yaml'}")
+        # A missing entry is warned about before the summary, as helm-deploy does.
+        self.assertTrue(summary[0].startswith(f"WARNING: {self.tmp / 'list.env'} line 2 names missing.yaml"))
+        self.assertEqual(summary[1], "         That file's values will not be rendered.")
+        text, _ = self.run_to_vault(list_body="# nothing listed\n")
+        self.assertFalse(any(line.startswith("  list") for line in self.summary_of(text).splitlines()))
+
+    def test_to_vault_lists_files_it_would_overwrite(self) -> None:
+        existing = self.tmp / "o/app/helx-app-secrets.json"
+        existing.parent.mkdir(parents=True)
+        existing.write_text('{"K": "old"}')
+        text, asked = self.run_to_vault()
+        self.assertEqual(len(asked), 1)
+        summary = self.summary_of(text).splitlines()
+        self.assertEqual(summary[-1], f"  overwrite {existing}")
+        self.assertNotIn(str(self.tmp / "o/app/helx-db.json"), self.summary_of(text))
+        self.assertEqual(json.loads(existing.read_text()), {"K": "new"})
+
+    def test_to_vault_answer_no_changes_nothing(self) -> None:
+        existing = self.tmp / "o/app/helx-app-secrets.json"
+        existing.parent.mkdir(parents=True)
+        existing.write_text('{"K": "old"}')
+        with self.assertRaisesRegex(vs.SecretsError, "Cancelled; no files were changed"):
+            self.run_to_vault(answer=False)
+        self.assertEqual(existing.read_text(), '{"K": "old"}')
+        self.assertFalse((self.tmp / "o/app/helx-db.json").exists())
+
+    def test_to_vault_assume_yes_shows_the_summary_without_asking(self) -> None:
+        text, asked = self.run_to_vault(assume_yes=True)
+        self.assertEqual(asked, [])
+        self.assertIn("  files     2 JSON files", text)
+        self.assertIn("ASSUME_YES is set; continuing without asking.", text)
+
+    def run_to_helm(self, *extra: str, answer: bool = True) -> tuple[Path, list[str], list[str]]:
+        vs.write_secret_files({"helx-app-secrets": {"K": "v"}}, self.specs, release="helx",
+                              out=self.tmp / "o", mount="helx", vault_path="", report=lambda _: None)
+        out_file = self.tmp / "o" / "secrets.yaml"
+        args = vs.parse_args(["--map", str(self.tmp / "map.yaml"), "to-helm",
+                              "--in", str(self.tmp / "o"), "--out-file", str(out_file), *extra])
+        reported: list[str] = []
+        asked: list[str] = []
+        with patch.object(vs, "confirm_on_tty", lambda prompt: asked.append(prompt) or answer):
+            vs.command_to_helm(args, self.specs, reported.append)
+        return out_file, asked, reported
+
+    def test_to_helm_does_not_ask_when_the_file_is_new(self) -> None:
+        out_file, asked, reported = self.run_to_helm()
+        self.assertEqual(asked, [])
+        self.assertFalse(any("LOCAL_VALUES_FILE" in line for line in reported))
+        self.assertTrue(out_file.exists())
+
+    def test_to_helm_asks_before_overwriting_and_no_keeps_the_file(self) -> None:
+        out_file = self.tmp / "o" / "secrets.yaml"
+        out_file.parent.mkdir(parents=True)
+        out_file.write_text("old: true\n")
+        with self.assertRaisesRegex(vs.SecretsError, "Cancelled; no files were changed"):
+            self.run_to_helm(answer=False)
+        self.assertEqual(out_file.read_text(), "old: true\n")
+        _, asked, reported = self.run_to_helm(answer=True)
+        self.assertEqual(asked, ["Overwrite it? [y/N] "])
+        self.assertIn("This file already exists and would be overwritten:", reported)
+        self.assertEqual(yaml.safe_load(out_file.read_text()), {"app": {"secret": {"values": {"K": "v"}}}})
+
+    def test_to_helm_assume_yes_overwrites_without_asking(self) -> None:
+        out_file = self.tmp / "o" / "secrets.yaml"
+        out_file.parent.mkdir(parents=True)
+        out_file.write_text("old: true\n")
+        _, asked, reported = self.run_to_helm("--assume-yes")
+        self.assertEqual(asked, [])
+        self.assertIn("ASSUME_YES is set; overwriting without asking.", reported)
 
     def test_to_helm_writes_an_owner_only_yaml(self) -> None:
         vs.write_secret_files({"helx-app-secrets": {"K": "v"}}, self.specs, release="helx",
@@ -447,6 +592,29 @@ class CommandTests(TempDirTest):
         vs.command_to_helm(args, self.specs, lambda _: None)
         self.assertEqual(yaml.safe_load(out_file.read_text()), {"app": {"secret": {"values": {"K": "v"}}}})
         self.assertEqual(stat.S_IMODE(out_file.stat().st_mode), 0o600)
+
+
+class UserPathTests(unittest.TestCase):
+    """zsh passes `VAULT_SECRETS_YAML=~/x` through with the ~ unexpanded."""
+
+    def test_leading_tilde_in_every_path_argument_is_expanded(self) -> None:
+        with patch.dict(vs.os.environ, {"HOME": "/home/someone"}):
+            cases = {
+                ("to-helm", "--in", "~/in", "--out-file", "~/out/secrets.yaml"): {
+                    "input": "/home/someone/in", "out_file": "/home/someone/out/secrets.yaml"},
+                ("to-vault", "--chart", "c", "--values-list", "~/list.env", "--out", "~/o"): {
+                    "values_list": "/home/someone/list.env", "out": "/home/someone/o"},
+                ("from-cluster", "--out", "~/o"): {"out": "/home/someone/o"},
+                ("upload", "--in", "~/o"): {"input": "/home/someone/o"},
+            }
+            for argv, expected in cases.items():
+                with self.subTest(command=argv[0]):
+                    args = vs.parse_args(list(argv))
+                    self.assertEqual({k: getattr(args, k) for k in expected}, expected)
+
+    def test_relative_and_absolute_paths_are_unchanged(self) -> None:
+        args = vs.parse_args(["to-helm", "--in", "dist/vault-secrets", "--out-file", "/abs/secrets.yaml"])
+        self.assertEqual((args.input, args.out_file), ("dist/vault-secrets", "/abs/secrets.yaml"))
 
 
 class UploadTests(TempDirTest):
@@ -532,7 +700,8 @@ class UploadTests(TempDirTest):
         fake.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n')
         fake.chmod(0o755)
         environ = {"PATH": f"{bin_dir}:/usr/bin:/bin", "VAULT_ADDR": "https://vault.example.org"}
-        with patch.dict(vs.os.environ, environ, clear=True):
+        with patch.dict(vs.os.environ, environ, clear=True), \
+                contextlib.redirect_stderr(io.StringIO()):
             code = vs.main([
                 "--map", str(self.tmp / "map.yaml"), "upload", "--in", str(self.out),
                 "--vault-path", "dev/azure/x", "--assume-yes",

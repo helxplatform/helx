@@ -125,7 +125,7 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `external-secrets` namespace and never committed. Its `conditions` list the
   namespaces allowed to use it, so a new environment's namespace goes there
   too.
-- `deploy/helm/vault-secrets.yaml` maps each Secret those ExternalSecrets fill
+- `deploy/helm/vault-secrets-map.yaml` maps each Secret those ExternalSecrets fill
   to its service and to where each key lives in the Helm values. The
   `helm-secrets-to-vault`, `vault-secrets-to-helm`, and
   `vault-secrets-from-cluster` targets (`.github/scripts/vault_secrets.py`)

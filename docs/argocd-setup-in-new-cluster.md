@@ -85,8 +85,8 @@ clusters don't (pulling images from ACR), the section says so.
 
   It also applies the plain manifests in `deploy/argocd/envs/<env>/manifests/`.
 - Secrets come from HashiCorp Vault through the External Secrets Operator (ESO).
-  The `~/helm-values/.../secrets.yaml` files used with `make helm-deploy` are
-  not used by Argo CD.
+  The `secrets.yaml` used with `make helm-deploy` (for example
+  `~/helm-values/.../helx/secrets.yaml`) is not used by Argo CD.
 - Argo CD reads `deploy/argocd/` and the values files from the `develop` branch,
   so nothing here takes effect until it is merged there.
 
@@ -94,8 +94,8 @@ Where everything lives, outside `deploy/argocd/`:
 
 - `deploy/helm/values/<cluster>/` holds the first two values files. The Azure
   cluster's `defaults/values.yaml` also points every image at ACR (section 7).
-- `deploy/helm/vault-secrets.yaml` maps each Secret to its Vault entry and its
-  Helm values. `.github/scripts/vault_secrets.py` and its tests, behind
+- `deploy/helm/vault-secrets-map.yaml` maps each Secret to its Vault entry and
+  its Helm values. `.github/scripts/vault_secrets.py` and its tests, behind
   `make helm-secrets-to-vault`, `vault-secrets-to-helm`,
   `vault-secrets-from-cluster` and `vault-secrets-upload`, use it (section 5).
   `make help-local-dev` describes the targets.
@@ -561,22 +561,27 @@ Secret with the single key `secrets.yaml` instead of `SECRET_KEY` and the rest.
 
 A `secrets.yaml` for `make helm-deploy` and the Vault entries above hold the
 same values in two shapes. Three Make targets convert between them, and a
-fourth uploads the result, using
-`deploy/helm/vault-secrets.yaml`, which records each Secret's service and
-where each of its keys lives in the Helm values:
+fourth uploads the result, using `deploy/helm/vault-secrets-map.yaml`,
+which records each Secret's service and where each of its keys lives in
+the Helm values:
 
-- **`make helm-secrets-to-vault`** renders the chart that
-  `make build-helx-chart` packaged, with your values files, and writes each
+- **`make helm-secrets-to-vault NAMESPACE=<namespace>`** renders the chart that
+  `make build-helx-chart` packaged, with your values files, for that
+  namespace, and writes each
   Secret the chart would create as `<service>/<Secret name>.json` under
-  `dist/vault-secrets/`. It uses the files listed in `LOCAL_VALUES_FILE`
-  (after a y/n prompt; `ASSUME_YES=1` skips it), followed by any `VALUES=`.
-  If `LOCAL_VALUES_FILE` doesn't exist, it uses `VALUES=` alone. It renders
-  twice and refuses to write anything if a value differs between the two,
-  listing the values paths to add to `secrets.yaml`. A value that differs is
-  one the chart generates, which Argo CD would replace on every sync.
+  `dist/vault-secrets/` (which is gitignored). It uses the files listed in
+  `LOCAL_VALUES_FILE`, followed by any `VALUES=`. If `LOCAL_VALUES_FILE`
+  doesn't exist or lists nothing, it uses `VALUES=` alone. It renders twice
+  and refuses to write anything if a value differs between the two, listing
+  the values paths to add to `secrets.yaml`. A value that differs is one the
+  chart generates, which Argo CD would replace on every sync. Otherwise it
+  shows the values files it used, the output folder (and whether that's the
+  default `VAULT_SECRETS_DIR`), and any files it would overwrite. It then asks
+  once whether to proceed (`ASSUME_YES=1` skips the question).
 - **`make vault-secrets-to-helm`** turns those JSON files back into one
   combined `secrets.yaml` (`dist/vault-secrets/secrets.yaml`) for
-  `make helm-deploy`.
+  `make helm-deploy`. If that file already exists, it asks y/n before
+  overwriting it (`ASSUME_YES=1` skips the question).
 - **`make vault-secrets-from-cluster`** copies the live Secrets of a running
   release into the same JSON files. It only reads from the cluster. It is the
   only source for values the charts generated, which no `secrets.yaml` holds.
@@ -591,9 +596,9 @@ where each of its keys lives in the Helm values:
   version 2 keeps the earlier ones.
 
 `VAULT_PATH` is the path prefix, on the `helx` mount, under which all of a
-namespace's secrets are stored: `dev/azure/ai-sb-test` for `ai-sb-test`. The
-JSON targets also print a `vault kv put` command per file, for uploading by
-hand. These use `$VAULT_PATH` from your shell unless you passed
+namespace's secrets are stored (e.g. `dev/azure/ai-sb-test` for `ai-sb-test`).
+The JSON targets also print a `vault kv put` command per file, for uploading
+by hand. These use `$VAULT_PATH` from your shell unless you passed
 `VAULT_PATH=` to Make. Every file holds plaintext secrets and is created
 readable by its owner only; `dist/` is ignored by Git. Delete the files once
 they are uploaded. `make help-local-dev` lists the variables each target
@@ -626,9 +631,8 @@ the live certificate.
    make vault-secrets-to-helm
    ```
 
-   Keep `dist/vault-secrets/secrets.yaml` wherever you keep secrets files (it
-   replaces the per-service `secrets.yaml` files) and list it in
-   `LOCAL_VALUES_FILE` in their place.
+   Keep `dist/vault-secrets/secrets.yaml` wherever you keep secrets files and
+   list it in `LOCAL_VALUES_FILE` in their place.
 4. Check that the new `secrets.yaml` describes the same Secrets, by rendering
    it back to JSON in a second folder and comparing:
 
@@ -643,19 +647,14 @@ the live certificate.
    key. A PEM key loads the same either way.
 5. Delete both folders: `rm -rf dist/vault-secrets dist/vault-secrets-check`.
 
-Check what landed in Vault (key names only) with, for example:
-
-```sh
-vault kv get -mount=helx -format=json dev/azure/ai-sb-test/appstore/helx-postgresql | jq '.data.data | keys'
-```
-
 ### A new environment, or changing a secret later
 
 Edit the environment's `secrets.yaml`, then run
 `make helm-secrets-to-vault NAMESPACE=<namespace>`, then
-`make vault-secrets-upload VAULT_PATH=<prefix>`. The namespace matters: some
-values the charts derive, such as ldap-sync's database `host` and `uri`,
-contain it. For a new environment, its error message lists
+`make vault-secrets-upload VAULT_PATH=<prefix>`. `NAMESPACE` is required and
+is never taken from your `kubectl` context, because some values the charts
+derive contain it, such as ldap-sync's database `host` and `uri`. For a new
+environment, its error message lists
 every value the charts would otherwise generate; add each to `secrets.yaml`.
 External Secrets picks up changed entries within an hour (`refreshInterval`),
 or straight away with:

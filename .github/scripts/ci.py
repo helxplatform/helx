@@ -1232,11 +1232,16 @@ class _ReleasedCharts:
         return _base_chart(self.root, self.ref, chart_dir)
 
     def field(self, chart_dir: Path, field: str) -> str | None:
-        """Return a released field, or None when the chart was never released."""
+        """Return a released field, or None when nothing was released under it.
+
+        That is either a chart absent from the ref, or one without the field:
+        a chart-only service released without appVersion has never published
+        an image, so an image added since has no floor.
+        """
         released = self.chart(chart_dir)
         if released is None:
             return None
-        return metadata_value(
+        return optional_metadata_value(
             released, field, f"{self.ref}:{relative_path(self.root, chart_dir)}/Chart.yaml"
         )
 
@@ -1261,7 +1266,8 @@ def check_versions(
 
     "Released" means the last v* tag for the umbrella, and for a service chart
     its version (or, for its images, its appVersion) on release_ref. A chart
-    absent from release_ref has never been released and is unconstrained. A
+    absent from release_ref has never been released and is unconstrained, and
+    so are the images of a chart released there without an appVersion. A
     version equal to the release passes only when the packaged chart (or image
     sources) are identical to that release, as after merging a hotfix back.
 

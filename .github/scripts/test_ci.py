@@ -1854,18 +1854,14 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
         self.assertEqual(message.count("Release ref 'origin/main' is not available"), 1)
 
-    def test_a_released_chart_without_app_version_is_listed_with_other_errors(self) -> None:
+    def test_a_chart_released_without_app_version_gives_its_image_no_floor(self) -> None:
+        # main released api chart-only; develop has since added its image.
         self.git("checkout", "-q", "-b", "no-app", "released")
         self.write_chart("services/api/chart", name="api", version="6.0.4")
         self.commit("release api without appVersion")
         self.git("checkout", "-q", "-")
-        self.regress_umbrella()
         self.touch_image()
-        with self.assertRaises(ci.CIError) as raised:
-            self.check(above_release=True, release_ref="no-app")
-        message = str(raised.exception)
-        self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
-        self.assertIn("no-app:services/api/chart/Chart.yaml", message)
+        self.check(above_release=True, release_ref="no-app")
 
     def test_an_unreadable_app_version_is_listed_with_other_errors(self) -> None:
         self.regress_umbrella()

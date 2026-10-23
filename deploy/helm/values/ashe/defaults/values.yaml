@@ -8,10 +8,6 @@ appstore:
     workers: 2
   fetcherImage:
     repository: containers.renci.org/helxplatform/url-fetch
-  imagePostgresql:
-    registry: containers.renci.org
-    repository: helxplatform/bitnami-postgresql
-    tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
@@ -265,7 +261,10 @@ ui:
           - Content-Type
 user-mutator:
   webhook:
-    enabled: false
+    # The deployer has only namespace access, so a cluster admin applies the
+    # saved manifest. Leaving this out makes the chart default to create,
+    # which fails the deploy on permissions.
+    mode: saveToConfigMap
   config:
     features:
       ldap:

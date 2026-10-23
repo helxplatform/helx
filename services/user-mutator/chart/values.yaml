@@ -28,7 +28,11 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
-securityContext: {}
+# -- Container securityContext, applied to every container in the pod.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+securityContext:
+  allowPrivilegeEscalation: false
   # capabilities:
   #   drop:
   #   - ALL
@@ -174,6 +178,18 @@ webhook:
   # either secret.mode: generate or webhook.caBundle.
   enabled: true
 
+  # -- What to do with the rendered configuration when enabled is true:
+  # `create` applies it to the cluster, which needs cluster-level permission
+  # on admissionregistration.k8s.io. `saveToConfigMap` creates no cluster-
+  # scoped object; it stores the manifest in a ConfigMap of the same name in
+  # the release namespace, under mutating-webhook-configuration.yaml, for a
+  # cluster admin to apply later. The chart then needs only namespace access.
+  # The default is create on purpose: an environment that forgets
+  # saveToConfigMap fails on permissions. With saveToConfigMap as the
+  # default, an environment that lost `mode: create` would have its live
+  # configuration deleted by the next upgrade, with no error.
+  mode: create
+
   # -- Name of the configuration. Defaults to <fullname>-webhook-<namespace>.
   # The release qualifier keeps two releases in one namespace apart, and the
   # namespace qualifier keeps one release name in two namespaces apart, which
@@ -204,6 +220,15 @@ webhook:
       values:
         - "true"
 
+  # -- Optional objectSelector, matched against each Deployment's own labels.
+  # Empty sends every Deployment in the selected namespaces to the webhook.
+  # Tycho labels the Deployments it launches `executor: tycho`, so
+  # {matchLabels: {executor: tycho}} narrows the webhook to app launches.
+  objectSelector: {}
+
+  # -- Ignore admits a Deployment unmutated when the webhook cannot be reached.
+  # Fail rejects it instead; set objectSelector first, or an outage would also
+  # block every other Deployment in the namespace, including this chart's own.
   failurePolicy: Ignore
   reinvocationPolicy: Never
   timeoutSeconds: 10

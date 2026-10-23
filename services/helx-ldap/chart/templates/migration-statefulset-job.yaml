@@ -29,6 +29,8 @@ spec:
         - name: migrate-statefulset
           image: "{{ .Values.openldap.migration.image.repository }}:{{ .Values.openldap.migration.image.tag }}"
           imagePullPolicy: {{ .Values.openldap.migration.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.openldap.migration.securityContext | nindent 12 }}
           command:
             - /bin/sh
             - -c

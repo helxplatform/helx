@@ -4,6 +4,13 @@ appRegistry:
   branch: ""
   brand: ""
 
+# -- Container securityContext for the controller and the DaemonSet's pause
+# container. allowPrivilegeEscalation: false is required by the AKS policy
+# that denies privilege escalation, and is harmless elsewhere; keep it when
+# overriding. The pre-pull init containers get theirs from the controller.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+
 # -- Controller (CronJob that fetches images and patches the DaemonSet)
 controller:
   image:

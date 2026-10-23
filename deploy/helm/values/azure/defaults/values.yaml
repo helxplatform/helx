@@ -131,13 +131,18 @@ pod-reaper:
 resty:
   image:
     repository: aisandboxrencitgt.azurecr.io/helxplatform/openresty
+  # The TLS Secret named here must exist before install: resty mounts it, so
+  # its pod cannot start without it. cert-manager cannot issue it on AKS, whose
+  # HTTPS-only Ingress policy denies the solver Ingress HTTP-01 needs (it has
+  # no spec.tls), so no cluster-issuer annotation is set below. Create the
+  # Secret out of band, or add the annotation per environment only with an
+  # issuer that uses DNS-01.
   SSL:
     nginxTLSSecret: # CHANGEME
   enabled: true
   dnsResolver: 10.0.0.10
   ingress:
     annotations:
-      cert-manager.io/cluster-issuer: letsencrypt
       nginx.ingress.kubernetes.io/proxy-body-size: 100m
       nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     create: true

@@ -9,7 +9,7 @@ appstore:
 appstore-prepuller:
   appRegistry:
     branch: helx-ai-sandbox-test-azure
-    brand: ai_sandbox
+    brand: helx
 resty:
   SSL:
     nginxTLSSecret: ai-sandbox-test.renci.org-tls
@@ -28,7 +28,7 @@ ui:
         <br />&nbsp;<br />
         The AI Sandbox is a deployment of HeLx and has been stood up for researchers and students to use
         and explore the capabilities of HeLx. This is the test deployment of the AI Sandbox.
-    brand_name: ai_sandbox
+    brand_name: helx
     default_space: workspaces
     hidden_result_tabs: cdes
     login_title: RENCI AI Sandbox Test Workspaces

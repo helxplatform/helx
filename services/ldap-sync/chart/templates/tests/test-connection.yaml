@@ -10,6 +10,8 @@ spec:
   containers:
     - name: wget
       image: busybox
+      securityContext:
+        allowPrivilegeEscalation: false
       command: ['wget']
-      args: ['{{ include "ldap-sync.fullname" . }}:{{ .Values.service.port }}']
+      args: ['{{ include "ldap-sync.serviceName" . }}:{{ .Values.service.port }}']
   restartPolicy: Never

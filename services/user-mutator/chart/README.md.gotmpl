@@ -235,16 +235,24 @@ webhook:
   mode: saveToConfigMap
 ```
 
-Deployments are not mutated until a cluster admin applies the stored manifest. The install notes print the command; for a release `helx` in namespace `helx-dev`:
+Deployments are not mutated until a cluster admin applies the stored manifest. Anyone who can edit ConfigMaps in the release namespace can change what the ConfigMap holds, and the admin applies it with cluster-level permission. So never pipe it straight into `kubectl apply`: a second YAML document, such as a ClusterRoleBinding to `cluster-admin`, would be applied along with the webhook without anyone seeing it. Save it to a file and read it first. The install notes print these commands; for a release `helx` in namespace `helx-dev`:
 
 ```sh
 kubectl -n helx-dev get configmap helx-user-mutator-webhook-helx-dev \
-  -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' | kubectl apply -f -
+  -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' > user-mutator-webhook.yaml
+kubectl diff -f user-mutator-webhook.yaml
+kubectl apply -f user-mutator-webhook.yaml
 ```
+
+`kubectl diff` lists every object the file would create or change, so anything besides the webhook shows up there. Before applying, check that:
+
+- the file holds a single `MutatingWebhookConfiguration` and nothing else;
+- `clientConfig.service.namespace` is the release namespace (`helx-dev` here);
+- `namespaceSelector` lists only namespaces the admin agreed to. By default that is just the release namespace; `webhook.namespaces` and `webhook.extraMatchExpressions` can widen it, and a webhook that selects another namespace can change every Deployment created there.
 
 The applied object is not owned by the release, which has three consequences:
 
-- An upgrade that changes a `webhook.*` value, or a certificate rotation, updates the ConfigMap but not the live configuration. The admin has to re-apply it.
+- An upgrade that changes a `webhook.*` value, or a certificate rotation, updates the ConfigMap but not the live configuration. The admin has to re-apply it, reading it again the same way.
 - `helm uninstall` removes the ConfigMap but leaves the live configuration behind. With the default `failurePolicy: Ignore` it fails open, but it should still be deleted.
 - Switching back to `create` later fails, because Helm will not take over an object it does not own. Delete the applied configuration first, as in the section above.
 

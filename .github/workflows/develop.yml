@@ -255,6 +255,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # Only success passes. No job here skips on purpose: the image matrix
+      # always lists every image, and this workflow never cancels a run for a
+      # newer one. So a skipped job means something it needs failed, or a
+      # condition skipped it by mistake, and the channel was not published.
       - name: Require every develop job to pass
         shell: bash
         env:
@@ -281,7 +285,7 @@ jobs:
             name=${status%%|*}
             result=${status#*|}
             printf '%-30s %s\n' "$name" "$result"
-            if [[ "$result" != success && "$result" != skipped ]]; then
+            if [[ "$result" != success ]]; then
               echo "::error::$name finished with result: $result"
               failed=1
             fi

@@ -261,7 +261,10 @@ jobs:
 
   ci-gate:
     name: CI gate
-    if: ${{ !cancelled() }}
+    # always(), so a cancelled run still reports, as a failure. Branch
+    # protection counts a skipped check as passing, so a gate that skipped
+    # itself on cancellation would show a run that checked nothing as green.
+    if: always()
     needs:
       - self-test
       - validate-common
@@ -277,9 +280,10 @@ jobs:
       # always lists every service chart, and the image matrix falls back to a
       # "No images to build" entry. So a skipped job means something it needs
       # failed, or a condition skipped it by mistake, and a gate that let that
-      # through would pass a run that checked nothing. A run cancelled because
-      # a newer one replaced it does not reach this step: !cancelled() above
-      # skips the gate itself.
+      # through would pass a run that checked nothing. Cancelled fails too. A
+      # run cancelled because a newer one replaced it, after a push or a PR
+      # edit, leaves a failed gate behind, but the newer run's gate reports
+      # after it and is the one branch protection reads.
       - name: Require every CI job to pass
         shell: bash
         env:

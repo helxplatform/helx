@@ -6,7 +6,9 @@ type: application
 
 version: 2.1.8
 # 1.1.4 bumps the server base image from EOL node:20 to node:24-alpine, which
-# carries the Brotli decoder OOB-write fix (CVE-2026-111497).
+# carries the Brotli decoder OOB-write fix (CVE-2026-111497), and the monitoring
+# base image from EOL python:3.9 to python:3.12.16-slim + certifi==2026.10.23
+# (drops the compromised eMudhra CAs, CVE-2026-111943).
 appVersion: 1.1.4
 dependencies:
   - name: helx-common

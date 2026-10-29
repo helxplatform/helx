@@ -51,8 +51,6 @@ ui:
     workspaces:
       enabled: "true"
 user-mutator:
-  secret:
-    existingSecret: ""
   config:
     userProfiles:
       enabled: true
@@ -73,10 +71,3 @@ user-mutator:
                 mountPath: /etc/codex
               - name: biome-model-config
                 mountPath: /etc/bdf-pz
-    features:
-      ldap:
-        host: openldap
-        port: 389
-        username: "cn=admin,dc=example,dc=org"
-        user_base_dn: "ou=users,dc=example,dc=org"
-        group_base_dn: "ou=groups,dc=example,dc=org"

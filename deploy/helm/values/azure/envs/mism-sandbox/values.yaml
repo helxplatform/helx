@@ -1,0 +1,59 @@
+# mism-sandbox on mism-test (unc-renci-services / mism-k8s) — helx develop 5.1.1-develop
+# Images, pull secrets and the unc-group-x hook come from the chart defaults (Harbor);
+# only env-specific values are set here.
+
+appstore:
+  # djangoSettings: helx          # inherited from azure defaults (D7 option B)
+  django:
+    ALLOW_SAML_LOGIN: "false"                    # D3: Keycloak OIDC (realm mism), not SAML
+    ALLOW_DJANGO_LOGIN: "true"                   # break-glass admin login
+  tycho:
+    externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
+  userStorage:
+    storageClass: azurefile-csi-nfs-pe           # NFS + private endpoint (R3, ACISITSM-3499)
+
+appstore-prepuller:
+  appRegistry:
+    branch: helx-mism-sandbox-azure              # D4
+    brand: helx                                  # must equal the appstore brand (D7 option B)
+
+ldap-sync:
+  searchBootstrap:
+    # Set explicitly (D5): MISM syncs the AI Sandbox groups. The azure defaults
+    # filter is unc:app:renci:internal:*. id (get-groups) and baseDN
+    # (ou=groups,dc=unc,dc=edu) are inherited from the azure defaults.
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+  # config.source (ldaps://ldap.unc.edu/, bind cn=unc:app:renci:helx:ns) is
+  # inherited unchanged from the azure defaults.
+
+resty:
+  SSL:
+    nginxTLSSecret: ai-sb.renci.org-tls          # pre-issued 2026-10-29 (Certificate mism-sandbox/ai-sb.renci.org-tls)
+  ingress:
+    annotations:                                 # merged into the defaults' annotations
+      # Removed from azure defaults on develop (HTTP-01 solver vs AKS HTTPS-only policy).
+      # On mism-test that policy is dryrun and letsencrypt (HTTP-01) already issues certs.
+      cert-manager.io/cluster-issuer: letsencrypt
+  service:
+    serverName: ai-sb.renci.org
+
+ui:
+  config:
+    brand_name: helx                             # D7 option B
+    login_title: MISM Sandbox Workspaces
+    meta:
+      title: MISM Sandbox
+    brand_description:
+      html: |
+        <a href="https://helxplatform.github.io/">HeLx</a> empowers researchers to work with their
+        preferred tools and apps in the cloud at scale without installation or other infrastructure concerns.
+        <br />&nbsp;<br />
+        The MISM Sandbox is a deployment of HeLx for researchers and students to use and explore.
+    support:
+      help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9   # confirm MISM support URLs
+      user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
+
+# user-mutator.webhook: mode create (chart default) and the admissions.enforcer/disabled
+# annotation (azure defaults) are inherited; keep.
+# No containerSecurityContext/securityContext overrides anywhere: chart defaults carry
+# allowPrivilegeEscalation: false, which the AKS deny policy requires.

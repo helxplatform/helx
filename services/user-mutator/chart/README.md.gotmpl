@@ -184,8 +184,8 @@ Namespaces are selected by the `kubernetes.io/metadata.name` label, which Kubern
 automatically. **Nothing has to be labelled for mutation to take effect**, and the chart needs no permission to patch
 namespaces. `webhook.namespaces` defaults to the release namespace.
 
-`webhook.extraMatchExpressions` is ANDed with that clause and defaults to keep the webhook away from control-plane and
-AKS-managed namespaces. To restore the historical opt-in label as a per-namespace toggle, add it to
+`webhook.extraMatchExpressions` is ANDed with that clause and defaults to keep the webhook away from namespaces
+labelled `control-plane: "true"`. To restore the historical opt-in label as a per-namespace toggle, add it to
 `webhook.matchLabels`:
 
 ```yaml
@@ -193,6 +193,22 @@ webhook:
   matchLabels:
     enable-user-mutator-webhook-ai-sb-test: "true"
 ```
+
+### AKS Admissions Enforcer
+
+On AKS, the Admissions Enforcer rewrites the `namespaceSelector` of every webhook configuration it admits, adding its
+own exclusions for control-plane and AKS-managed namespaces, and takes ownership of that field. Helm 4 applies charts
+server-side, so the next upgrade fails with a conflict naming `admissionsenforcer`. Opt the configuration out with
+`webhook.annotations`; the `kubernetes.io/metadata.name` clause already keeps the webhook to the listed namespaces:
+
+```yaml
+webhook:
+  annotations:
+    admissions.enforcer/disabled: "true"
+```
+
+A configuration the enforcer already rewrote still has it as the owner, so the first upgrade that adds the annotation
+needs `--force-conflicts`, or the configuration deleted beforehand.
 
 ### Deployment selection and failure policy
 

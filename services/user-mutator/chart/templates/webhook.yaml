@@ -84,6 +84,10 @@ metadata:
   name: {{ include "user-mutator.webhookName" $root }}
   labels:
     {{- include "user-mutator.labels" $root | nindent 4 }}
+  {{- with $root.Values.webhook.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 webhooks:
   - name: {{ printf "%s.%s.svc" (include "user-mutator.serviceName" $root) $root.Release.Namespace }}
     admissionReviewVersions:

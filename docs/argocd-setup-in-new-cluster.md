@@ -7,7 +7,7 @@ already running. The commands use the Azure AI Sandbox cluster (kube context
 own cluster and namespace. Where the Azure cluster needs something other
 clusters don't (pulling images from ACR), the section says so.
 
-> **Status and hand-off (2026-10-23).** This block, and the *(done)* /
+> **Status and hand-off (2026-10-29).** This block, and the *(done)* /
 > *(not done yet)* markers on the section headings, track the first run of
 > this procedure, on the Azure cluster's `ai-sb-test` namespace. Delete them
 > once that run is finished; everything else in this document is the
@@ -22,17 +22,21 @@ clusters don't (pulling images from ACR), the section says so.
 > - **Section 4:** done. The ClusterSecretStore `vault` is `READY`, the
 >   `vault-token` Secret exists, and `vault-token-renewal` runs every Monday
 >   at 06:17 UTC.
-> - **Section 5:** the nine entries are uploaded to the `helx` mount under
->   `dev/azure/ai-sb-test/`. `make vault-secrets-to-helm` has been run. Still to
->   do: the comparison in step 4 of "Taking over a running release", listing
->   the new `dist/vault-secrets/secrets.yaml` in `LOCAL_VALUES_FILE` (kept
->   outside `dist/`), and deleting `dist/vault-secrets/`. It holds plaintext
->   secrets.
+> - **Section 5:** done. The nine entries are uploaded to the `helx` mount
+>   under `dev/azure/ai-sb-test/`, the comparison matched (only the expected
+>   `tls.key` newline), the new `secrets.yaml` is listed in
+>   `LOCAL_VALUES_FILE`, and `dist/vault-secrets/` is deleted. The
+>   chart-managed Secrets in `ai-sb-test` were last written on 2026-10-14, so
+>   the Helm upgrades since then (revision 7, 2026-10-27) haven't changed them.
 > - **Section 6:** done in the repository.
 > - **Section 7:** the CI changes are on the branch `argocd-setup`, not yet
->   merged, so they don't run yet. The ACR token and the GitHub variable and
->   secrets (`ACR_LOGIN_SERVER`, `ACR_USERNAME`, `ACR_PASSWORD`) are not set
->   up.
+>   merged, so they don't run yet. ACR (`aisandboxrencitgt`, Standard SKU,
+>   public network access, no firewall) passes step 1's check and has no
+>   tokens yet. Steps 2–4 (token, password, GitHub variable and secrets) are
+>   not done. Every built image's `helxplatform/` repository already exists in
+>   ACR, but only with hand-pushed `azure-deploy-*` tags, which is what
+>   `ai-sb-test` runs now; no `develop-<sha>` or `v<appVersion>` tags yet
+>   (step 5).
 > - **Section 8:** not done; there's no GHCR repository Secret in Argo CD.
 > - **Section 9:** waiting on the merge. `argocd-setup` is to be merged to
 >   `develop` after the next release is cut. Argo CD reads `develop`, so
@@ -532,7 +536,7 @@ Vault-side setup (an auth mount and a role per namespace). Kubernetes login
 also needs Vault to reach the cluster's API server. Only
 `vault-cluster-secret-store.yaml` would change to use either.
 
-## 5. Move each secret into Vault *(entries uploaded; check and clean-up left)*
+## 5. Move each secret into Vault *(done)*
 
 Every Secret that the chart used to create gets one Vault entry, on the
 `helx` mount, with the same name and the same keys. Each sits under the
@@ -732,7 +736,7 @@ ExternalSecrets and the webhook's `caBundle`, which matches the live one.
 No Deployment or StatefulSet template changes, so the takeover itself restarts
 nothing. Pods do roll when the first ACR candidate changes the image tags.
 
-## 7. Publish a chart Argo CD can follow, and images the cluster can pull *(CI on the branch, not merged; ACR setup not done yet)*
+## 7. Publish a chart Argo CD can follow, and images the cluster can pull *(CI on the branch, not merged; ACR token and GitHub settings not done yet)*
 
 ### The chart: numbered candidates on GHCR
 
@@ -788,30 +792,80 @@ Images this repository doesn't build are set separately in the same file:
 Bitnami PostgreSQL, os-shell, openresty, and unc-group-x point at ACR. ldap-sync's `docker.io/postgres` and pod-reaper's
 `helxplatform/pod-reaper` come from Docker Hub, which this cluster can reach.
 
-To set it up (someone with ACR and GitHub admin rights):
+To set it up (someone with ACR and GitHub admin rights), with `az` logged in
+to the registry's subscription:
 
-1. Create an ACR token CI can push with, limited to `helxplatform/`:
+1. Check that GitHub-hosted runners can reach the registry, and that the
+   token doesn't exist yet. These commands only read:
 
    ```sh
    ACR=aisandboxrencitgt
-   az acr scope-map create --registry "$ACR" --name helx-ci-push \
-     --repository 'helxplatform/*' content/read content/write
-   az acr token create --registry "$ACR" --name helx-ci --scope-map helx-ci-push
+   az acr show -n "$ACR" --query \
+     '{sku: sku.name, publicNetworkAccess: publicNetworkAccess, defaultAction: networkRuleSet.defaultAction}'
+   az acr token list -r "$ACR" --query '[].name'
    ```
 
-   Wildcard repository scopes need a recent ACR. If `az` rejects them, list the
-   repositories explicitly: each `repository` in `.github/ci/images.yaml`,
-   under `helxplatform/`.
+   `publicNetworkAccess` must be `Enabled`, and `defaultAction` `Allow` or
+   `null`. A registry that denies by default or is private-only can't take
+   pushes from GitHub's runners; it needs a self-hosted runner inside its
+   network instead. Tokens work on every SKU.
 
-2. In the GitHub repository settings, add the variable
-   `ACR_LOGIN_SERVER=aisandboxrencitgt.azurecr.io` and the secrets
-   `ACR_USERNAME` (the token name, `helx-ci`) and `ACR_PASSWORD` (one of its
-   passwords).
-3. Get every image into ACR before Argo CD is bootstrapped: push to `develop`
+2. Create a token CI can push with, limited to `helxplatform/`. A wildcard
+   must be a single `/*` at the end of the path, and it also covers
+   repositories that don't exist yet, so a new image needs no change here.
+   `--no-passwords` keeps `az` from printing a password; the next step makes
+   one:
+
+   ```sh
+   az acr scope-map create -r "$ACR" -n helx-ci-push \
+     --description 'HeLx CI: copy images from Harbor' \
+     --repository 'helxplatform/*' content/read content/write
+   az acr token create -r "$ACR" -n helx-ci --scope-map helx-ci-push --no-passwords
+   ```
+
+   Check it: `status` must be `enabled`, and the scope map's actions must be
+   `content/read` and `content/write` on `helxplatform/*` only:
+
+   ```sh
+   az acr token show -r "$ACR" -n helx-ci --query '{status: status, scopeMap: scopeMapId}'
+   az acr scope-map show -r "$ACR" -n helx-ci-push --query actions
+   ```
+
+3. Generate the token's password straight into the clipboard, so it never
+   appears in the terminal (`pbcopy` is macOS; on Linux pipe to
+   `xclip -selection clipboard`):
+
+   ```sh
+   az acr token credential generate -r "$ACR" -n helx-ci --password1 \
+     --expiration-in-days 365 --query 'passwords[0].value' -o tsv | pbcopy
+   ```
+
+   Without `--expiration-in-days` the password never expires. With it, the
+   mirror jobs start failing once it lapses; replace it before then (below).
+
+4. In the GitHub repository settings (Settings → Secrets and variables →
+   Actions), add the secret `ACR_PASSWORD` by pasting the clipboard, then the
+   secret `ACR_USERNAME` (the token name, `helx-ci`), then the variable
+   `ACR_LOGIN_SERVER=aisandboxrencitgt.azurecr.io`. Add the variable last:
+   it is what turns the mirror jobs on, so a push in between would run them
+   without credentials. Clear the clipboard afterwards.
+
+5. Get every image into ACR before Argo CD is bootstrapped: push to `develop`
    (or run "Develop channel" from the Actions tab) for the candidate images,
    and let the next push to `main` copy the released ones. Until then, a
    numbered candidate published before the variable was set names images
-   that are not in ACR.
+   that are not in ACR. Check that the copies arrived; each built image should
+   show a `develop-<sha>` tag (and, after a release, `v<appVersion>`):
+
+   ```sh
+   az acr repository show-tags -n "$ACR" --repository helxplatform/appstore \
+     --orderby time_desc --top 3
+   ```
+
+To replace the password, generate the other one (`--password2` in step 3),
+update `ACR_PASSWORD` with it, wait for a `develop` run to pass, then delete
+the old one with `az acr token credential delete -r "$ACR" -n helx-ci
+--password1`. The two passwords take turns.
 
 ## 8. Give Argo CD access to the repositories *(not done yet)*
 

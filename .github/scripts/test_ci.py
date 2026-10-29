@@ -1555,9 +1555,13 @@ class HelpLayoutTests(unittest.TestCase):
 
     def test_help_wraps_each_target_description_as_one_paragraph(self) -> None:
         root = SCRIPT.resolve().parents[2]
+        # The expected text is wrapped at 80 columns, so don't inherit the caller's terminal width.
+        environment = {k: v for k, v in os.environ.items() if k != "COLUMNS"}
         result = subprocess.run(
             ["make", "--no-print-directory", "help-ci"],
             cwd=root,
+            env={**environment, "HELP_WIDTH": "80"},
+            stdin=subprocess.DEVNULL,
             check=True,
             text=True,
             capture_output=True,

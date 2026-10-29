@@ -1,6 +1,7 @@
 appstore:
   DEBUG: "true"
   logLevel: DEBUG
+  djangoSettings: ai_sandbox
   saml:
     ASSERTION_URL: https://ai-sandbox-test.renci.org
     ENTITY_ID: https://ai-sandbox-test.renci.org
@@ -9,7 +10,13 @@ appstore:
 appstore-prepuller:
   appRegistry:
     branch: helx-ai-sandbox-test-azure
-    brand: helx
+    brand: ai_sandbox
+global:
+  imagePullSecrets:
+  - aisandboxrencitgt-creds
+ldap-sync:
+  searchBootstrap:
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
 resty:
   SSL:
     nginxTLSSecret: ai-sandbox-test.renci.org-tls
@@ -57,15 +64,11 @@ user-mutator:
             - configmapName: app-environment-config
           volumes:
             volumeSources:
-              - name: postgres-info
-                source: secret://(.*)-pguser-{{ .username }}
               - name: azure-codex-config
                 source: configmap://azure-codex-config
               - name: biome-model-config
                 source: configmap://biome-model-config
             volumeMounts:
-              - name: postgres-info
-                mountPath: /var/run/helx/postgres/{{ index .cap 0 }}
               - name: azure-codex-config
                 mountPath: /etc/codex
               - name: biome-model-config

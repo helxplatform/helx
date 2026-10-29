@@ -1,6 +1,11 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this service.
+
+This service is part of the HeLx monorepo. The repository-wide rules in the
+root `AGENTS.md` (versioning, chart dependencies, never touching Harbor or
+other registries) take precedence over anything here, and `AGENTSINIT.md`
+explains how ldap-sync fits into the platform.
 
 ## Project Overview
 
@@ -12,17 +17,22 @@ ldap-sync is a Go-based service for synchronizing LDAP entries between two LDAP 
 # Generate Swagger documentation (must be done before building)
 make docs
 
-# Build Docker image
-make build REPOSITORY=containers.renci.org/helxplatform/ldap-sync TAG=v3.1.0
-
-# Push Docker image
-make push
-
 # Build locally (requires Go 1.23+)
 CGO_ENABLED=0 GOOS=linux go build -o ldap-sync .
 
-# For Helm chart - update dependencies before installing
-cd chart && helm dependency update
+# Run the tests; CI does not run them
+go test ./...
+```
+
+From the repository root:
+
+```bash
+# Build the image exactly as CI does; CI publishes it, never push it yourself
+make docker-build SERVICE=ldap-sync
+
+# Vendor dependencies, lint, and package the chart (pulls the postgres chart,
+# so it needs network access). Do not run `helm dependency update`.
+make build-chart SERVICE=ldap-sync
 ```
 
 ## Database Persistence
@@ -138,7 +148,12 @@ Hooks are independent Go services that implement the transformation logic:
 - `hooks/ordrd-group-x/`: Processes ORDRD groups, UNC users, and posix groups with pid-to-uid mapping
 - `hooks/unc-group-x/`: Similar to ordrd-group-x but uses template variables and bindings for dependency resolution
 
-Each hook has its own Makefile with `docs`, `build`, and `push` targets. Build hooks using the same pattern as the main service.
+Each hook has its own Makefile with `docs`, `build`, and `push` targets. CI
+does not build or publish hook images, so a hook change only reaches a
+deployment once someone publishes a new hook image and the values that name it
+(for example `ldap-sync.config.hooks[].image.tag`) are updated. `hooks/` is in
+`.dockerignore`, so the version check never asks for an ldap-sync bump when a
+hook changes, and nothing reminds anyone to publish the hook image.
 
 ## REST API Endpoints
 
@@ -190,15 +205,13 @@ Implementation details:
 
 ## Deploying with Helm
 
-The Helm chart includes PostgreSQL for search persistence:
+The Helm chart includes PostgreSQL for search persistence. In HeLx it is
+deployed as part of the umbrella chart (`deploy/helm/helx-chart`). To install it
+alone, package it first with `make build-chart SERVICE=ldap-sync` from the
+repository root, then:
 
 ```bash
-# Update dependencies first
-cd chart
-helm dependency update
-
-# Install or upgrade
-helm upgrade --install ldap-sync . \
+helm upgrade --install ldap-sync services/ldap-sync/chart \
   --set config.source.url="ldap://source:389" \
   --set secret.mode=values \
   --set secret.values.SOURCE_BIND_PASSWORD="source-password" \

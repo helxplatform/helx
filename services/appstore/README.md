@@ -1,6 +1,3 @@
-[![Code-Checks](https://github.com/helxplatform/appstore/actions/workflows/code-checks.yml/badge.svg)](https://github.com/helxplatform/appstore/actions/workflows/code-checks.yml)
-
-
 # AppStore Overview
 
 ## Introduction
@@ -8,6 +5,12 @@
 The HeLx appstore is the primary user experience component of the HeLx data science
 platform. Through the appstore, users discover and interact with analytic tools
 and data to explore scientific problems.
+
+This README came from the standalone `helxplatform/appstore` repository. The
+CI/CD, Frontend Development, and Tycho sections below describe this monorepo.
+The development-environment, Kubernetes, and Helm sections predate it: deploy
+through the umbrella chart (`deploy/helm/helx-chart`) as the root `README.md`
+describes, and treat `chart/values.yaml` as the reference for chart settings.
 
 ## CLI
 
@@ -25,42 +28,31 @@ testing of the live server/API is implemented using the `artillery` npm package.
 
 ## CI/CD
 
-Github Actions are employed to lint, test, build and publish this project.
+The monorepo workflows build this image and package its chart; the root
+`README.md` and `.github/CI.md` describe them. They run neither the tests above
+nor a linter or vulnerability scanner, so run `make test` yourself.
 
 ### Packaging
 
-Appstore is packaged as a Docker image in a non-root container and embeds a copy of the [helx-ui](https://hub.docker.com/r/helxplatform/helx-ui) front end within the Dockerfile image specificaton itself. 
+Appstore is packaged as a Docker image that runs as a non-root user. It does
+not contain the front end: `ui` is its own image and chart, and resty routes
+`/helx` and `/static/frontend` to it.
 
-The docker image is built and published automatically when merging to `develop` or `master` branches. 
+Images are pushed only to Harbor, `containers.renci.org/helxplatform/appstore`:
 
-These published images can be found [here](https://hub.docker.com/r/helxplatform/appstore) and are tagged thusly:
-
-#### develop-branch
-- appstore:`develop`
-- appstore:`(short-commit-sha)`
-
-#### master-branch
-- appstore:`latest`
-- appstore:`(short-commit-sha)`
-- appstore:`vX.X.X`
+- every push to `develop`: `develop-<short-sha>`
+- every push to `main`: `v<appVersion>`, from `chart/Chart.yaml`
 
 ### Releases
 
-[Releases](https://github.com/helxplatform/appstore/releases) are also automated following the semver specification ('major', 'minor','patch') for the project when merging `develop` branch to `master`. 
-
-For an automatic increase of the major version add a comment with "breaking|major" in it.  For an increase in the minor version add "feat|feature|minor" in a comment.  Make sure it is in the first part of the comment so it goes into the header.
-
-During a new release workflow, a new tag solidifying the semver version of the new release is first added to the master branch, then a github release object is created with release notes highlighting major, minor, patch changes and contributors for each release.
-
-The template for the release notes may be found [here](https://github.com/helxplatform/appstore/blob/develop/.github/release.yml)
+Versions never come from commit messages. To release an image change, bump
+`appVersion` and `version` in `chart/Chart.yaml`, then the appstore pin in
+`deploy/helm/helx-chart/Chart.yaml`. A HeLx release (Git tag and GitHub
+Release) is created when the umbrella chart's `version` increases on `main`.
 
 #### CI/CD HouseKeeping
 
 Inline comments within the code such as `#noqa: F401` are necessary items that instruct the linter to bypass or perform a special action for specific sections of code. ***PLEASE DO NOT DELETE these inline comments.
-
-#### Fail on Vulnerability Detection
-
-During PR's several vulnerability scanners are run. If there are vulnerabilities detected, the pr checks will fail and a report will be sent to Github Security Dashboard for viewing. Please ensure the vulnerability is mitigated prior to continuing the merge to protected branches.
 
 ## Deployment
 
@@ -383,86 +375,30 @@ http://localhost/unique-URI
 
 ### Frontend Development
 
-The appstore has a new frontend being developed inside the [helx-ui](https://github.com/helxplatform/helx-ui)
-that is served by Django. This frontend is focused on user interactions with
-search and apps providing a rich experience while Django remains responsible
-for authentication, authorization, routing and exposing data from Tycho.
+The front end lives in `services/ui` and runs in its own container from its own
+chart. Django remains responsible for authentication, authorization, and
+exposing data from Tycho: it serves the login page, and its middleware checks
+that the user may access a resource before the front end is reached. resty
+sends `/helx` and `/static/frontend` to `ui`, and sends any path appstore
+answers with a 404 back to `/helx/...`, so the front end handles its own routes.
 
-This means that before a user is able to access the frontend `helx-ui` project
-Django will provide a login page to authenticate the user, after which the
-Django middleware will also make sure the user is allowed to access resources
-as part of the authorization middleware. Once this is complete the user will be
-able to navigate and interact with the new frontend which is served via the
-`/frontend` Django app embedded in a Django view.
-
-The new frontend is built in to the appstore docker image build. Inside of our
-`Dockerfile` we use a multistage build to pull the frontend artifact out of the
-`helx-ui` container into the `static` directory in the frontend Django app. That
-artifact is then collected with `collectstatic` and served on the `/frontend`
-route.
-
-For local filesystem development `make appstore.frontend brand=cat` will pull the
-`helx-ui` image, start the container, copy the artifacts to your local filesystem
-in the frontend Django app, stop and remove the container. You can then run
-`make appstore.start brand=cat` which will run database migrations, execute
-`collectstatic` and start the appstore Django project for development and testing.
-
-If changes need to happen to the frontend artifacts (react components, etc) those
-changes will need to be done in the `helx-ui` repo which has instructions for
-developing the frontend and testing appstore integration.
-
->NOTE: helx-ui is now deployed with it's own Helm chart and runs in it's own
->container separate from appstore.
+Front-end changes (React components and so on) are made in `services/ui`,
+whose README covers developing it.
 
 ## Coordination of Development for Tycho and Appstore
 
->NOTE: Tycho is a library that provides a facility and API to manipulate launch and 
->get state information for kubernetes objects in a more simplistic manner.
->Appstore relies on this facility to launch apps as defined by an external 
->repository  and then later query/manager those objects afterwards.  Thus,
->Tycho is an Appstore dependency.  It's functionality is made available as
->a python package, and changes to tycho are accessed through an updated
->package.  During the development process this can be accomplished by either
->using a published package or using a locally created package.
+Tycho is a library that provides a facility and API to manipulate launch and
+get state information for kubernetes objects in a more simplistic manner.
+Appstore relies on this facility to launch apps as defined by an external
+repository (`helxplatform/helx-apps`) and then later query and manage those
+objects.
 
-### Install build support packages
-
-    pip install setuptools==53.0.0
-    pip install wheel==0.36.2
-    pip install twine==3.3.0
-
-### Publish a new tycho package
-
-#### Create a pypi account and establish credentials
-
-1. Log into pypi.org with credentials from helx-pypi-credentials.txt in Keybase
-2. Go to Account Settings->API Tokens and generate a new token
-  - don’t limit its scope to a new project
-  - copy the token before you exit the screen
-  - create a ~/.pypirc file with this content
-
-    [pypi]
-      username = __token__
-      password = <pypi-token>
-
-#### Publishing
-
-This will build Tycho with your updates and publish a package to pypi.org
-
-1.  Update version in /tycho.__init__.py
-
-Use the  .dev* suffix for test versions
-
-2. Publish from within the Tycho project folder.
-```
-python setup.py publish
-```
-
-#### Updating Appstore
- 
-1. Go to appstore code base and update tycho version in following files `requirements.txt` created in the publishing step
-
-2. Build and publish appstore
+Tycho is not a separate package. Its source is part of appstore, in
+`appstore/tycho`, and runs inside the appstore process. A Tycho change is an
+appstore image change: bump appstore's `appVersion` as described under
+Releases. That includes the Jinja templates in `appstore/tycho/template`, which
+Tycho renders into each app's Deployment and Service at launch time; they are
+not Helm templates.
 
 ## Cluster Kubernetes Config
 

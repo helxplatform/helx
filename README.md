@@ -4,7 +4,7 @@ This is the HeLxplatform monorepo. From July 2026 and onward all changes to the 
 
 Everything CI does can be run locally with the same scripts CI uses, so you can
 get a green answer before pushing. The CI internals are documented separately in
-[`.github/README.md`](.github/README.md); this section is the working developer's
+[`.github/CI.md`](.github/CI.md); this section is the working developer's
 view.
 
 ### Prerequisites
@@ -165,10 +165,18 @@ make pull-remotes           # every subtree in sequence
 ```
 
 `ambassador`, `pod-reaper`, and `resty` are not subtrees. Their charts were
-mirrored by content from subdirectories of `helxplatform/helx-chart`, which
-`git subtree` cannot map. That mirror was retired ahead of the monorepo
-cutover: these charts are maintained here now and have no upstream to pull
-from.
+vendored from subdirectories of `helxplatform/helx-chart` (`charts/<name>`),
+which `git subtree` cannot map. Each records the upstream commit it has
+incorporated in `services/<name>/UPSTREAM_COMMIT`, and a pull replays only the
+upstream commits since then, so local divergence survives:
+
+```bash
+make check-vendored-sync                # how far behind each one is
+make pull-vendored-chart NAME=resty     # or pull-vendored for all three
+```
+
+`resty` is deliberately ahead of upstream, so never replace it wholesale with
+an upstream copy. `make help-subtrees` covers resolving a replay that conflicts.
 
 After any upstream pull, run `validate-config`. An upstream chart version bump
 leaves the umbrella pin stale, which is a failure this will catch.

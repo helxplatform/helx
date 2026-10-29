@@ -3,3 +3,7 @@ chart/
 .git/
 .gitignore
 README.md
+# Agent guidance; never part of the build
+CLAUDE.md
+# Each hook is its own Go module and image; `go build .` never compiles them
+hooks/

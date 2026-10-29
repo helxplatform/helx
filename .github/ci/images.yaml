@@ -23,6 +23,9 @@ services:
     dockerfile: controller/Dockerfile
     # This chart reads controller.image.tag, not image.tag.
     tag_path: controller.image.tag
+    # Its build context is controller/, so the README and LICENSE beside it
+    # cannot reach the image.
+    sources: [controller]
   appstore-sockets:
     images:
       server: {}

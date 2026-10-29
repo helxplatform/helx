@@ -1,17 +1,25 @@
 # Agent guidance for helx
 
+New to this repository? Read [`AGENTSINIT.md`](AGENTSINIT.md) first: it explains
+what HeLx does, how the services fit together, and where everything is. This
+file holds the rules.
+
 ## Repository layout
 
 - This is a monorepo. Application and Helm sources live under `services/`; do not
   restructure service directories without asking for approval.
-- Buildable image services are:
+- `.github/ci/images.yaml` is the authoritative list of images. Buildable image
+  services are:
   - `services/appstore` (`appstore` image)
   - `services/appstore-prepuller/controller` (`appstore-prepuller` image)
   - `services/appstore-sockets` (`appstore-sockets/server` and `appstore-sockets/monitoring` images)
+  - `services/ldap-sync` (`ldap-sync` image; its `hooks/` images are not built by CI)
   - `services/ui` (`helx-ui` image, but we call it `ui` everywhere else in this repo)
-  - `services/user-mutator` (`user-mutator` image)
-- Other service directories are chart-only or utility/source-only. Helm charts
-  may be at the service root or under `services/<service>/chart/`.
+  - `services/user-mutator` (`user-mutator` image) and
+    `services/user-mutator/nslcd-sidecar` (`nslcd-sidecar` image)
+- Other service directories are chart-only or utility/source-only. Every
+  service chart lives at `services/<service>/chart/`; CI discovers charts only
+  there, plus `deploy/helm/helx-common/chart` and the umbrella.
 - The umbrella chart is `deploy/helm/helx-chart`.
 
 ## CI and image publishing
@@ -139,10 +147,11 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `services/<name>/UPSTREAM_COMMIT`. `make check-vendored-sync` reports how far
   behind each one is and lists what to run for each; it succeeds even when a
   chart is behind, since being behind an archived upstream is not a build
-  failure. `STRICT=1` makes it exit non-zero instead, which is how CI gates on
-  it (`check-subtree-sync` gates unconditionally; this one does not) and `make pull-vendored-chart NAME=<name>` replays only
-  the commits since that record onto `services/<name>/chart`, then restamps the
-  file. `pull-vendored` does all three. They are the vendored counterparts of
+  failure. `STRICT=1` makes it exit non-zero instead, for a caller that wants to
+  gate on it; `check-subtree-sync` always exits non-zero when a subtree is
+  behind. No workflow runs either check, so CI never notices drift from
+  upstream. `make pull-vendored-chart NAME=<name>` replays only the commits
+  since that record onto `services/<name>/chart`, then restamps the file. `pull-vendored` does all three. They are the vendored counterparts of
   `check-subtree-sync` and `pull-<name>`, and they never touch the repo root.
 - A replay is a three-way apply, so it preserves local divergence and leaves a
   genuine clash as conflict markers instead of discarding it. On conflict the
@@ -160,8 +169,8 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   apply's exit status when deciding whether a chart is really in sync.
 - `helx-chart` dependencies use the GHCR OCI registry, not the old GitHub Pages
   repository. OCI consumers need GHCR registry authentication.
-- Chart-only changes should not trigger an image build; image workflows exclude
-  nested `chart/` paths.
+- Chart-only changes should not trigger an image build; every image's default
+  `excludes` in `.github/ci/images.yaml` is its service's `chart/` directory.
 
 ## Validation and safety
 
@@ -186,8 +195,21 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `.github/scripts/helm-build-chart.sh` vendors each locked dependency itself,
   preferring an in-tree chart and pulling from the registry otherwise.
 - Validate workflow/action YAML and inspect project diagnostics after edits.
-- Preserve unrelated user changes, including untracked directories such as
-  `deployments/argocd/`; do not commit or create branches unless requested.
+- Preserve unrelated user changes, including untracked files and directories;
+  do not commit or create branches unless requested.
+- Never run anything against shared infrastructure, including read-only
+  queries: Harbor (`containers.renci.org`), ACR (`aisandboxrencitgt.azurecr.io`),
+  GHCR, and the `helxplatform/helm-charts` index. Test CI logic against
+  synthetic fixtures (locally packaged charts, `example.invalid` URLs); scripts
+  that touch a registry are for the user to run.
+- Cluster investigations are read-only: `get`, `describe`, and `logs`. Give the
+  user `exec`, restart, delete, and `helm upgrade` commands to run themselves,
+  and say what breaks if one goes wrong.
+- Before running a script, say what it does, what it writes, and what it
+  touches, rather than asking for approval of an opaque `bash script.sh`.
+- Runbooks and other procedure docs must read as timeless instructions: state
+  what to look for, never what a previous run printed or when it happened.
+  Temporary done markers are fine while someone is working through one.
 
 ## Other rules
 

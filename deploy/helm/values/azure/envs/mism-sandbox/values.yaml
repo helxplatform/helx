@@ -34,9 +34,13 @@ appstore-prepuller:
     brand: helx                                  # must equal the appstore brand (D7 option B)
 
 ldap-sync:
-  # searchBootstrap (get-groups / unc:app:renci:ai-sandbox:* / ou=groups,dc=unc,dc=edu)
-  # and config.source (ldaps://ldap.unc.edu/, bind cn=unc:app:renci:helx:ns) are
-  # inherited unchanged from the azure defaults (D5).
+  searchBootstrap:
+    # Set explicitly (D5): MISM syncs the AI Sandbox groups. The azure defaults
+    # filter is moving to unc:app:renci:internal:*. id (get-groups) and baseDN
+    # (ou=groups,dc=unc,dc=edu) are inherited from the azure defaults.
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+  # config.source (ldaps://ldap.unc.edu/, bind cn=unc:app:renci:helx:ns) is
+  # inherited unchanged from the azure defaults.
   config:
     hooks:                                       # list replaces the defaults' list, so restate it fully
     - name: unc-group-x

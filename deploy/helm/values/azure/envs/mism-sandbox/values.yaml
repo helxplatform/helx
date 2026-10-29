@@ -1,0 +1,81 @@
+# mism-sandbox on mism-test (unc-renci-services / mism-k8s) — helx develop 5.1.1-develop
+global:
+  imagePullSecrets: []            # Harbor helxplatform/* is anonymous here; ACR is unreachable
+
+appstore:
+  # djangoSettings: helx          # inherited from azure defaults (D7 option B)
+  global:
+    imageRegistry: containers.renci.org          # revert ACR override (Bitnami subchart images)
+  imagePostgresql:                               # revert ACR override to the develop chart default
+    registry: ""
+    repository: containers.renci.org/helxplatform/third-party/bitnami-postgresql
+    tag: 17.5.0-debian-12-r18
+  postgresql:
+    image:
+      registry: containers.renci.org
+      repository: helxplatform/third-party/bitnami-postgresql
+      tag: 17.5.0-debian-12-r18
+    volumePermissions:
+      image:
+        registry: containers.renci.org           # verified in A4 (2026-10-29)
+        repository: bitnami/os-shell
+        tag: 12-debian-12-r50
+  django:
+    ALLOW_SAML_LOGIN: "false"                    # D3: CILogon, not SAML
+    ALLOW_DJANGO_LOGIN: "true"                   # break-glass admin login
+  tycho:
+    externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
+  userStorage:
+    storageClass: azurefile-csi-nfs-pe           # NFS + private endpoint (R3, ACISITSM-3499)
+
+appstore-prepuller:
+  appRegistry:
+    branch: helx-mism-sandbox-azure              # D4
+    brand: helx                                  # must equal the appstore brand (D7 option B)
+
+ldap-sync:
+  # searchBootstrap (get-groups / unc:app:renci:ai-sandbox:* / ou=groups,dc=unc,dc=edu)
+  # and config.source (ldaps://ldap.unc.edu/, bind cn=unc:app:renci:helx:ns) are
+  # inherited unchanged from the azure defaults (D5).
+  config:
+    hooks:                                       # list replaces the defaults' list, so restate it fully
+    - name: unc-group-x
+      url: http://localhost:5001/hook
+      args: [--baseGid=1025, --baseGroup=helx-users]
+      image:
+        repository: containers.renci.org/helxplatform/unc-group-x   # revert ACR override
+        tag: v2.4.1
+
+resty:
+  image:
+    repository: containers.renci.org/helxplatform/third-party/openresty   # revert ACR override
+    tag: "1.21"
+  SSL:
+    nginxTLSSecret: ai-sb.renci.org-tls          # pre-issued 2026-10-29 (Certificate mism-sandbox/ai-sb.renci.org-tls)
+  ingress:
+    annotations:                                 # merged into the defaults' annotations
+      # Removed from azure defaults on develop (HTTP-01 solver vs AKS HTTPS-only policy).
+      # On mism-test that policy is dryrun and letsencrypt (HTTP-01) already issues certs.
+      cert-manager.io/cluster-issuer: letsencrypt
+  service:
+    serverName: ai-sb.renci.org
+
+ui:
+  config:
+    brand_name: helx                             # D7 option B
+    login_title: MISM Sandbox Workspaces
+    meta:
+      title: MISM Sandbox
+    brand_description:
+      html: |
+        <a href="https://helxplatform.github.io/">HeLx</a> empowers researchers to work with their
+        preferred tools and apps in the cloud at scale without installation or other infrastructure concerns.
+        <br />&nbsp;<br />
+        The MISM Sandbox is a deployment of HeLx for researchers and students to use and explore.
+    support:
+      help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9   # confirm MISM support URLs
+      user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
+
+# user-mutator.webhook.mode: create              # chart default on develop (azure defaults no longer set it); keep
+# No containerSecurityContext/securityContext overrides anywhere: chart defaults carry
+# allowPrivilegeEscalation: false, which the AKS deny policy requires.

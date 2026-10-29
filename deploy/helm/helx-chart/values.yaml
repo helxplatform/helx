@@ -50,6 +50,9 @@ user-mutator:
   # user-mutator.webhook.mode to saveToConfigMap. The chart then stores the
   # MutatingWebhookConfiguration manifest in a ConfigMap for a cluster admin
   # to apply, instead of creating it; the install notes print the command.
+  # Set it in the environment's values, not here, so the default stays create
+  # and an environment that forgets it fails on permissions instead of quietly
+  # changing mode.
 
 global:
   restartr_api_service_name: helx-restartr-api-service

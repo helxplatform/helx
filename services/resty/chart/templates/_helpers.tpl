@@ -86,7 +86,8 @@ Resolve the values used for the chart-managed basic-auth Secret.
 and `basicAuth.password` are the pre-2.0 spelling and still work: the entry is
 derived from them when `secret.values.auth` is unset. Deriving re-hashes on every
 render because bcrypt salts are random, so the Secret is rewritten on each
-upgrade, exactly as it was before; set `secret.values.auth` to pin it.
+upgrade, exactly as it was before; set `secret.values.auth` to pin it. Returns
+JSON, which fromJson reads back with every value intact.
 */}}
 {{- define "resty.basicAuthSecretValues" -}}
 {{- $values := deepCopy (default (dict) .Values.secret.values) -}}
@@ -104,5 +105,5 @@ upgrade, exactly as it was before; set `secret.values.auth` to pin it.
   {{- end -}}
   {{- $_ := set $values "auth" (htpasswd $username $password) -}}
 {{- end -}}
-{{- toYaml $values -}}
+{{- toJson $values -}}
 {{- end }}

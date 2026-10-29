@@ -161,17 +161,30 @@ Install note for webhook.mode saveToConfigMap; empty in every other case.
 Shared by this chart's NOTES.txt and the helx umbrella's, because Helm does not
 print a subchart's NOTES.txt by default. The umbrella calls it with a stand-in
 context holding only Values, Release, and Chart.Name, so keep it to those.
+
+The commands save the manifest to a file instead of piping it into kubectl
+apply. Anyone who can edit ConfigMaps in the namespace controls what the file
+holds, and the admin applies it with cluster-level permission, so it has to be
+read first.
 */}}
 {{- define "user-mutator.notes.webhookConfigMap" -}}
 {{- if and .Values.webhook.enabled (eq .Values.webhook.mode "saveToConfigMap") -}}
 The MutatingWebhookConfiguration was NOT created, because webhook.mode is saveToConfigMap.
-Deployments are not mutated until a cluster admin applies it:
+Deployments are not mutated until a cluster admin applies it. Anyone who can
+edit ConfigMaps in {{ .Release.Namespace }} can change the stored manifest, so the admin should
+save it to a file and read it before applying it:
 
   kubectl -n {{ .Release.Namespace }} get configmap {{ include "user-mutator.webhookName" . }} \
-    -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' | kubectl apply -f -
+    -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' > user-mutator-webhook.yaml
+  kubectl diff -f user-mutator-webhook.yaml
+  kubectl apply -f user-mutator-webhook.yaml
 
-Re-apply after any upgrade that changes the webhook settings or rotates the
-certificate; the ConfigMap is updated, the applied object is not.
+The file must hold a single MutatingWebhookConfiguration and nothing else. Its
+clientConfig.service.namespace must be {{ .Release.Namespace }}, and its namespaceSelector
+must list only namespaces the admin agreed to (by default just {{ .Release.Namespace }}).
+
+Re-apply the same way after any upgrade that changes the webhook settings or
+rotates the certificate; the ConfigMap is updated, the applied object is not.
 {{- end -}}
 {{- end -}}
 

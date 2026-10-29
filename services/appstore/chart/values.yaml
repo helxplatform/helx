@@ -271,6 +271,8 @@ django:
 
   # -- allowed domains to make post requests to the appstore
   CSRF_DOMAINS: "https://*.renci.org,https://*.renci.unc.edu"
+  # Enable the Secure flag on appstore's session cookie
+  DJANGO_COOKIE_SECURE: "true"
 
 saml:
   cache:

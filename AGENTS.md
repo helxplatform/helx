@@ -177,8 +177,9 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   released rather than increase on every change, and may not regress against the
   base (equal is fine). "Released" is the last `v*` tag for the umbrella, and the
   `version`/`appVersion` in `origin/main`'s `Chart.yaml` for service charts and
-  their images (`--release-ref`; a chart absent there has no floor, a missing ref
-  is an error, no registry is queried). Equal to the release is allowed only when
+  their images (`--release-ref`; a chart absent there has no floor, nor do the
+  images of a chart there without `appVersion`, a missing ref is an error, no
+  registry is queried). Equal to the release is allowed only when
   the packaged files are identical to it (main's tree, or the tag's for the
   umbrella), so merging a hotfix back needs no extra bump. The umbrella's
   dependency pins are still enforced. So only the first pull request after a

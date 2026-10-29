@@ -38,7 +38,7 @@ intentional, for two reasons:
   the service charts, so none of them can build while it is broken. During a
   build the library is packaged from this tree, not pulled from the registry,
   because each service chart pins exactly the in-tree version (`appstore` pins
-  `helx-common` `0.2.0`, which is what `deploy/helm/helx-common/chart` contains).
+  `helx-common` `0.2.1`, which is what `deploy/helm/helx-common/chart` contains).
 - Those service charts still name `oci://ghcr.io/helxplatform/helm-charts` as
   where `helx-common` comes from. On `main` the library is published there
   first, so the version a service chart names already exists in the registry by
@@ -47,7 +47,18 @@ intentional, for two reasons:
 ## CI validation
 
 `CI` runs on every pull request and on manual dispatch. Its stable
-branch-protection result is `CI gate`. Pushes to `develop` are handled by
+branch-protection result is `CI gate`. It passes only when every job succeeded;
+a skipped or cancelled job fails it, and it reports even when the run is
+cancelled, because branch protection would read a skipped gate as passing.
+
+Editing a pull request's title, description, or base branch reruns all of CI
+on the same commit (`edited` cannot be narrowed to base-branch changes before
+a run starts), and the newer run cancels the one in progress. The cancelled
+run's gate fails, and the newer run's gate replaces it once that run finishes,
+so the pull request shows red in between, never green. A run cancelled by hand
+stays red until it is re-run.
+
+Pushes to `develop` are handled by
 `Develop channel`, which repeats the same validation before publishing anything,
 so the two do not build the same images twice.
 

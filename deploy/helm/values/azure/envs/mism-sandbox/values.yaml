@@ -1,27 +1,11 @@
 # mism-sandbox on mism-test (unc-renci-services / mism-k8s) — helx develop 5.1.1-develop
-global:
-  imagePullSecrets: []            # Harbor helxplatform/* is anonymous here; ACR is unreachable
+# Images, pull secrets and the unc-group-x hook come from the chart defaults (Harbor);
+# only env-specific values are set here.
 
 appstore:
   # djangoSettings: helx          # inherited from azure defaults (D7 option B)
-  global:
-    imageRegistry: containers.renci.org          # revert ACR override (Bitnami subchart images)
-  imagePostgresql:                               # revert ACR override to the develop chart default
-    registry: ""
-    repository: containers.renci.org/helxplatform/third-party/bitnami-postgresql
-    tag: 17.5.0-debian-12-r18
-  postgresql:
-    image:
-      registry: containers.renci.org
-      repository: helxplatform/third-party/bitnami-postgresql
-      tag: 17.5.0-debian-12-r18
-    volumePermissions:
-      image:
-        registry: containers.renci.org           # verified in A4 (2026-10-29)
-        repository: bitnami/os-shell
-        tag: 12-debian-12-r50
   django:
-    ALLOW_SAML_LOGIN: "false"                    # D3: CILogon, not SAML
+    ALLOW_SAML_LOGIN: "false"                    # D3: Keycloak OIDC (realm mism), not SAML
     ALLOW_DJANGO_LOGIN: "true"                   # break-glass admin login
   tycho:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
@@ -36,24 +20,13 @@ appstore-prepuller:
 ldap-sync:
   searchBootstrap:
     # Set explicitly (D5): MISM syncs the AI Sandbox groups. The azure defaults
-    # filter is moving to unc:app:renci:internal:*. id (get-groups) and baseDN
+    # filter is unc:app:renci:internal:*. id (get-groups) and baseDN
     # (ou=groups,dc=unc,dc=edu) are inherited from the azure defaults.
     filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
   # config.source (ldaps://ldap.unc.edu/, bind cn=unc:app:renci:helx:ns) is
   # inherited unchanged from the azure defaults.
-  config:
-    hooks:                                       # list replaces the defaults' list, so restate it fully
-    - name: unc-group-x
-      url: http://localhost:5001/hook
-      args: [--baseGid=1025, --baseGroup=helx-users]
-      image:
-        repository: containers.renci.org/helxplatform/unc-group-x   # revert ACR override
-        tag: v2.4.1
 
 resty:
-  image:
-    repository: containers.renci.org/helxplatform/third-party/openresty   # revert ACR override
-    tag: "1.21"
   SSL:
     nginxTLSSecret: ai-sb.renci.org-tls          # pre-issued 2026-10-29 (Certificate mism-sandbox/ai-sb.renci.org-tls)
   ingress:
@@ -80,6 +53,7 @@ ui:
       help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9   # confirm MISM support URLs
       user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P
 
-# user-mutator.webhook.mode: create              # chart default on develop (azure defaults no longer set it); keep
+# user-mutator.webhook: mode create (chart default) and the admissions.enforcer/disabled
+# annotation (azure defaults) are inherited; keep.
 # No containerSecurityContext/securityContext overrides anywhere: chart defaults carry
 # allowPrivilegeEscalation: false, which the AKS deny policy requires.

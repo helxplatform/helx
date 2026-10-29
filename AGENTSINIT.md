@@ -6,11 +6,10 @@ in [`AGENTS.md`](AGENTS.md); when the two seem to disagree, `AGENTS.md` wins.
 
 ## What HeLx is
 
-HeLx lets researchers sign in through UNC single sign-on (SAML) and launch
-containerized tools, such as Jupyter, RStudio, VS Code, and browser desktops
-("webtop"), on Kubernetes. Each launched app gets the user's home directory
-and their LDAP identity (uid, gid, groups), so files keep the right owner
-across apps.
+HeLx lets researchers sign in and launch containerized tools, such as
+Jupyter, RStudio, VS Code, and browser desktops ("webtop"), on Kubernetes.
+Each launched app gets the user's home directory and their LDAP identity
+(uid, gid, groups), so files keep the right owner across apps.
 
 The whole platform is deployed as one Helm chart, the umbrella `helx` in
 `deploy/helm/helx-chart`. The umbrella's `version` is the HeLx release number:

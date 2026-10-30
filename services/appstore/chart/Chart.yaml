@@ -12,12 +12,14 @@ description: A Helm chart for Kubernetes
 type: application
 # This is the chart version. This version number should be incremented each time you make changes
 # to the chart and its templates, including the app version.
-version: 6.0.7
+version: 6.0.8
 # This is the version number of the application being deployed. This version
 # number should be incremented each time you make changes to the application.
 # 4.4.1 is the released appstore image carrying the Ambassador-removal changes
 # (private_route resolver, APP_ROUTING_MODE, SECURE_PROXY_SSL_HEADER).
-appVersion: 4.4.4
+# 4.4.5 bumps the base image to python:3.12.16-alpine (off EOL 3.10) and pins
+# certifi==2026.10.23 to drop the compromised eMudhra CAs (CVE-2026-111943).
+appVersion: 4.4.5
 dependencies:
   - name: helx-common
     version: "0.2.1"

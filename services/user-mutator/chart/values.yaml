@@ -209,6 +209,14 @@ webhook:
   # secret.mode is not generate.
   caBundle: ""
 
+  # -- Annotations on the configuration. On AKS, set
+  # {admissions.enforcer/disabled: "true"} so the Admissions Enforcer leaves
+  # namespaceSelector alone; otherwise it takes ownership of that field and
+  # every later server-side apply fails with a conflict. The selector's
+  # kubernetes.io/metadata.name clause already keeps the webhook to the listed
+  # namespaces.
+  annotations: {}
+
   # -- Optional additional namespaceSelector matchLabels. Set this to
   # {enable-<webhook.name>: "true"} to keep the historical opt-in label as a
   # per-namespace toggle.

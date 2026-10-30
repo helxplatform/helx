@@ -1,6 +1,7 @@
 appstore:
   DEBUG: "true"
   logLevel: DEBUG
+  djangoSettings: ai_sandbox
   saml:
     ASSERTION_URL: https://ai-sandbox-test.renci.org
     ENTITY_ID: https://ai-sandbox-test.renci.org
@@ -10,6 +11,12 @@ appstore-prepuller:
   appRegistry:
     branch: helx-ai-sandbox-test-azure
     brand: ai_sandbox
+global:
+  imagePullSecrets:
+  - aisandboxrencitgt-creds
+ldap-sync:
+  searchBootstrap:
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
 resty:
   SSL:
     nginxTLSSecret: ai-sandbox-test.renci.org-tls
@@ -28,7 +35,7 @@ ui:
         <br />&nbsp;<br />
         The AI Sandbox is a deployment of HeLx and has been stood up for researchers and students to use
         and explore the capabilities of HeLx. This is the test deployment of the AI Sandbox.
-    brand_name: ai_sandbox
+    brand_name: helx
     default_space: workspaces
     hidden_result_tabs: cdes
     login_title: RENCI AI Sandbox Test Workspaces
@@ -44,8 +51,6 @@ ui:
     workspaces:
       enabled: "true"
 user-mutator:
-  secret:
-    existingSecret: ""
   config:
     userProfiles:
       enabled: true
@@ -57,23 +62,12 @@ user-mutator:
             - configmapName: app-environment-config
           volumes:
             volumeSources:
-              - name: postgres-info
-                source: secret://(.*)-pguser-{{ .username }}
               - name: azure-codex-config
                 source: configmap://azure-codex-config
               - name: biome-model-config
                 source: configmap://biome-model-config
             volumeMounts:
-              - name: postgres-info
-                mountPath: /var/run/helx/postgres/{{ index .cap 0 }}
               - name: azure-codex-config
                 mountPath: /etc/codex
               - name: biome-model-config
                 mountPath: /etc/bdf-pz
-    features:
-      ldap:
-        host: openldap
-        port: 389
-        username: "cn=admin,dc=example,dc=org"
-        user_base_dn: "ou=users,dc=example,dc=org"
-        group_base_dn: "ou=groups,dc=example,dc=org"

@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -51,13 +51,14 @@ jobs:
         shell: bash
         env:
           BASE_SHA: ${{ github.event.before || format('{0}^', github.sha) }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           if [[ "$BASE_SHA" =~ ^0+$ ]]; then
             echo 'No previous develop commit to compare against.'
           else
             python .github/scripts/ci.py check-versions --base "$BASE_SHA" \
-              --umbrella-above-release
+              --above-release --release-ref "origin/$DEFAULT_BRANCH"
           fi
       - name: Install actionlint 1.7.12
         shell: bash
@@ -76,7 +77,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -97,7 +98,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -122,7 +123,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -143,7 +144,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -178,7 +179,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -205,7 +206,7 @@ jobs:
       chart-version: ${{ steps.candidate.outputs.chart-version }}
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -254,6 +255,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # Only success passes. No job here skips on purpose: the image matrix
+      # always lists every image, and this workflow never cancels a run for a
+      # newer one. So a skipped job means something it needs failed, or a
+      # condition skipped it by mistake, and the channel was not published.
       - name: Require every develop job to pass
         shell: bash
         env:
@@ -280,7 +285,7 @@ jobs:
             name=${status%%|*}
             result=${status#*|}
             printf '%-30s %s\n' "$name" "$result"
-            if [[ "$result" != success && "$result" != skipped ]]; then
+            if [[ "$result" != success ]]; then
               echo "::error::$name finished with result: $result"
               failed=1
             fi

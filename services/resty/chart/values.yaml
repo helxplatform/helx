@@ -26,6 +26,12 @@ service:
   serverName: _
   # nodePort: 31337
 
+# -- Container securityContext, applied to every container this chart renders.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+
 resources:
   limits:
     cpu: 100m
@@ -139,16 +145,13 @@ stubStatus:
 dnsResolver: kube-dns.kube-system.svc.cluster.local
 
 global:
-  ambassador_service_name: ambassador
-  dug_web_service_name: dug-web
-  dug_search_client_service_name: dug-search-client
   restartr_api_service_name: restartr-api-service
   # -- PROTOTYPE (ambassador removal): direct backend service names that
   # were previously reached only through the "ambassador" service.
-  # appstore_service_name / ui_service_name: leave null to auto-derive — the
-  # bare chart name ("appstore"/"ui") when resty is deployed on its own, or
-  # "<release>-appstore"/"<release>-ui" when deployed as a subchart of the
-  # umbrella. Set explicitly only if your Service names differ.
+  # appstore_service_name / ui_service_name: leave null to use the bare chart
+  # name ("appstore"/"ui"), which is what those charts name their Service. Set
+  # explicitly only when appstore.fullnameOverride or ui.fullnameOverride is
+  # set, to the same value.
   appstore_service_name:
   ui_service_name:
   appstore_sockets_service_name: appstore-sockets-service

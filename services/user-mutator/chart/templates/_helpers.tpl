@@ -24,6 +24,15 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{/*
+Name of the chart's Service: the bare chart name, not "<release>-<chart>",
+so other components can address it at a fixed name. fullnameOverride still
+takes over, which lets two releases share a namespace.
+*/}}
+{{- define "user-mutator.serviceName" -}}
+{{- default .Chart.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "user-mutator.chart" -}}
@@ -148,6 +157,38 @@ from colliding. Set webhook.name to adopt an existing configuration.
 {{- end -}}
 
 {{/*
+Install note for webhook.mode saveToConfigMap; empty in every other case.
+Shared by this chart's NOTES.txt and the helx umbrella's, because Helm does not
+print a subchart's NOTES.txt by default. The umbrella calls it with a stand-in
+context holding only Values, Release, and Chart.Name, so keep it to those.
+
+The commands save the manifest to a file instead of piping it into kubectl
+apply. Anyone who can edit ConfigMaps in the namespace controls what the file
+holds, and the admin applies it with cluster-level permission, so it has to be
+read first.
+*/}}
+{{- define "user-mutator.notes.webhookConfigMap" -}}
+{{- if and .Values.webhook.enabled (eq .Values.webhook.mode "saveToConfigMap") -}}
+The MutatingWebhookConfiguration was NOT created, because webhook.mode is saveToConfigMap.
+Deployments are not mutated until a cluster admin applies it. Anyone who can
+edit ConfigMaps in {{ .Release.Namespace }} can change the stored manifest, so the admin should
+save it to a file and read it before applying it:
+
+  kubectl -n {{ .Release.Namespace }} get configmap {{ include "user-mutator.webhookName" . }} \
+    -o jsonpath='{.data.mutating-webhook-configuration\.yaml}' > user-mutator-webhook.yaml
+  kubectl diff -f user-mutator-webhook.yaml
+  kubectl apply -f user-mutator-webhook.yaml
+
+The file must hold a single MutatingWebhookConfiguration and nothing else. Its
+clientConfig.service.namespace must be {{ .Release.Namespace }}, and its namespaceSelector
+must list only namespaces the admin agreed to (by default just {{ .Release.Namespace }}).
+
+Re-apply the same way after any upgrade that changes the webhook settings or
+rotates the certificate; the ConfigMap is updated, the applied object is not.
+{{- end -}}
+{{- end -}}
+
+{{/*
 Validate the webhook TLS ownership mode. generate is chart-specific, while the
 other modes use the shared helx-common contract.
 */}}
@@ -210,12 +251,36 @@ narrower rule.
 {{- end -}}
 
 {{/*
+Annotation on the chart-generated TLS Secret recording the Service name its
+certificate was issued for.
+*/}}
+{{- define "user-mutator.webhookCertServiceAnnotation" -}}
+user-mutator.helxplatform.io/service-name
+{{- end -}}
+
+{{/*
+Whether the chart-generated TLS Secret already in the cluster can keep serving
+the webhook, as "true" or "". The certificate's SANs name the Service, so it is
+only valid while the Service keeps that name. A Secret without the annotation
+predates it and was issued for "<release>-user-mutator", so it is replaced too.
+*/}}
+{{- define "user-mutator.webhookCertReusable" -}}
+{{- $existing := default (dict) (lookup "v1" "Secret" .Release.Namespace (include "user-mutator.tlsManagedSecretName" .)) -}}
+{{- $data := default (dict) (get $existing "data") -}}
+{{- $issuedFor := dig "metadata" "annotations" (include "user-mutator.webhookCertServiceAnnotation" .) "" $existing -}}
+{{- if and (get $data "tls.crt") (get $data "tls.key") (get $data "ca.crt") (eq $issuedFor (include "user-mutator.serviceName" .)) -}}
+true
+{{- end -}}
+{{- end -}}
+
+{{/*
 Resolve the webhook certificate material, returning base64-encoded tls.crt,
 tls.key, and ca.crt.
 
-Persisted material always wins, so an upgrade never rotates the certificate out
-from under a MutatingWebhookConfiguration that already carries the matching CA
-bundle. The lookup is unconditional rather than gated on Release.IsUpgrade so
+Persisted material wins as long as it was issued for the current Service name
+(see user-mutator.webhookCertReusable), so an upgrade never rotates the
+certificate out from under a MutatingWebhookConfiguration that already carries
+the matching CA bundle. The lookup is unconditional rather than gated on Release.IsUpgrade so
 that a Secret retained by helm.sh/resource-policy: keep is reused after a
 delete and reinstall.
 
@@ -225,16 +290,11 @@ inspected, never applied, but it does mean rendering the chart twice offline
 produces two different certificates.
 */}}
 {{- define "user-mutator.webhookCertData" -}}
-{{- $secretName := include "user-mutator.tlsManagedSecretName" . -}}
-{{- $existing := default (dict) (lookup "v1" "Secret" .Release.Namespace $secretName) -}}
-{{- $data := default (dict) (get $existing "data") -}}
-{{- $crt := default "" (get $data "tls.crt") -}}
-{{- $key := default "" (get $data "tls.key") -}}
-{{- $ca := default "" (get $data "ca.crt") -}}
-{{- if and $crt $key $ca -}}
-  {{- dict "tls.crt" $crt "tls.key" $key "ca.crt" $ca | toYaml -}}
+{{- if include "user-mutator.webhookCertReusable" . -}}
+  {{- $existing := lookup "v1" "Secret" .Release.Namespace (include "user-mutator.tlsManagedSecretName" .) -}}
+  {{- pick $existing.data "tls.crt" "tls.key" "ca.crt" | toYaml -}}
 {{- else -}}
-  {{- $serviceName := include "user-mutator.fullname" . -}}
+  {{- $serviceName := include "user-mutator.serviceName" . -}}
   {{- $namespace := .Release.Namespace -}}
   {{- $altNames := list
     $serviceName

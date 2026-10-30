@@ -18,7 +18,7 @@ USER_MUTATOR_URL                ?= https://github.com/helxplatform/user-mutator.
 APPSTORE_PREFIX                 ?= services/appstore
 APPSTORE_BRANCH                 ?= master
 APPSTORE_CHART_PREFIX           ?= services/appstore/chart
-APPSTORE_CHART_BRANCH           ?= develop
+APPSTORE_CHART_BRANCH           ?= main
 APPSTORE_PREPULLER_PREFIX       ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH       ?= main
 APPSTORE_SOCKETS_PREFIX         ?= services/appstore-sockets
@@ -63,7 +63,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 # Defaults for the developer-facing targets. All are overridable on the command
 # line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked --umbrella-above-release
+CHECK_VERSIONS_FLAGS            ?= --include-untracked --above-release
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -140,9 +140,10 @@ HELM_FLAGS                      ?=
 # volumeClaimTemplates, which helm never owned in the first place. Names the
 # charts build out of the release name are written with $(RELEASE); the rest are
 # fixed by whichever chart creates them. Set either variable empty to leave that
-# kind of resource alone.
+# kind of resource alone. The shared user storage claim stdnfs is deliberately
+# not in the default: it holds every user's home directory, so deleting it has
+# to be asked for by name, e.g. UNINSTALL_PVCS="stdnfs ...".
 UNINSTALL_PVCS                  ?= appstore-postgresql-pvc \
-                                   stdnfs \
                                    data-$(RELEASE)-postgresql-0 \
                                    data-$(RELEASE)-ldap-sync-postgres-0 \
                                    data-openldap-0
@@ -907,6 +908,10 @@ ci-validate-everything: $(PYTHON_READY)
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
+	@# --above-release reads the release floor from origin/main and the v* tags.
+	@# A stale copy sets the floor too low, so a local pass could fail in CI.
+	@git fetch --quiet origin main 2>/dev/null || \
+		echo "warning: could not fetch origin main; the release floor may be stale." >&2
 	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
 
 # ci-tests: Run the unit tests for the CI helpers. [PYTHON, VENV]

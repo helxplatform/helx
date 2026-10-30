@@ -25,6 +25,8 @@ spec:
             - name: controller
               image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
               imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
               env:
                 - name: PREPULLER_DAEMONSET_NAME
                   value: {{ include "appstore-prepuller.daemonsetName" . }}

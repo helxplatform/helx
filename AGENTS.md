@@ -1,8 +1,12 @@
 # Agent guidance for helx
 
-New to this repository? Read [`AGENTSINIT.md`](AGENTSINIT.md) first: that file explains
-what HeLx does, how the services fit together, and where everything is. This
-file holds the rules.
+Read [`AGENTSINIT.md`](AGENTSINIT.md) before starting work here: that file
+explains what HeLx does, how the services fit together, and where everything
+is. You may skip it for a small, specific change the user asked for whose
+effects stay where you make them, such as fixing a typo in a comment or
+renaming a local variable. A change to a values file or a `Chart.yaml` never
+qualifies; read its "Traps" section at least. This file holds the rules, and
+they apply either way.
 
 ## Working in the repository
 

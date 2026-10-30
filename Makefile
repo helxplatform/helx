@@ -235,7 +235,7 @@ help:
 	@echo
 	@echo 'More help:'
 	@echo '  make help-subtrees    Pulling service subtrees, mirroring vendored charts'
-	@echo '  make help-ci          Checks and lock maintenance that mirror CI'
+	@echo '  make help-ci          Checks that mirror CI'
 	@echo '  make help-build       Building and inspecting service charts and images'
 	@echo '  make help-local-dev   Building, deploying, and tearing down local builds'
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
@@ -247,7 +247,7 @@ help-subtrees:
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
-#help-ci: Show the CI-shaped checks and lock-maintenance targets
+#help-ci: Show the CI-shaped checks
 help-ci:
 	@awk -f $(HELP_AWK) -v topic=ci $(THIS_MAKEFILE)
 	@echo
@@ -672,11 +672,12 @@ add-vendored-remote:
 # check-vendored-sync: Report whether each vendored chart still matches the
 # upstream subdirectory it was taken from. Read-only: it fetches and compares,
 # and never merges or edits files. Succeeds even when a chart is behind, so it
-# reads as the status report it is; STRICT=1 exits non-zero instead, which is
-# how CI gates on it. "local edits" means the chart also differs from upstream
-# at its recorded commit, so a pull may conflict; it is the expected state for
-# resty. Like check-versions, this compares committed content, so an
-# uncommitted or staged chart edit is invisible to it.
+# reads as the status report it is; STRICT=1 exits non-zero instead, for a
+# caller that wants to gate on it (no workflow runs this target). "local edits"
+# means the chart also differs from upstream at its recorded commit, so a pull
+# may conflict; it is the expected state for resty. Like check-versions, this
+# compares committed content, so an uncommitted or staged chart edit is
+# invisible to it.
 # [HELX_CHART_URL, HELX_CHART_BRANCH, VENDORED_CHARTS, STRICT]
 check-vendored-sync: add-vendored-remote
 	@set -euo pipefail; \
@@ -974,6 +975,7 @@ pull-develop:
 		exit 1; \
 	fi; \
 	GIT_EDITOR=true git commit --no-edit
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 # Recreate generated locks, then stage only locks that were unmerged before
 # regeneration. Ordinary stale locks remain unstaged, as before.
@@ -989,6 +991,7 @@ define sync-lock-and-resolve
 	fi
 endef
 
+##@ locks Chart.lock maintenance
 # sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
 # Charts without dependencies are skipped rather than treated as an error.
 # [PYTHON, VENV]
@@ -1007,7 +1010,6 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
-##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ build Building and inspecting one service
 # build-chart SERVICE=<name>: Vendor dependencies, lint, and package one

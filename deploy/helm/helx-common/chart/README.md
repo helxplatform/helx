@@ -9,33 +9,45 @@ Add the published library dependency to a service chart:
 ```yaml
 dependencies:
   - name: helx-common
-    version: "0.1.1"
+    version: "0.2.1"
     repository: "oci://ghcr.io/helxplatform/helm-charts"
 ```
 
-Commit the resulting `Chart.lock`, but do not commit generated dependency
-archives under `charts/`. CI publishes `helx-common` before service charts. For
-pull requests and first publication of a new version, CI substitutes an exact
-name-and-version match from this repository while assembling dependencies; the
-committed metadata remains OCI-based.
+Pin exactly the version in this repository's `Chart.yaml`; `validate-config`
+rejects any other pin. Regenerate the consumer's `Chart.lock` with
+`make sync-locks` rather than `helm dependency update`, and do not commit
+generated dependency archives under `charts/`. When CI or `make build-chart`
+assembles dependencies, the chart in this repository is used in place of the
+published one whenever its name and version match, so a new version works
+before it is published; the committed metadata remains OCI-based.
 
 ## Secret helpers
 
 `helx-common.secret.resources.v1` implements one Secret contract with three
-mutually exclusive ownership modes:
+ownership modes. The consumer must choose one with `secret.mode`; rendering
+fails when it is unset:
 
-1. A chart-managed Secret bootstrapped from values.
-2. A caller-managed Secret selected with `existingSecret`.
-3. An ESO-managed Secret selected with `secret.externalSecret.enabled`.
+1. `values`: a chart-managed Secret bootstrapped from `secret.values`.
+2. `existingSecret`: a caller-managed Secret named by `secret.existingSecret`.
+3. `externalSecret`: an ESO-managed Secret described by `secret.externalSecret`.
+
+Settings that belong to a mode other than the selected one are errors, not
+silently ignored: a non-empty `existingSecret` outside `existingSecret` mode,
+`externalSecret.enabled: true` outside `externalSecret` mode, or non-empty
+`values` outside `values` mode. `externalSecret.enabled` does not select ESO;
+only `mode` does.
 
 It also supports optional cluster-aware migration from a differently named
-legacy Secret. Persisted data is normalized using caller-provided key renames,
-and values only fill keys absent from persisted data.
+legacy Secret. Persisted data is normalized using caller-provided key renames.
+By default, values only fill keys absent from persisted data, so changing a
+value in `secret.values` does not change a key the live Secret already holds;
+see `preserveKeys` below.
 
 Consumers use one standard values block:
 
 ```yaml
 secret:
+  mode: values
   existingSecret: ""
   values: {}
   externalSecret:
@@ -65,6 +77,8 @@ configuration explicitly:
 {{- include "helx-common.secret.resources.v1" (dict
   "root" .
   "defaultName" (printf "%s-secrets" (include "example.fullname" .))
+  "mode" .Values.secret.mode
+  "secretValueBlockPath" "secret"
   "existingSecret" .Values.secret.existingSecret
   "values" .Values.secret.values
   "externalSecret" .Values.secret.externalSecret
@@ -73,6 +87,13 @@ configuration explicitly:
   "requiredKeys" (list "EXAMPLE_API_KEY")
 ) -}}
 ```
+
+`secretValueBlockPath` is the values path shown in error messages, for a chart
+whose block is not at `secret`. A chart that builds extra Secret values from
+other configuration, such as a bundled database's settings, should build them
+only when `helx-common.secret.mode.v1` (same `mode`, `existingSecret`, and
+`externalSecret` arguments) returns `values`, since passing values in another
+mode fails.
 
 Set `secret.externalSecret.targetName` when ESO should use a target distinct
 from the chart-managed Secret, for example during an explicit ownership
@@ -127,6 +148,7 @@ Workloads resolve the selected name with:
 ```gotemplate
 {{- include "helx-common.secret.name.v1" (dict
   "defaultName" (printf "%s-secrets" (include "example.fullname" .))
+  "mode" .Values.secret.mode
   "existingSecret" .Values.secret.existingSecret
   "externalSecret" .Values.secret.externalSecret
 ) -}}

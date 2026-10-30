@@ -1442,10 +1442,11 @@ class HelpLayoutTests(unittest.TestCase):
                 "pre-push",
                 "install-hooks",
                 "pull-develop",
-                "sync-locks",
-                "sync-helx-lock",
-                "check-locks",
             ),
+        ),
+        (
+            "##@ locks Chart.lock maintenance",
+            ("sync-locks", "sync-helx-lock", "check-locks"),
         ),
         (
             "##@ build Building and inspecting one service",
@@ -1488,7 +1489,11 @@ class HelpLayoutTests(unittest.TestCase):
             self.assertEqual(found, list(targets), marker)
 
         self.assertEqual(starts, sorted(starts))
-        for target, topic in (("help-build", "build"), ("help-local-dev", "local-dev")):
+        for target, topic in (
+            ("help-locks", "locks"),
+            ("help-build", "build"),
+            ("help-local-dev", "local-dev"),
+        ):
             with self.subTest(target=target):
                 self.assertRegex(
                     text,

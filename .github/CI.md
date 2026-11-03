@@ -285,6 +285,12 @@ services/*/chart                service charts
 Adding a service chart under that layout automatically adds it to validation and
 publication.
 
+All three workflows handle charts through
+[`actions/publish-charts`](actions/publish-charts/action.yml). Each use of it
+builds, lints, and packages one chart with
+[`scripts/helm-build-chart.sh`](scripts/helm-build-chart.sh), and publishes it
+when asked.
+
 ### Dependency rules
 
 - A chart with dependencies must commit `Chart.lock`.
@@ -352,6 +358,13 @@ umbrella once with its own defaults and once for every environment under
 what a chart defaults to. Other platforms do not enforce the policy and are not
 rendered; `PRIVILEGE_ESCALATION_PLATFORMS` in `scripts/ci.py` lists the ones
 that are.
+
+Each chart kept the values key that already reached its containers, so the name
+differs. ambassador, ldap-sync, ui, and user-mutator call it `securityContext`;
+appstore, appstore-prepuller, appstore-sockets, pod-reaper, and resty call it
+`containerSecurityContext`; helx-ldap sets it in the values it passes to its
+openldap subchart. appstore-sockets also has a `securityContext` value that no
+template reads, so setting it has no effect.
 
 The renders layer the umbrella's lint values (see
 [Lint values](#lint-values)), then the platform defaults and environment

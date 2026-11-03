@@ -6,10 +6,11 @@ metadata:
   labels:
     {{- include "ldap-sync.labels" . | nindent 4 }}
 spec:
-  # Select the postgres pod deployed by the subchart
+  # Select the postgres pod deployed by the subchart, which takes its name
+  # label from postgres.nameOverride (ldap-sync-postgres by default).
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: postgres
+      app.kubernetes.io/name: {{ .Values.postgres.nameOverride | default "postgres" }}
       app.kubernetes.io/instance: {{ .Release.Name }}
   policyTypes:
     - Ingress

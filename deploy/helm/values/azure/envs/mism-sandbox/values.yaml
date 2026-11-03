@@ -11,6 +11,11 @@ appstore:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
   userStorage:
     storageClass: azurefile-csi-nfs-pe           # NFS + private endpoint (R3, ACISITSM-3499)
+  security:
+    # mism-test enforces NetworkPolicy, and launched apps may only egress to
+    # DNS and non-private addresses. Their nslcd sidecar needs openldap.
+    appEgressAllowedPods:
+    - app.kubernetes.io/name: openldap
 
 appstore-prepuller:
   appRegistry:

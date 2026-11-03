@@ -13,12 +13,15 @@ appstore:
     storageClass: azurefile-csi-nfs-pe           # NFS + private endpoint (R3, ACISITSM-3499)
   postgresql:
     persistence:
-      # The appstore chart creates this RWX claim (appstore-postgresql-pvc) for
-      # postgresql.persistence.existingClaim, which the bitnami postgresql 16
-      # subchart no longer reads; its data lives on data-<release>-postgresql-0.
-      # On the default Azure Disk class (WaitForFirstConsumer, RWO) the unused
-      # claim never binds and every `helm --wait` times out. Azure Files binds
-      # it immediately.
+      # Workaround so `helm --wait` can finish. The appstore chart always creates
+      # appstore-postgresql-pvc, meant as postgres' data volume, but the bundled
+      # bitnami postgresql chart ignores it and keeps its data on its own volume,
+      # data-<release>-postgresql-0. Nothing ever mounts appstore-postgresql-pvc,
+      # so on the default Azure Disk class, which only provisions once a pod uses
+      # the claim, it stays Pending and every install or upgrade times out.
+      # Azure Files provisions right away, so the claim binds. It stays empty.
+      # On an existing release, delete the unbound claim before upgrading: a
+      # claim's storage class can't change after creation.
       storageClass: azurefile-csi
   security:
     # mism-test enforces NetworkPolicy, and launched apps may only egress to

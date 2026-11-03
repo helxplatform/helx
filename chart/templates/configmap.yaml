@@ -20,6 +20,7 @@ data:
       max_retries: {{ .Values.config.hookRetry.maxRetries | default 10 }}
       initial_delay_ms: {{ .Values.config.hookRetry.initialDelayMs | default 100 }}
       max_delay_ms: {{ .Values.config.hookRetry.maxDelayMs | default 30000 }}
+    min_refresh: {{ .Values.config.minRefresh | default 60 }}
     source:
       url: {{ .Values.config.source.url | quote }}
       bind_dn: {{ .Values.config.source.bindDN | quote }}

@@ -80,6 +80,8 @@ affinity: {}
 loglevel: "info"
 config:
   hooks: []
+  # Floor, in seconds, applied to every search refresh interval.
+  minRefresh: 60
   hookRetry:
     maxRetries: 10
     initialDelayMs: 100

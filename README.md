@@ -208,6 +208,31 @@ startup delays (e.g., when hook sidecars are still initializing):
 This ensures hooks have time to start before the main application
 begins processing entries.
 
+### Source Connection and Polling
+
+All searches share a single bound connection to the source LDAP, so the
+number of binds (authentications against the source) scales with reconnects,
+not with the number of searches or how often they poll.
+
+```yaml
+min_refresh: 60   # Floor in seconds for every search's refresh interval (default: 60)
+```
+
+- A refresh interval below `min_refresh`, whether requested through the API
+  or by a hook's derived search, is raised to `min_refresh`
+- Poll intervals are jittered by ±10% so searches do not poll in lockstep
+- After a failed connect or bind, no new attempt is made for a backoff
+  period shared by all searches: 10s, doubling up to 5 minutes. Rejected
+  credentials go straight to the 5-minute backoff
+- A derived search re-emitted by a hook with an unchanged spec keeps
+  running; it is only restarted when its filter, refresh, base DN or
+  one-shot flag changes
+- Entries are compared ignoring the order of values within multi-valued
+  attributes, so server-side value reordering is not treated as a change
+
+The bundled hooks (`unc-group-x`, `ordrd-group-x`) request a 300 second
+refresh for their derived searches by default; override with `--refresh`.
+
 ### Database Persistence
 
 Enable PostgreSQL persistence for searches:

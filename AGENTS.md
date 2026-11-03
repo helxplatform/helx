@@ -99,8 +99,9 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `helm dependency update`; `--check` verifies without writing. The digest
   reproduces Helm's `resolver.HashReq` and is covered by a test using a
   helm-generated lock as the oracle.
-- `check-versions` runs on every pull request, not just those targeting the
-  default branch, and on direct pushes to `develop`.
+- Run `check-versions` only on pull requests into `main` or `develop` and on
+  pushes to them. Do not add it to pull requests into other branches: their
+  changes are checked when that branch reaches `develop` or `main`.
 - A version bump is only required when a changed file can affect the artifact.
   Charts consult their own `.helmignore`, images consult `excludes` in
   `.github/ci/images.yaml` plus the build context's `.dockerignore`. So editing
@@ -109,13 +110,21 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
   `templates/`. `validate-config` enforces both, and also rejects `.dockerignore`
   negation or `**`, which the gate cannot reason about.
-- On pull requests that do not target the default branch, and on direct pushes to
-  `develop`, versions are judged with `--above-release` (old name
-  `--umbrella-above-release` still works): each must sit strictly above what is
-  released rather than increase on every change, and may not regress against the
-  base (equal is fine). "Released" is the last `v*` tag for the umbrella, and the
-  `version`/`appVersion` in `origin/main`'s `Chart.yaml` for service charts and
-  their images (`--release-ref`; a chart absent there has no floor, nor do the
+- `check-versions` has one rule: each changed version must sit strictly above
+  what is released, and may not regress against the base (equal is fine).
+  `--above-release` and its old name `--umbrella-above-release` are accepted
+  but no longer change anything. What is released is read from `--release-ref`:
+  on `main`, pull requests and pushes alike pass the base commit itself, so
+  every change must increase over it. Never let a check there read the release
+  from `origin/main`, which after a push is the commit being checked. On pull
+  requests into `develop`, and on direct pushes to `develop`, the release ref
+  is `origin/main`, so a version need only sit above what main has released
+  rather than increase on every change.
+  "Released" is, for the umbrella, the highest `v*` tag in the release ref's
+  history whose `deploy/helm/helx-chart/Chart.yaml` carries that `version:`
+  (other `v*` tags, such as subtree upstreams' own, are ignored), and the
+  `version`/`appVersion` in the release ref's `Chart.yaml` for service charts
+  and their images (a chart absent there has no floor, nor do the
   images of a chart there without `appVersion`, a missing ref is an error, no
   registry is queried). Equal to the release is allowed only when
   the packaged files are identical to it (main's tree, or the tag's for the
@@ -123,7 +132,7 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   dependency pins are still enforced. So only the first pull request after a
   release picks each next version. Raising the umbrella starts publishing a new
   `<version>-develop` channel automatically, since the candidate tag derives
-  from it. Never pass that flag on the default branch.
+  from it.
 - `check-versions` compares committed revisions, so an uncommitted or untracked
   chart file is invisible to it.
 - Prefer fixing the ignore file over adding a CI exception. If a file never

@@ -985,7 +985,7 @@ class UntrackedChangeTests(GitFixtureTest):
             # Committed history alone shows nothing to gate on.
             ci.check_versions(self.root, "develop")
             with self.assertRaises(ci.CIError) as raised:
-                ci.check_versions(self.root, "develop", include_untracked=True)
+                ci.check_versions(self.root, "develop", include_untracked=True, release_ref="develop")
 
         self.assertEqual(
             str(raised.exception),
@@ -1010,7 +1010,7 @@ class UntrackedChangeTests(GitFixtureTest):
             patch.object(ci, "load_images_config", return_value=empty),
             self.assertRaises(ci.CIError) as raised,
         ):
-            ci.check_versions(self.root, "develop", include_untracked=True)
+            ci.check_versions(self.root, "develop", include_untracked=True, release_ref="develop")
 
         self.assertEqual(
             str(raised.exception),
@@ -1035,10 +1035,10 @@ class UntrackedChangeTests(GitFixtureTest):
             patch.object(ci, "load_images_config", return_value=empty),
             self.assertRaises(ci.CIError) as raised,
         ):
-            ci.check_versions(self.root, "develop", include_untracked=True)
+            ci.check_versions(self.root, "develop", include_untracked=True, release_ref="develop")
 
         message = str(raised.exception)
-        self.assertIn("services/api/chart chart version must increase above '1.0.1'", message)
+        self.assertIn("services/api/chart chart version must not decrease below '1.0.1'", message)
         self.assertNotIn("convergence", message)
 
 
@@ -1609,26 +1609,73 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         chart = self.root / "deploy/helm/helx-chart/Chart.yaml"
         chart.write_text(chart.read_text() + "description: pins moved\n", encoding="utf-8")
 
-    def check(self, **kwargs: bool) -> None:
+    def check(self, *, release_ref: str = "HEAD") -> None:
+        # The fixture has no remote, so its own history stands in for main.
         with patch.object(ci, "load_images_config", return_value=self.empty_images):
-            ci.check_versions(self.root, self.base, include_untracked=True, **kwargs)
+            ci.check_versions(
+                self.root, self.base, include_untracked=True,
+                release_ref=release_ref,
+            )
 
     def test_last_released_version_picks_the_highest_tag(self) -> None:
-        self.assertIsNone(ci.last_released_version(self.root))
-        for tag in ("v4.6.2", "v4.7.0", "v4.6.9", "not-a-release", "v-bogus"):
+        self.assertIsNone(ci.last_released_version(self.root, "HEAD"))
+        self.release("4.6.2")
+        self.set_umbrella("4.7.0")
+        self.commit("release 4.7.0")
+        self.release("4.7.0")
+        for tag in ("not-a-release", "v-bogus"):
             self.git("tag", tag)
-        self.assertEqual(ci.last_released_version(self.root), "4.7.0")
+        self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.7.0")
+
+    def test_a_tag_naming_another_umbrella_version_is_not_a_release(self) -> None:
+        self.release("4.6.2")
+        self.git("tag", "v6.4.4")  # Same commit, whose umbrella says 4.6.2.
+        self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.6.2")
+
+    def test_a_subtree_upstream_tag_is_not_a_release(self) -> None:
+        # A merge-mode subtree puts the upstream's commits, and so its tags,
+        # into main's history, but they carry no umbrella chart.
+        self.release("4.6.2")
+        empty_tree = self.git("hash-object", "-w", "-t", "tree", "/dev/null").stdout.strip()
+        upstream = self.git("commit-tree", empty_tree, "-m", "helx-ui 6.4.4").stdout.strip()
+        self.git("merge", "-q", "-s", "ours", "--allow-unrelated-histories", "--no-edit", upstream)
+        self.git("tag", "v6.4.4", upstream)
+        self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.6.2")
+
+    def test_a_tag_off_the_release_ref_is_not_a_release(self) -> None:
+        self.release("4.6.2")
+        self.git("checkout", "-q", "-b", "side")
+        self.set_umbrella("9.0.0")
+        self.commit("bump on a branch that never reached main")
+        self.release("9.0.0")
+        self.git("checkout", "-q", "-")
+        self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.6.2")
+        self.assertEqual(ci.last_released_version(self.root, "side"), "9.0.0")
+
+    def test_a_stray_tag_does_not_raise_the_floor(self) -> None:
+        self.release("4.6.2")
+        self.git("tag", "v6.4.4")
+        self.set_umbrella("4.7.0")
+        self.commit("open 4.7.0")
+        self.touch_umbrella()
+        self.check()
+
+    def test_an_unavailable_release_ref_is_an_error_not_an_absent_floor(self) -> None:
+        self.release("4.6.2")
+        self.touch_umbrella()
+        with self.assertRaisesRegex(ci.CIError, "Release ref 'origin/main' is not available"):
+            self.check(release_ref="origin/main")
 
     def test_with_no_release_the_umbrella_is_unconstrained(self) -> None:
         # Nothing is published, so there is nothing to sit above.
         self.touch_umbrella()
-        self.check(above_release=True)
+        self.check()
 
     def test_matching_the_last_release_is_rejected(self) -> None:
         self.release("4.6.2")
         self.touch_umbrella()
         with self.assertRaisesRegex(ci.CIError, "must sit above the last published release"):
-            self.check(above_release=True)
+            self.check()
 
     def test_sitting_above_the_release_needs_no_further_bump(self) -> None:
         self.release("4.6.2")
@@ -1637,7 +1684,7 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         self.git("commit", "-qm", "open 4.7.0")
         # A later change leaves the version alone and still passes.
         self.touch_umbrella()
-        self.check(above_release=True)
+        self.check()
 
     def test_merging_a_hotfix_release_back_may_match_the_tag(self) -> None:
         self.release("4.6.2")
@@ -1647,24 +1694,37 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         self.git("commit", "-qm", "hotfix 4.6.3")
         self.release("4.6.3")
         # develop was still at 4.6.2; its tree now matches v4.6.3 exactly.
-        self.check(above_release=True)
+        self.check()
         self.write("deploy/helm/helx-chart/values.yaml", "develop: only\n")
         with self.assertRaisesRegex(ci.CIError, "identical to v4.6.3's"):
-            self.check(above_release=True)
+            self.check()
+
+    def test_into_main_the_umbrella_must_increase_over_its_base(self) -> None:
+        self.release("4.6.2")
+        self.touch_umbrella()
+        with self.assertRaisesRegex(
+            ci.CIError, "chart version must increase above '4.6.2'; current value is '4.6.2'"
+        ):
+            self.check(release_ref=self.base)
 
     def test_regression_against_the_base_is_rejected(self) -> None:
+        self.set_umbrella("4.0.0")
+        self.commit("release 4.0.0")
         self.release("4.0.0")
+        self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.2")
+        self.commit("open 4.6.2")
+        self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        # 4.5.0 is above the release but below the base.
         self.set_umbrella("4.5.0")
         with self.assertRaisesRegex(ci.CIError, "must not decrease below"):
-            self.check(above_release=True)
+            self.check()
 
-    def test_the_old_flag_name_is_an_alias(self) -> None:
+    def test_the_retired_flags_still_parse(self) -> None:
+        # Older invocations keep working; the release rule is the only mode.
         for flag in ("--above-release", "--umbrella-above-release"):
             with self.subTest(flag=flag):
-                args = ci.parse_args(["check-versions", "--base", "develop", flag])
-                self.assertTrue(args.above_release)
+                ci.parse_args(["check-versions", "--base", "develop", flag])
         args = ci.parse_args(["check-versions", "--base", "develop"])
-        self.assertFalse(args.above_release)
         self.assertEqual(args.release_ref, "origin/main")
 
 
@@ -1723,25 +1783,25 @@ class ServiceAboveReleaseTests(GitFixtureTest):
     def touch_image(self) -> None:
         self.write("services/api/main.go", "package main\n")
 
-    def check(self, *, release_ref: str = "released", **kwargs: bool) -> None:
+    def check(self, *, release_ref: str = "released") -> None:
         with patch.object(ci, "load_images_config", return_value=self.images):
             ci.check_versions(
                 self.root, self.base, include_untracked=True,
-                release_ref=release_ref, **kwargs,
+                release_ref=release_ref,
             )
 
     def test_staying_at_the_base_version_passes_when_above_main(self) -> None:
         # main has 6.0.4, develop already opened 6.0.5: a second pull request
         # editing api leaves it at 6.0.5 and does not burn 6.0.6.
         self.touch_chart()
-        self.check(above_release=True)
+        self.check()
 
     def test_matching_main_is_rejected(self) -> None:
         # develop has just been synced with main, so the first change must bump.
         self.sync_with_main()
         self.touch_chart()
         with self.assertRaises(ci.CIError) as raised:
-            self.check(above_release=True)
+            self.check()
         self.assertEqual(
             str(raised.exception),
             "Version checks failed:\n"
@@ -1760,7 +1820,7 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         with self.assertRaisesRegex(
             ci.CIError, "services/api/chart chart version must not decrease below '6.0.6'"
         ):
-            self.check(above_release=True)
+            self.check()
 
     def test_a_chart_missing_on_main_is_unconstrained(self) -> None:
         # Version and appVersion equal the base, and nothing is released to sit
@@ -1768,16 +1828,19 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.sync_with_main()
         self.touch_chart()
         self.touch_image()
-        self.check(above_release=True, release_ref=self.unreleased)
+        self.check(release_ref=self.unreleased)
 
     def test_app_version_staying_at_the_base_passes_when_above_main(self) -> None:
         self.touch_image()
-        self.check(above_release=True)
+        self.check()
 
-    def test_app_version_default_mode_still_requires_a_bump(self) -> None:
+    def test_app_version_into_main_requires_a_bump(self) -> None:
+        # Into main the base is the release, so staying at 6.0.5 is not enough.
         self.touch_image()
-        with self.assertRaisesRegex(ci.CIError, "api appVersion must increase above '6.0.5'"):
-            self.check()
+        with self.assertRaisesRegex(
+            ci.CIError, r"api appVersion must increase above '6.0.5'; current value is '6.0.5'$"
+        ):
+            self.check(release_ref=self.base)
 
     def test_app_version_matching_main_is_rejected(self) -> None:
         self.sync_with_main()
@@ -1787,7 +1850,7 @@ class ServiceAboveReleaseTests(GitFixtureTest):
             "api appVersion must increase above '6.0.4'; current value is '6.0.4'. "
             "It must sit above the appVersion released has published",
         ):
-            self.check(above_release=True)
+            self.check()
 
     def test_app_version_going_below_the_base_is_rejected(self) -> None:
         self.set_api(app_version="6.0.6")
@@ -1796,7 +1859,7 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.set_api(app_version="6.0.5")
         self.touch_image()
         with self.assertRaisesRegex(ci.CIError, "api appVersion must not decrease below '6.0.6'"):
-            self.check(above_release=True)
+            self.check()
 
     def hotfix_main(self) -> None:
         """main ships hotfix 6.0.5 over develop's 6.0.4, then develop merges it back.
@@ -1812,7 +1875,7 @@ class ServiceAboveReleaseTests(GitFixtureTest):
 
     def test_merging_a_hotfix_back_may_match_main(self) -> None:
         self.hotfix_main()
-        self.check(above_release=True)
+        self.check()
 
     def test_matching_main_with_different_chart_content_is_rejected(self) -> None:
         self.hotfix_main()
@@ -1822,7 +1885,7 @@ class ServiceAboveReleaseTests(GitFixtureTest):
             "services/api/chart chart version must increase above '6.0.5'.*unless its "
             "packaged files are identical",
         ):
-            self.check(above_release=True)
+            self.check()
 
     def test_app_version_matching_main_with_different_sources_is_rejected(self) -> None:
         self.hotfix_main()
@@ -1831,27 +1894,29 @@ class ServiceAboveReleaseTests(GitFixtureTest):
             ci.CIError,
             "api appVersion must increase above '6.0.5'.*unless its sources are identical",
         ):
-            self.check(above_release=True)
+            self.check()
 
     def test_an_unavailable_release_ref_is_an_error_not_an_absent_floor(self) -> None:
         # Only resolved once something needs a floor, so unrelated changes pass.
-        self.check(above_release=True, release_ref="origin/main")
+        self.check(release_ref="origin/main")
         self.touch_chart()
         with self.assertRaisesRegex(ci.CIError, "Release ref 'origin/main' is not available"):
-            self.check(above_release=True, release_ref="origin/main")
+            self.check(release_ref="origin/main")
 
     def regress_umbrella(self) -> None:
         """An unrelated error, so a release lookup failure must not hide it."""
         self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.1")
 
     def test_an_unavailable_release_ref_is_listed_once_with_other_errors(self) -> None:
-        self.regress_umbrella()
-        self.touch_chart()
+        # The umbrella and the api chart both need the ref; the image fails on
+        # its missing appVersion before it would look.
+        self.write_chart("deploy/helm/helx-chart", name="helx", version="4.6.2", chart_type="application")
+        self.write_chart("services/api/chart", name="api", version="6.0.5")
         self.touch_image()
         with self.assertRaises(ci.CIError) as raised:
-            self.check(above_release=True, release_ref="origin/main")
+            self.check(release_ref="origin/main")
         message = str(raised.exception)
-        self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
+        self.assertIn("services/api/chart/Chart.yaml is missing top-level 'appVersion'", message)
         self.assertEqual(message.count("Release ref 'origin/main' is not available"), 1)
 
     def test_a_chart_released_without_app_version_gives_its_image_no_floor(self) -> None:
@@ -1861,14 +1926,14 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.commit("release api without appVersion")
         self.git("checkout", "-q", "-")
         self.touch_image()
-        self.check(above_release=True, release_ref="no-app")
+        self.check(release_ref="no-app")
 
     def test_an_unreadable_app_version_is_listed_with_other_errors(self) -> None:
         self.regress_umbrella()
         self.write_chart("services/api/chart", name="api", version="6.0.5")
         self.touch_image()
         with self.assertRaises(ci.CIError) as raised:
-            self.check(above_release=True)
+            self.check()
         message = str(raised.exception)
         self.assertIn("deploy/helm/helx-chart chart version must not decrease below '4.6.2'", message)
         self.assertIn("services/api/chart/Chart.yaml is missing top-level 'appVersion'", message)
@@ -1881,7 +1946,7 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.set_api(version="6.0.6", app_version="6.0.5")
         self.touch_image()
         self.check()
-        self.check(above_release=True)
+        self.check(release_ref=self.base)
 
 
 class PrivilegeEscalationTests(TempTreeTest):
@@ -2104,6 +2169,34 @@ class WorkflowShellSyntaxTests(unittest.TestCase):
                     )
                     checked += 1
         self.assertGreater(checked, 10, "suspiciously few run blocks discovered")
+
+
+class VersionCheckWiringTests(unittest.TestCase):
+    """Checks on main must pass their base as the release.
+
+    After a push, origin/main is the commit being checked, so reading the
+    release from it would compare every version with itself and always pass.
+    """
+
+    def check_versions_step(self, workflow: str) -> str:
+        path = SCRIPT.resolve().parents[1] / "workflows" / workflow
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        runs = [
+            step["run"]
+            for spec in document["jobs"].values()
+            for step in spec.get("steps") or []
+            if "check-versions" in (step.get("run") or "")
+        ]
+        self.assertEqual(len(runs), 1, f"expected one check-versions step in {workflow}")
+        return runs[0]
+
+    def test_a_push_to_main_judges_against_the_commit_before_it(self) -> None:
+        script = self.check_versions_step("publish.yml")
+        self.assertIn('--base "$BASE_SHA" --release-ref "$BASE_SHA"', script)
+
+    def test_a_pull_request_into_main_judges_against_its_base(self) -> None:
+        script = self.check_versions_step("ci.yml")
+        self.assertIn('arguments+=(--release-ref "$BASE_SHA")', script)
 
 
 if __name__ == "__main__":

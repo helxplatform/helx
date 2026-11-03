@@ -366,9 +366,10 @@ setup: $(PYTHON_READY) add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected
 # URL. Either way, stop it fetching tags: the upstream repos have their own v*
-# tags (e.g. helx-ui v6.4.4), and check-versions takes the newest local v* tag
-# as the last umbrella release. A clone that already has them can drop them
-# with: git tag -l | sort | comm -23 - <(git ls-remote --tags origin |
+# tags (e.g. helx-ui v6.4.4) that only clutter the clone; check-versions ignores
+# them, since they carry no umbrella chart. A clone that already has them can
+# drop them with:
+# git tag -l | sort | comm -23 - <(git ls-remote --tags origin |
 #   sed 's#.*refs/tags/##;s#\^{}##' | sort -u) | xargs -r git tag -d
 define ensure-remote
 	@if git remote get-url "$(1)" >/dev/null 2>&1; then \

@@ -11,6 +11,15 @@ appstore:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
   userStorage:
     storageClass: azurefile-csi-nfs-pe           # NFS + private endpoint (R3, ACISITSM-3499)
+  postgresql:
+    persistence:
+      # The appstore chart creates this RWX claim (appstore-postgresql-pvc) for
+      # postgresql.persistence.existingClaim, which the bitnami postgresql 16
+      # subchart no longer reads; its data lives on data-<release>-postgresql-0.
+      # On the default Azure Disk class (WaitForFirstConsumer, RWO) the unused
+      # claim never binds and every `helm --wait` times out. Azure Files binds
+      # it immediately.
+      storageClass: azurefile-csi
   security:
     # mism-test enforces NetworkPolicy, and launched apps may only egress to
     # DNS and non-private addresses. Their nslcd sidecar needs openldap.

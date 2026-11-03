@@ -63,7 +63,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 # Defaults for the developer-facing targets. All are overridable on the command
 # line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked --above-release
+CHECK_VERSIONS_FLAGS            ?= --include-untracked
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -915,7 +915,7 @@ ci-validate-everything: $(PYTHON_READY)
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
-	@# --above-release reads the release floor from origin/main and the v* tags.
+	@# The release floor is read from origin/main and the v* tags on it.
 	@# A stale copy sets the floor too low, so a local pass could fail in CI.
 	@git fetch --quiet origin main 2>/dev/null || \
 		echo "warning: could not fetch origin main; the release floor may be stale." >&2

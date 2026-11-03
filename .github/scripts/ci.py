@@ -1306,6 +1306,11 @@ def check_versions(
     paths = changed_paths(root, base, include_untracked)
     errors: list[str] = []
     released_charts = _ReleasedCharts(root, release_ref)
+    # Only picks the error wording; pass or fail is the same either way. Names
+    # are compared, not commits, because passing base as release_ref is how a
+    # caller on main says the base is the release. A pull request into develop
+    # whose base happens to be main's commit should still be told it must sit
+    # above what main has released.
     release_is_base = release_ref == base
     release_diffs: dict[str, list[str]] = {}
     chart_dirs = discover_chart_dirs(root)

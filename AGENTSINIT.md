@@ -185,9 +185,8 @@ Two examples, for a service whose `appVersion` equals the one on `main`:
 
 Before pushing, run `make pre-push`. It compares against your local `develop`
 branch, so update that first or pass `BASE=origin/develop`. For a pull request
-into `main`, use
-`make ci-check-versions BASE=origin/main CHECK_VERSIONS_FLAGS=--include-untracked`
-instead, because `--above-release` must not be used there.
+into `main`, also run `make ci-check-versions BASE=origin/main`, since there
+every changed version must increase over `main`.
 
 ## Environments and values
 

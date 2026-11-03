@@ -64,18 +64,19 @@ jobs:
       # the last release. A pull request into any other branch skips it. Its
       # changes are checked when that branch's own pull request into develop or
       # main runs CI.
-      # On a pull request into main, the base is what is currently released,
-      # so every changed version must increase over it.
+      # On a pull request into main, the base is what is currently released, so
+      # every changed version must increase over it.
       # On a pull request into develop, changes are judged against what was
       # last released rather than the base, so that not every pull request into
       # develop has to bump versions. What was last released is the highest v*
       # tag on main whose umbrella Chart.yaml carries that version, and main's
-      # Chart.yaml for each service chart and appVersion. So only the first pull request after a release has to pick
-      # the next version; a later one can raise it further if its changes call
-      # for a bigger bump. The umbrella's dependency pins are still enforced, and
-      # no version may regress against the base. Raising the umbrella's version
-      # starts publishing a new <version>-develop channel automatically, because
-      # the candidate tag is derived from it.
+      # Chart.yaml for each service chart and appVersion. So only the first
+      # pull request after a release has to pick the next version; a later one
+      # can raise it further if its changes call for a bigger bump. The
+      # umbrella's dependency pins are still enforced, and no version may
+      # regress against the base. Raising the umbrella's version starts
+      # publishing a new <version>-develop channel automatically, because the
+      # candidate tag is derived from it.
       - name: Require chart and image version increases
         if: >-
           github.event_name == 'pull_request' &&

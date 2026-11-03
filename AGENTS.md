@@ -8,203 +8,7 @@ renaming a local variable. A change to a values file or a `Chart.yaml` never
 qualifies; read its "Traps" section at least. This file holds the rules, and
 they apply either way.
 
-- This is a monorepo. Application and Helm sources live under `services/`; do not
-  restructure service directories without asking for approval.
-- Buildable image services are:
-  - `services/appstore` (`appstore` image)
-  - `services/appstore-prepuller/controller` (`appstore-prepuller` image)
-  - `services/appstore-sockets` (`appstore-sockets/server` and `appstore-sockets/monitoring` images)
-  - `services/ui` (`helx-ui` image, but we call it `ui` everywhere else in this repo)
-  - `services/user-mutator` (`user-mutator` image)
-- Other service directories are chart-only or utility/source-only. Helm charts
-  may be at the service root or under `services/<service>/chart/`.
-- The umbrella chart is `deploy/helm/helx-chart`.
-
-## CI and image publishing
-
-- There are three workflows and no per-service workflows:
-  - `.github/workflows/ci.yml` runs on pull requests and `workflow_dispatch`.
-    It only validates: charts are linted and packaged to `$RUNNER_TEMP`, images
-    build with `push: false`, and nothing leaves the runner.
-  - `.github/workflows/develop.yml` runs on pushes to `develop`. It validates
-    the same charts, publishes every image as `develop-<short-sha>`, then
-    publishes the candidate umbrella (see "Candidate channels").
-  - `.github/workflows/publish.yml` runs on pushes to `main`. It publishes
-    charts, publishes images as `v<appVersion>`, and creates the Git tag plus
-    GitHub Release when the umbrella `version:` increases.
-- Shared image build logic is in `.github/actions/build-service/action.yml` and
-  shared chart logic is in `.github/actions/publish-charts/action.yml`. Keep
-  workflows thin and reuse these actions.
-- Pull requests build only the images whose sources changed; chart edits never
-  select an image. The exception is `REBUILD_ALL_IMAGE_PATHS` in
-  `.github/scripts/ci.py` (`build-service`, `images.yaml`, `ci.py`, `ci.yml`):
-  touching any of them builds every image. That is intentional, so a CI change
-  rebuilding everything is not a bug.
-- Image tags come from chart metadata, not from Git tags or commit messages:
-  released images are `v<appVersion>` of the owning chart, and candidate images
-  are `<channel>-<short-sha>`. There is no automatic version bumping; bump
-  `appVersion` in the owning chart instead.
-- Images and BuildKit cache layers are pushed only to
-  `containers.renci.org/helxplatform/<image>`. Required image secrets are
-  `CONTAINERHUB_USERNAME` and `CONTAINERHUB_PASSWORD`; Docker Hub is not pushed to.
-  However, even though the prefix of these variables is `CONTAINERHUB_`, the actual
-  name of the registry is Harbor. Please use that name when referring to the registry
-  itself.
-- That applies to the workflows. The local image targets in the Makefile take
-  `IMAGE_REGISTRY=<base url>` to build, push, and pin against a different
-  registry; it defaults to the `registry` in `.github/ci/images.yaml`, which is
-  Harbor. The override reaches `ci.py` as `image-plan --registry` and
-  `candidate-values --registry`, and the latter rewrites each image's
-  `repository` alongside its tag, so the packaged chart names the registry the
-  images were actually pushed to. CI never sets it.
-
-## Candidate channels
-
-A "candidate" is a single packaged umbrella chart published to a channel tag. 
-(e.g. `oci://ghcr.io/helxplatform/helm-charts/helx:4.6.0-develop`)
-
-- A candidate channel publishes one mutable prerelease umbrella chart that
-  tracks a branch. `develop` publishes `<umbrella version>-develop` to
-  `oci://ghcr.io/helxplatform/helm-charts/helx` and overwrites it on every push.
-- Candidates are SemVer prereleases, so they always sort below the matching
-  release and can never be mistaken for it.
-- Candidate mode is driven by `CHART_CHANNEL` and `CHART_CHANNEL_COMMIT` in
-  `.github/scripts/helm-build-chart.sh`, and only applies to the umbrella. In
-  this mode local service charts are vendored by name regardless of the version
-  pinned in `Chart.lock`, so the archive describes the branch tree rather than
-  what is already published.
-- Candidate image tags are written into the umbrella's `values.yaml` before
-  packaging and restored afterwards, because `helm package` cannot take value
-  overrides. Add `tag_path` to a service in `.github/ci/images.yaml` when its
-  chart does not read `image.tag`. `repository_path` is its sibling, defaults
-  to the `repository` key in the same block, and is only written when a
-  registry override is in play. `validate-config` requires both keys to exist
-  in the owning chart's `values.yaml`, since a pin that lands nowhere is
-  invisible.
-- The immutability preflight is skipped for candidates and must stay that way;
-  it exists to protect released versions only.
-
-## Helm charts
-
-- Chart build, lint, package, and publication all go through
-  `.github/actions/publish-charts/action.yml`, which calls
-  `.github/scripts/helm-build-chart.sh`. Published charts go to
-  `oci://ghcr.io/helxplatform/helm-charts/`.
-- Chart versions are immutable in OCI registries. Bump `version:` in
-  `Chart.yaml` for chart changes that have already been published.
-- A dependency that also exists in this tree must be pinned to exactly the
-  in-tree chart's version. `validate-config` enforces this. Without it the
-  version comparison in `helm-build-chart.sh` silently decides whether a chart
-  is vendored from the tree or pulled from the registry, so bumping a service
-  chart without bumping the umbrella pin would drop it from the umbrella with no
-  warning. Bumping a service chart and the umbrella pin is one change.
-- Every dependency is pinned to an exact version, so `Chart.lock` is derivable
-  from `Chart.yaml` with no registry access. Regenerate it with
-  `make sync-locks`, `make sync-helx-lock`, or
-  `python .github/scripts/ci.py sync-lock <chart-dir>` rather than
-  `helm dependency update`; `--check` verifies without writing. The digest
-  reproduces Helm's `resolver.HashReq` and is covered by a test using a
-  helm-generated lock as the oracle.
-- Run `check-versions` only on pull requests into `main` or `develop` and on
-  pushes to them. Do not add it to pull requests into other branches: their
-  changes are checked when that branch reaches `develop` or `main`.
-- A version bump is only required when a changed file can affect the artifact.
-  Charts consult their own `.helmignore`, images consult `excludes` in
-  `.github/ci/images.yaml` plus the build context's `.dockerignore`. So editing
-  a chart's `.gitignore` never gates, while editing `Chart.lock` does.
-- Every chart must commit a `.helmignore` with the baseline patterns in
-  `REQUIRED_HELMIGNORE`, and it must not exclude `Chart.yaml`, `values.yaml`, or
-  `templates/`. `validate-config` enforces both, and also rejects `.dockerignore`
-  negation or `**`, which the gate cannot reason about.
-- `check-versions` has one rule: each changed version must sit strictly above
-  what is released, and may not regress against the base (equal is fine).
-  `--above-release` and its old name `--umbrella-above-release` are accepted
-  but no longer change anything. What is released is read from `--release-ref`:
-  on `main`, pull requests and pushes alike pass the base commit itself, so
-  every change must increase over it. Never let a check there read the release
-  from `origin/main`, which after a push is the commit being checked. On pull
-  requests into `develop`, and on direct pushes to `develop`, the release ref
-  is `origin/main`, so a version need only sit above what main has released
-  rather than increase on every change.
-  "Released" is, for the umbrella, the highest `v*` tag in the release ref's
-  history whose `deploy/helm/helx-chart/Chart.yaml` carries that `version:`
-  (other `v*` tags, such as subtree upstreams' own, are ignored), and the
-  `version`/`appVersion` in the release ref's `Chart.yaml` for service charts
-  and their images (a chart absent there has no floor, nor do the
-  images of a chart there without `appVersion`, a missing ref is an error, no
-  registry is queried). Equal to the release is allowed only when
-  the packaged files are identical to it (main's tree, or the tag's for the
-  umbrella), so merging a hotfix back needs no extra bump. The umbrella's
-  dependency pins are still enforced. So only the first pull request after a
-  release picks each next version. Raising the umbrella starts publishing a new
-  `<version>-develop` channel automatically, since the candidate tag derives
-  from it.
-- `check-versions` compares committed revisions, so an uncommitted or untracked
-  chart file is invisible to it.
-- Prefer fixing the ignore file over adding a CI exception. If a file never
-  reaches an image, add it to that service's `.dockerignore`.
-- `ambassador`, `pod-reaper`, and `resty` were vendored from subdirectories of
-  helxplatform/helx-chart (`charts/<name>`), not from a repo root, so they are
-  **not** subtrees: they have no merge base, they are absent from
-  `SUBTREE_MAP`, and the `pull-<name>` subtree targets do not touch them. They
-  have their own targets, below. `resty` in particular is deliberately ahead of
-  upstream (helx-common secrets contract, caller-managed TLS, Harbor image), so
-  it must never be overwritten wholesale from upstream.
-- Each of those charts records the upstream commit it has incorporated in
-  `services/<name>/UPSTREAM_COMMIT`. `make check-vendored-sync` reports how far
-  behind each one is and lists what to run for each; it succeeds even when a
-  chart is behind, since being behind an archived upstream is not a build
-  failure. `STRICT=1` makes it exit non-zero instead, which is how CI gates on
-  it (`check-subtree-sync` gates unconditionally; this one does not) and `make pull-vendored-chart NAME=<name>` replays only
-  the commits since that record onto `services/<name>/chart`, then restamps the
-  file. `pull-vendored` does all three. They are the vendored counterparts of
-  `check-subtree-sync` and `pull-<name>`, and they never touch the repo root.
-- A replay is a three-way apply, so it preserves local divergence and leaves a
-  genuine clash as conflict markers instead of discarding it. On conflict the
-  record keeps its old `upstream:` and gains a `pending:` line naming the commit
-  being replayed, so the chart still reads as un-synced and nobody has to
-  remember a sha. `check-vendored-sync` reports it as `REPLAY UNFINISHED`.
-  Resolve the markers, then `make update-vendored-chart-stamp NAME=<name>`. That
-  target is bookkeeping only: it rewrites `upstream:` in the record and edits no
-  chart file, because the replay already happened in full during the pull. It
-  refuses while the chart still has unmerged entries or markers. `COMMIT=<sha>`
-  is only for stamping by hand.
-- `git apply -3` skips hunks already present and stages what it applies, so a
-  clean run is not proof anything changed. Review `git diff --cached` before
-  committing, and trust `check-vendored-sync` (which compares trees) over the
-  apply's exit status when deciding whether a chart is really in sync.
-- `helx-chart` dependencies use the GHCR OCI registry, not the old GitHub Pages
-  repository. OCI consumers need GHCR registry authentication.
-- Chart-only changes should not trigger an image build; image workflows exclude
-  nested `chart/` paths.
-
-## Validation and safety
-
-- Every container a chart renders, init containers and test pods included, must
-  set `securityContext.allowPrivilegeEscalation: false`. AKS denies pods that
-  leave it unset, and the umbrella build enforces it by rendering the chart
-  defaults and each `deploy/helm/values/azure/envs/*` environment
-  (`ci.py check-privilege-escalation`). Charts expose it as `securityContext`
-  where that key already reached the containers, and as
-  `containerSecurityContext` elsewhere; in appstore-sockets, `securityContext`
-  is still not applied to any container. Tycho's pod template sets it itself.
-- Lint values live in `.github/helm/lint-values/<chart name>.yaml`, one file
-  per chart, used when that chart is linted alone. The umbrella has none to
-  maintain: `ci.py lint-values` nests each dependency's file under its name (a
-  `helx.yaml`, if ever added, goes on top), and both `helm lint` in
-  `helm-build-chart.sh` and the render checks use that. A chart-managed Secret
-  that requires values belongs in `existingSecret` mode there, or lint prints
-  `[INFO] Fail:` lines. `validate-config` rejects a file not named after a chart.
-- Use `helm lint` on the affected chart, then the complete chart set when
-  practical. Dependency archives are not checked in. CI does not run
-  `helm dependency update`; `prepare_dependencies` in
-  `.github/scripts/helm-build-chart.sh` vendors each locked dependency itself,
-  preferring an in-tree chart and pulling from the registry otherwise.
-- Validate workflow/action YAML and inspect project diagnostics after edits.
-- Preserve unrelated user changes, including untracked directories such as
-  `deployments/argocd/`; do not commit or create branches unless requested.
-
-## Other rules
+## Working in the repository
 
 - Do not restructure service directories under `services/` without asking for
   approval.
@@ -235,8 +39,9 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   `helm dependency update`.
 - On pull requests into `develop`, a version only has to sit above the one
   released on `main`, so check that before bumping again. On pull requests into
-  `main`, never pass `--above-release`: run
-  `make ci-check-versions BASE=origin/main CHECK_VERSIONS_FLAGS=--include-untracked`.
+  `main`, every changed version must increase over `main`. Check locally with
+  `make ci-check-versions BASE=origin/develop` or `BASE=origin/main`, matching
+  the branch the pull request targets.
 
 ## Charts
 
@@ -259,6 +64,12 @@ A "candidate" is a single packaged umbrella chart published to a channel tag.
   not a bug.
 - The immutability preflight is skipped for candidate (`<version>-develop`)
   charts and must stay that way; it exists to protect released versions only.
+- Run `check-versions` only on pull requests into `main` or `develop` and on
+  pushes to them. Do not add it to pull requests into other branches: their
+  changes are checked when that branch reaches `develop` or `main`.
+- On `main`, pass the base commit to `check-versions` as `--release-ref`, never
+  `origin/main`. After a push, `origin/main` is the commit being checked, so
+  every version would match itself and the check would always pass.
 
 ## Checking your work
 

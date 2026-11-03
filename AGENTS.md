@@ -39,8 +39,9 @@ they apply either way.
   `helm dependency update`.
 - On pull requests into `develop`, a version only has to sit above the one
   released on `main`, so check that before bumping again. On pull requests into
-  `main`, never pass `--above-release`: run
-  `make ci-check-versions BASE=origin/main CHECK_VERSIONS_FLAGS=--include-untracked`.
+  `main`, every changed version must increase over `main`. Check locally with
+  `make ci-check-versions BASE=origin/develop` or `BASE=origin/main`, matching
+  the branch the pull request targets.
 
 ## Charts
 
@@ -63,6 +64,12 @@ they apply either way.
   not a bug.
 - The immutability preflight is skipped for candidate (`<version>-develop`)
   charts and must stay that way; it exists to protect released versions only.
+- Run `check-versions` only on pull requests into `main` or `develop` and on
+  pushes to them. Do not add it to pull requests into other branches: their
+  changes are checked when that branch reaches `develop` or `main`.
+- On `main`, pass the base commit to `check-versions` as `--release-ref`, never
+  `origin/main`. After a push, `origin/main` is the commit being checked, so
+  every version would match itself and the check would always pass.
 
 ## Checking your work
 

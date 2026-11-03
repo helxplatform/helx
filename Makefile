@@ -63,7 +63,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 # Defaults for the developer-facing targets. All are overridable on the command
 # line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked --above-release
+CHECK_VERSIONS_FLAGS            ?= --include-untracked
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -366,9 +366,10 @@ setup: $(PYTHON_READY) add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected
 # URL. Either way, stop it fetching tags: the upstream repos have their own v*
-# tags (e.g. helx-ui v6.4.4), and check-versions takes the newest local v* tag
-# as the last umbrella release. A clone that already has them can drop them
-# with: git tag -l | sort | comm -23 - <(git ls-remote --tags origin |
+# tags (e.g. helx-ui v6.4.4) that only clutter the clone; check-versions ignores
+# them, since they carry no umbrella chart. A clone that already has them can
+# drop them with:
+# git tag -l | sort | comm -23 - <(git ls-remote --tags origin |
 #   sed 's#.*refs/tags/##;s#\^{}##' | sort -u) | xargs -r git tag -d
 define ensure-remote
 	@if git remote get-url "$(1)" >/dev/null 2>&1; then \
@@ -914,7 +915,7 @@ ci-validate-everything: $(PYTHON_READY)
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
-	@# --above-release reads the release floor from origin/main and the v* tags.
+	@# The release floor is read from origin/main and the v* tags on it.
 	@# A stale copy sets the floor too low, so a local pass could fail in CI.
 	@git fetch --quiet origin main 2>/dev/null || \
 		echo "warning: could not fetch origin main; the release floor may be stale." >&2

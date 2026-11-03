@@ -85,24 +85,38 @@ All charts are validated instead of maintaining a changed-chart dependency
 planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
 
-Version checks run on **every** pull request, not only those targeting `main`,
-and again on direct pushes to `develop` and `main`. The `develop` candidate channel
+Version checks run on pull requests into `main` and into `develop`, and again on
+direct pushes to `develop` and `main`. The `develop` candidate channel
 vendors service charts straight out of the tree, so a chart edited without a
 version bump could otherwise ship under a version already published with
-different content. Manual validation runs have no base revision to compare against
-and are exempt.
+different content. A pull request into any other branch skips them: its changes
+are judged when that branch's own pull request into `develop` or `main` runs.
+Manual validation runs have no base revision to compare against and are exempt.
 
-What "bump" means depends on where the change is going. Charts and
-`v<appVersion>` images are published immutably only from `main`, so on a pull
-request into `main` every changed chart version and image `appVersion` must
-increase over the base. On a pull request into any other branch, and on direct
-pushes to `develop`, `--above-release` applies instead: rather than having to
-increase on every change, a version need only sit **above what is already
-released**, and may not regress against the base. "Released" means:
+"Bump" means the same thing everywhere: a changed chart version or image
+`appVersion` must sit **above what is already released**, and may not regress
+against the base. What has been released is read from `--release-ref`, and that
+depends on where the change is going:
 
-- for the umbrella, the highest `v*` tag;
-- for a service chart, the `version` in `origin/main`'s copy of its `Chart.yaml`;
-- for an image, the owning chart's `appVersion` on `origin/main`.
+- **Into `main`** (pull requests, and pushes once they land): the base itself.
+  Charts and `v<appVersion>` images are published immutably only from `main`, so
+  its base is what is released, and every changed version must increase over it.
+  A hotfix straight into `main` must raise every version it touches. After a
+  push, `origin/main` is the commit being checked, so reading the release from
+  it would compare every version with itself and always pass.
+- **Into `develop`** (pull requests, and direct pushes): `origin/main`. Rather
+  than having to increase on every change, a version need only sit above what
+  `main` has released.
+
+"Released" means:
+
+- for the umbrella, the highest `v*` tag that is in the release ref's history and
+  whose `deploy/helm/helx-chart/Chart.yaml` has that `version:`. Other `v*` tags
+  are ignored, such as a subtree upstream's own (helx-ui's `v6.4.4` is a helx-ui
+  commit with no umbrella chart) or one pushed from a branch that never reached
+  `main`;
+- for a service chart, the `version` in the release ref's copy of its `Chart.yaml`;
+- for an image, the owning chart's `appVersion` on the release ref.
 
 A chart that does not exist on `main` has never been released, so it has no
 floor. A version *equal* to the released one passes only when the packaged files
@@ -110,9 +124,8 @@ are identical to that release (the chart's own `.helmignore` decides what is
 packaged; for an image, its `sources`, `excludes`, and `.dockerignore`). That is
 what merging a hotfix from `main` back into `develop` produces: the same content
 under the same version is not a second artifact. For the umbrella, "that release"
-is the tree at the `v*` tag. The ref is `--release-ref` (CI passes `origin/<default branch>`); if it is
-missing the check fails rather than silently dropping the floor. No registry is
-queried. The umbrella's dependency pins are still enforced.
+is the tree at the `v*` tag. If the release ref is missing the check fails
+rather than silently dropping the floor. No registry is queried. The umbrella's dependency pins are still enforced.
 
 Without this, two pull requests into `develop` that each edit appstore would
 force 6.0.5 and then 6.0.6, and 6.0.5 would never ship. With it:
@@ -162,9 +175,9 @@ Because develop always sits above the last release, `<version>-develop` is an
 honest preview of `<version>` and correctly sorts below it. Before the first `v*`
 release there is nothing to sit above, so the umbrella is unconstrained.
 
-The required increase over the base reappears on the pull request into `main`,
-where publication would otherwise fail the immutability preflight. Never pass
-`--above-release` there.
+On `main` the base is the release, so the required increase over the base
+reappears there, where publication would otherwise fail the immutability
+preflight. Never let a check on `main` read the release from `origin/main`.
 
 ### What counts as a change
 

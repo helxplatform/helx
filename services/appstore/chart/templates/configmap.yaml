@@ -43,6 +43,11 @@ data:
   LDAP_URI: {{ .Values.ldap.uri }}
   LDAP_GROUP_DN: {{ .Values.ldap.groupDN }}
   LDAP_SEARCH_BASE: {{ .Values.ldap.searchBase }}
+  LDAP_BIND_DN: {{ .Values.ldap.bindDN | quote }}
+  LDAP_PROVISION_EMAIL_DOMAINS: {{ join "," .Values.ldap.provision.emailDomains | quote }}
+  LDAP_PROVISION_UID_MIN: {{ .Values.ldap.provision.uidMin | int | quote }}
+  LDAP_PROVISION_UID_MAX: {{ .Values.ldap.provision.uidMax | int | quote }}
+  LDAP_PROVISION_GID_NUMBER: {{ .Values.ldap.provision.gidNumber | int | quote }}
   {{- end }}
   SAML_FETCH_URL: "{{ .Values.saml.AUTHORITY_URL }}"
   SAML_FETCH_FILE: "{{ .Values.saml.cache.FETCH_FILE }}"

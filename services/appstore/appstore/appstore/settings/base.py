@@ -49,6 +49,18 @@ TYCHO_MODE = os.environ.get("TYCHO_MODE", "null" if DEV_PHASE == "stub" else "li
 # Needs to be JSON-encoded since expressions can contain basically any character that would be used as a delimiter.
 AUTO_WHITELIST_PATTERNS = json.loads(os.environ.get("AUTO_WHITELIST_PATTERNS", "[]"))
 
+# Create an LDAP account at first login for users whose verified email is in one
+# of these domains (comma-separated, e.g. "duke.edu"), so users that ldap-sync
+# doesn't sync can launch apps. Empty turns it off. See core/ldap_provision.py.
+LDAP_PROVISION_EMAIL_DOMAINS = [
+    d.strip().lower()
+    for d in os.environ.get("LDAP_PROVISION_EMAIL_DOMAINS", "").split(",")
+    if d.strip()
+]
+LDAP_PROVISION_UID_MIN = int(os.environ.get("LDAP_PROVISION_UID_MIN", "2000000"))
+LDAP_PROVISION_UID_MAX = int(os.environ.get("LDAP_PROVISION_UID_MAX", "2099999"))
+LDAP_PROVISION_GID_NUMBER = int(os.environ.get("LDAP_PROVISION_GID_NUMBER", "1025"))
+
 # Variables used for an external Tycho app registry.
 # ToDo: Consider setting the default value of TYCHO_APP_REGISTRY_REPO to
 # "https://github.com/helxplatform/helx-apps/raw" and remove any other similar

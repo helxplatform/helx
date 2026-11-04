@@ -157,6 +157,25 @@ ldap:
   uri: "ldap://openldap"
   groupDN: "cn=users,ou=groups,dc=example,dc=org"
   searchBase: "ou=users,dc=example,dc=org"
+  # -- DN appstore binds as. Empty binds anonymously, which is enough for the
+  # group check; provisioning needs one that can write, e.g. helx-ldap's admin
+  # "cn=admin,dc=example,dc=org".
+  bindDN: ""
+  bindPasswordSecret:
+    # -- Secret holding bindDN's password, e.g. helx-ldap's "openldap-credentials". Empty sets no password.
+    name: ""
+    # -- Key of the password in that Secret.
+    key: LDAP_ADMIN_PASSWORD
+  provision:
+    # -- Email domains whose users get an LDAP account (in groupDN, a posixGroup)
+    # at first login, e.g. [duke.edu]. Needs a bindDN that can write. Empty turns it off.
+    emailDomains: []
+    # -- First uidNumber given to provisioned users.
+    uidMin: 2000000
+    # -- Last uidNumber given to provisioned users.
+    uidMax: 2099999
+    # -- gidNumber of provisioned users and of groupDN when it's created.
+    gidNumber: 1025
 
 updateStrategy:
   # -- 'RollingUpdate' or 'Recreate'. Must use Recreate if mounting PVCs due to multi-attach errors.

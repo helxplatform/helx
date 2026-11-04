@@ -5,7 +5,7 @@ import time
 from django.conf import settings
 from django.contrib.auth.models import User, Group
 from django.http import HttpResponseRedirect
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from ldap3.core.exceptions import LDAPSocketOpenError, LDAPSocketReceiveError
 from mock import Mock, patch
@@ -114,7 +114,8 @@ class LdapGroupMemberRetryTests(SimpleTestCase):
     def _live_conn(member=True):
         conn = Mock()
         conn.search.return_value = True
-        conn.entries = [Mock(entry_dn="uid=tcheek9,ou=users,dc=example,dc=org")]
+        conn.entries = [Mock(entry_dn="uid=tcheek9,ou=users,dc=example,dc=org",
+                             entry_attributes_as_dict={"uid": ["tcheek9"]})]
         conn.compare.return_value = member
         return conn
 
@@ -210,6 +211,20 @@ class LdapGroupMemberRetryTests(SimpleTestCase):
         # would add clauses of its own.
         self.assertEqual(self._filter_for("*", "x)(uid=*"),
                          "(|(mail=x\\29\\28uid=\\2a)(uid=\\2a))")
+
+    def test_posix_group_member_is_admitted(self):
+        # e.g. ldap-sync's helx-users lists memberUid, not member.
+        conn = self._live_conn()
+        conn.compare.side_effect = lambda dn, attr, value: (attr, value) == ("memberUid", "tcheek9")
+        result, connects = self._check([conn])
+        self.assertTrue(result)
+        self.assertEqual(connects, 1)
+
+    @override_settings(LDAP_PROVISION_EMAIL_DOMAINS=["duke.edu"])
+    def test_filter_for_provisioned_domain_is_mail_only(self):
+        # A uid match could be a UNC user with the same name.
+        self.assertEqual(self._filter_for("tcheek9", "tcheek9@Duke.edu"),
+                         "(mail=tcheek9@Duke.edu)")
 
     @patch.dict(os.environ, {"LDAP_URI": ""})
     def test_ldap_disabled_does_not_retry(self):

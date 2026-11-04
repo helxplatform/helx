@@ -64,8 +64,15 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | irods.enabled | bool | `false` | enable branded iRODS support; provide its environment variables through the selected appstore Secret. |
 | irodsUnbranded.IROD_USER_VALUES | object | `{}` |  |
 | irodsUnbranded.enabled | bool | `false` |  |
+| ldap.bindDN | string | `""` | DN appstore binds as. Empty binds anonymously, which is enough for the group check; provisioning needs one that can write, e.g. helx-ldap's admin "cn=admin,dc=example,dc=org". |
+| ldap.bindPasswordSecret.key | string | `"LDAP_ADMIN_PASSWORD"` | Key of the password in that Secret. |
+| ldap.bindPasswordSecret.name | string | `""` | Secret holding bindDN's password, e.g. helx-ldap's "openldap-credentials". Empty sets no password. |
 | ldap.enabled | bool | `false` |  |
 | ldap.groupDN | string | `"cn=users,ou=groups,dc=example,dc=org"` |  |
+| ldap.provision.emailDomains | list | `[]` | Email domains whose users get an LDAP account (in groupDN, a posixGroup) at first login, e.g. [duke.edu]. Needs a bindDN that can write. Empty turns it off. |
+| ldap.provision.gidNumber | int | `1025` | gidNumber of provisioned users and of groupDN when it's created. |
+| ldap.provision.uidMax | int | `2099999` | Last uidNumber given to provisioned users. |
+| ldap.provision.uidMin | int | `2000000` | First uidNumber given to provisioned users. |
 | ldap.searchBase | string | `"ou=users,dc=example,dc=org"` |  |
 | ldap.uri | string | `"ldap://openldap"` |  |
 | logLevel | string | `"WARNING"` | Set the log level for the application.  (DEBUG INFO WARNING ERROR CRITICAL) |

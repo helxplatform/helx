@@ -2,6 +2,8 @@ import logging
 from django.contrib.auth.signals import user_logged_in, user_login_failed, user_logged_out
 from django.dispatch import receiver
 
+from core import ldap_provision
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,6 +31,7 @@ def on_user_logged_in(sender, request, user, **kwargs):
         f"User login successful: username={user.username} "
         f"ip={ip_address} user_agent={user_agent}"
     )
+    ldap_provision.provision(user)
 
 
 @receiver(user_logged_out)

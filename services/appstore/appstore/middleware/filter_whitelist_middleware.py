@@ -75,6 +75,10 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
         # changing the filter, e.g. (uid=*) would match every user.
         flt    = (f"(|(mail={escape_filter_chars(user.email)})"
                   f"(uid={escape_filter_chars(user.username)}))")
+        # Users from provisioned domains are found by mail only: a uid match
+        # could be someone else with the same name, e.g. a synced UNC onyen.
+        if (user.email or "").rpartition("@")[2].lower() in settings.LDAP_PROVISION_EMAIL_DOMAINS:
+            flt = f"(mail={escape_filter_chars(user.email)})"
 
         conn = None
         for attempt in range(cls.LDAP_RETRIES + 1):
@@ -92,7 +96,7 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
 
             logger.debug("[LDAP] Searching base=%s filter=%s", base, flt)
             try:
-                ok = conn.search(base, flt, SUBTREE, attributes=[])
+                ok = conn.search(base, flt, SUBTREE, attributes=["uid"])
                 logger.debug("[LDAP] Search ok=%s; hits=%s", ok, len(conn.entries))
                 if not ok or not conn.entries:
                     return False
@@ -104,14 +108,20 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
                                    ", ".join(e.entry_dn for e in conn.entries))
                     return False
                 user_dn = conn.entries[0].entry_dn
-                logger.debug("[LDAP] Resolved user_dn=%s", user_dn)
+                uids = conn.entries[0].entry_attributes_as_dict.get("uid", [])
+                logger.debug("[LDAP] Resolved user_dn=%s uid=%s", user_dn, uids)
             except Exception as exc:                           # noqa: BLE001
                 logger.error("[LDAP] Search failed: %s", exc)
                 continue
 
             try:
-                result = conn.compare(group_dn, "member", user_dn)
-                logger.debug("[LDAP] compare(%s member %s) → %s", group_dn, user_dn, result)
+                # A groupOfNames lists member DNs; a posixGroup (e.g. ldap-sync's
+                # helx-users) lists memberUid. A comparison against an attribute
+                # the group doesn't have is false.
+                result = (conn.compare(group_dn, "member", user_dn)
+                          or any(conn.compare(group_dn, "memberUid", u) for u in uids))
+                logger.debug("[LDAP] compare(%s member %s / memberUid %s) → %s",
+                             group_dn, user_dn, uids, result)
                 return result
             except Exception as exc:                           # noqa: BLE001
                 logger.error("[LDAP] Compare failed: %s", exc)

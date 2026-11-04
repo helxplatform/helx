@@ -1,6 +1,5 @@
 import os
 import logging
-import re
 from functools import lru_cache
 
 from django.conf import settings
@@ -12,7 +11,6 @@ from smtplib import SMTPSenderRefused, SMTPResponseException
 
 from ldap3 import Server, Connection, SUBTREE  # NEW
 from ldap3.utils.conv import escape_filter_chars
-from core.models import AuthorizedUser
 
 
 logger = logging.getLogger(__name__)
@@ -199,45 +197,16 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
     
 
     @staticmethod
-    def is_auto_whitelisted_email(user):
-        email = user.email
-        for pattern in settings.AUTO_WHITELIST_PATTERNS:
-            if re.match(pattern, email) is not None:
-                return True
-        return False
-    
-    @staticmethod
-    def is_whitelisted_username(user):
-        username = user.username
-        
-
-    @staticmethod
     def is_authorized(user):
+        """Only users in the LDAP group get in. Apps take their user identity
+        from LDAP, so a user admitted without an entry could launch apps that
+        never start. The AuthorizedUser table and AUTO_WHITELIST_PATTERNS are no
+        longer consulted."""
         logger.debug("[AUTHZ] Testing %s / %s", user.username, user.email)
-
-        if user.email and AuthorizedUser.objects.filter(email=user.email).exists():
-            logger.debug("[AUTHZ] email match in AuthorizedUser")
-            return True
-
-        if AllowWhiteListedUserOnly.is_auto_whitelisted_email(user):
-            logger.debug("[AUTHZ] AUTO-pattern match → persisting email")
-            # AuthorizedUser.objects.get_or_create(
-            #     email=user.email, defaults={"username": user.username}
-            # )
-            return True
-
-        if AuthorizedUser.objects.filter(username=user.username).exists():
-            logger.debug("[AUTHZ] username match in AuthorizedUser")
-            return True
-
         if AllowWhiteListedUserOnly._ldap_group_member(user):
-            logger.debug("[AUTHZ] LDAP group match → persisting email")
-            # AuthorizedUser.objects.get_or_create(
-            #     email=user.email, defaults={"username": user.username}
-            # )
+            logger.debug("[AUTHZ] LDAP group match")
             return True
-
-        logger.debug("[AUTHZ] No rule matched; user is NOT authorised")
+        logger.debug("[AUTHZ] Not in the LDAP group; user is NOT authorised")
         return False
 
 

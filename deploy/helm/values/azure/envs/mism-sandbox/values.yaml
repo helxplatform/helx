@@ -57,15 +57,15 @@ resty:
 ui:
   config:
     brand_name: helx                             # D7 option B
-    login_title: MISM Sandbox Workspaces
+    login_title: MDSC Sandbox Workspaces
     meta:
-      title: MISM Sandbox
+      title: MDSC Sandbox
     brand_description:
       html: |
         <a href="https://helxplatform.github.io/">HeLx</a> empowers researchers to work with their
         preferred tools and apps in the cloud at scale without installation or other infrastructure concerns.
         <br />&nbsp;<br />
-        The MISM Sandbox is a deployment of HeLx for researchers and students to use and explore.
+        The MDSC Sandbox is a deployment of HeLx for researchers and students to use and explore.
     support:
       help_portal_url: https:\/\/renci.atlassian.net\/servicedesk\/customer\/portal\/9   # confirm MISM support URLs
       user_guide_url: https:\/\/renci.atlassian.net\/wiki\/x\/BID7P

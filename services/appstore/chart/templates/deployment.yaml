@@ -113,6 +113,21 @@ spec:
             configMapKeyRef:
               key: ALLOW_SAML_LOGIN
               name: {{ include "appstore.fullname" . }}-env
+        - name: SOCIALACCOUNT_EMAIL_AUTHENTICATION
+          valueFrom:
+            configMapKeyRef:
+              key: SOCIALACCOUNT_EMAIL_AUTHENTICATION
+              name: {{ include "appstore.fullname" . }}-env
+        - name: USERNAME_FROM_EMAIL_LOCALPART
+          valueFrom:
+            configMapKeyRef:
+              key: USERNAME_FROM_EMAIL_LOCALPART
+              name: {{ include "appstore.fullname" . }}-env
+        - name: OIDC_DISPLAY_NAME
+          valueFrom:
+            configMapKeyRef:
+              key: OIDC_DISPLAY_NAME
+              name: {{ include "appstore.fullname" . }}-env
         {{- if .Values.saml.AUTHORITY_URL }}
         - name: SAML2_AUTH_ASSERTION_URL
           valueFrom:

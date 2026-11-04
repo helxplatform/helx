@@ -36,8 +36,11 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | django.DJANGO_COOKIE_SECURE | string | `"true"` |  |
 | django.DOCKSTORE_APPS_BRANCH | string | `"v1.6.0"` | Specify the git branch to use for HeLx app specifications.  When declaring 'tycho.externalAppRegistryRepo' leave this as an empty string. |
 | django.IMAGE_DOWNLOAD_URL | string | `""` | Specify URL to use for the "Image Download" link on the top part of website. |
+| django.OIDC_DISPLAY_NAME | string | `""` | Label for the OIDC login button. Empty uses OIDC_NAME, which stays the provider id in the login and callback URLs. |
 | django.PRODUCT_LINKS | list | `[]` |  |
 | django.SESSION_IDLE_TIMEOUT | string | `"2592000"` | idle timeout for user web session |
+| django.SOCIALACCOUNT_EMAIL_AUTHENTICATION | string | `"false"` | Log a social login into the existing user with the same verified email (allauth SOCIALACCOUNT_EMAIL_AUTHENTICATION), so admins can pre-create users with a chosen username. ("true" \| "false") |
+| django.USERNAME_FROM_EMAIL_LOCALPART | string | `"false"` | When a social login's username is an email address, use the part before the "@" (suffixed if taken) as the username. Usernames become pod labels and LDAP uids, which can't contain "@". ("true" \| "false") |
 | djangoSettings | string | `"helx"` | set the theme for appstore (bdc, braini, restartr, scidas) |
 | extraEnv | object | `{}` |  |
 | fetcherImage.pullPolicy | string | `"IfNotPresent"` | pull policy |

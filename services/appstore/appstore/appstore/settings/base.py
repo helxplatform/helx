@@ -113,7 +113,19 @@ ACCOUNT_EMAIL_REQUIRED = True
 SOCIALACCOUNT_ADAPTER = "appstore.adapter.SocialAccountAdapter"
 SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
+# Log a social login into the existing user with the same email, so an admin can
+# pre-create a user with the username they need. allauth only does this for
+# addresses the provider marks verified. Off unless enabled.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = (
+    os.environ.get("SOCIALACCOUNT_EMAIL_AUTHENTICATION", "false").lower() == "true"
+)
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+# When a social login's username is an email address, build the username from
+# the part before the "@" instead (jdoe@example.org -> jdoe). Usernames become
+# pod labels and LDAP uids, neither of which can contain "@". Off unless enabled.
+USERNAME_FROM_EMAIL_LOCALPART = (
+    os.environ.get("USERNAME_FROM_EMAIL_LOCALPART", "false").lower() == "true"
+)
 
 SOCIALACCOUNT_PROVIDERS = {
     "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}},
@@ -197,6 +209,10 @@ if OIDC_NAME != "":
     OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID","")
     OIDC_SECRET = os.environ.get("OIDC_SECRET","")
     OIDC_SERVER_URL = os.environ.get("OIDC_SERVER_URL","")
+    # The label shown on the login button. OIDC_NAME stays the provider id,
+    # which is part of the login and callback URLs and keys existing users'
+    # social accounts, so changing the label must not change it.
+    OIDC_DISPLAY_NAME = os.environ.get("OIDC_DISPLAY_NAME", "") or OIDC_NAME
 
     SOCIALACCOUNT_PROVIDERS.update(
     {
@@ -204,7 +220,7 @@ if OIDC_NAME != "":
             "APPS": [
              {
                 "provider_id": OIDC_NAME,
-                "name": OIDC_NAME,
+                "name": OIDC_DISPLAY_NAME,
                 "client_id": OIDC_CLIENT_ID,
                 "secret": OIDC_SECRET,
                 "settings": { "server_url": OIDC_SERVER_URL }

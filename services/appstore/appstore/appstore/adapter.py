@@ -1,5 +1,6 @@
 import logging
 from allauth.account.adapter import DefaultAccountAdapter
+from allauth.account.utils import user_username
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 
 from django.conf import settings
@@ -70,6 +71,16 @@ class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
         return url
     
 class SocialAccountAdapter(DefaultSocialAccountAdapter):
+    def populate_user(self, request, sociallogin, data):
+        user = super().populate_user(request, sociallogin, data)
+        # Some providers (e.g. Keycloak) send the email address as the username.
+        # Clearing it makes the account adapter generate one, and
+        # LoginRedirectAdapter.generate_unique_username builds it from the email's
+        # local part, suffixing it when that username is taken.
+        if settings.USERNAME_FROM_EMAIL_LOCALPART and "@" in (user_username(user) or ""):
+            user_username(user, "")
+        return user
+
     def on_authentication_error(self, request, provider, error=None, exception=None, extra_context=None):
         provider_id = provider.id if provider else "unknown"
         error_code = error.name if error else "unknown"

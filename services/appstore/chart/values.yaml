@@ -260,6 +260,17 @@ django:
   ALLOW_DJANGO_LOGIN: ""
   # -- show SAML log in fields (true | false)
   ALLOW_SAML_LOGIN: ""
+  # -- Log a social login into the existing user with the same verified email
+  # (allauth SOCIALACCOUNT_EMAIL_AUTHENTICATION), so admins can pre-create users
+  # with a chosen username. ("true" | "false")
+  SOCIALACCOUNT_EMAIL_AUTHENTICATION: "false"
+  # -- When a social login's username is an email address, use the part before
+  # the "@" (suffixed if taken) as the username. Usernames become pod labels and
+  # LDAP uids, which can't contain "@". ("true" | "false")
+  USERNAME_FROM_EMAIL_LOCALPART: "false"
+  # -- Label for the OIDC login button. Empty uses OIDC_NAME, which stays the
+  # provider id in the login and callback URLs.
+  OIDC_DISPLAY_NAME: ""
 
   # -- Specify URL to use for the "Image Download" link on the top part of website.
   IMAGE_DOWNLOAD_URL: ""

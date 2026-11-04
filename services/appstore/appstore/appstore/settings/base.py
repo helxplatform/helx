@@ -49,6 +49,19 @@ TYCHO_MODE = os.environ.get("TYCHO_MODE", "null" if DEV_PHASE == "stub" else "li
 # Needs to be JSON-encoded since expressions can contain basically any character that would be used as a delimiter.
 AUTO_WHITELIST_PATTERNS = json.loads(os.environ.get("AUTO_WHITELIST_PATTERNS", "[]"))
 
+# Create an LDAP account at first login for users whose verified email is in one
+# of these domains (comma-separated, e.g. "duke.edu") and who have no entry, so
+# users that ldap-sync doesn't sync can launch apps. Needs USERNAME_FROM_LDAP.
+# Empty turns it off. See core/ldap_provision.py.
+LDAP_PROVISION_EMAIL_DOMAINS = [
+    d.strip().lower()
+    for d in os.environ.get("LDAP_PROVISION_EMAIL_DOMAINS", "").split(",")
+    if d.strip()
+]
+LDAP_PROVISION_UID_MIN = int(os.environ.get("LDAP_PROVISION_UID_MIN", "2000000"))
+LDAP_PROVISION_UID_MAX = int(os.environ.get("LDAP_PROVISION_UID_MAX", "2099999"))
+LDAP_PROVISION_GID_NUMBER = int(os.environ.get("LDAP_PROVISION_GID_NUMBER", "1025"))
+
 # Variables used for an external Tycho app registry.
 # ToDo: Consider setting the default value of TYCHO_APP_REGISTRY_REPO to
 # "https://github.com/helxplatform/helx-apps/raw" and remove any other similar
@@ -113,7 +126,20 @@ ACCOUNT_EMAIL_REQUIRED = True
 SOCIALACCOUNT_ADAPTER = "appstore.adapter.SocialAccountAdapter"
 SOCIALACCOUNT_QUERY_EMAIL = ACCOUNT_EMAIL_REQUIRED
 SOCIALACCOUNT_STORE_TOKENS = True
+# Log a social login into the existing user with the same email, so an admin can
+# pre-create a user with the username they need. allauth only does this for
+# addresses the provider marks verified. Off unless enabled.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = (
+    os.environ.get("SOCIALACCOUNT_EMAIL_AUTHENTICATION", "false").lower() == "true"
+)
 SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+# Take a social login's username from LDAP: the uid of the one entry whose mail
+# is the login's verified email. A login with no such entry is refused, unless
+# its domain is in LDAP_PROVISION_EMAIL_DOMAINS and an entry is created for it.
+# Building usernames from emails instead could hand someone another person's
+# LDAP identity and home directory. SAML logins keep the IdP's username. Off
+# unless enabled.
+USERNAME_FROM_LDAP = os.environ.get("USERNAME_FROM_LDAP", "false").lower() == "true"
 
 SOCIALACCOUNT_PROVIDERS = {
     "google": {"SCOPE": ["profile", "email"], "AUTH_PARAMS": {"access_type": "offline"}},
@@ -197,6 +223,10 @@ if OIDC_NAME != "":
     OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID","")
     OIDC_SECRET = os.environ.get("OIDC_SECRET","")
     OIDC_SERVER_URL = os.environ.get("OIDC_SERVER_URL","")
+    # The label shown on the login button. OIDC_NAME stays the provider id,
+    # which is part of the login and callback URLs and keys existing users'
+    # social accounts, so changing the label must not change it.
+    OIDC_DISPLAY_NAME = os.environ.get("OIDC_DISPLAY_NAME", "") or OIDC_NAME
 
     SOCIALACCOUNT_PROVIDERS.update(
     {
@@ -204,7 +234,7 @@ if OIDC_NAME != "":
             "APPS": [
              {
                 "provider_id": OIDC_NAME,
-                "name": OIDC_NAME,
+                "name": OIDC_DISPLAY_NAME,
                 "client_id": OIDC_CLIENT_ID,
                 "secret": OIDC_SECRET,
                 "settings": { "server_url": OIDC_SERVER_URL }

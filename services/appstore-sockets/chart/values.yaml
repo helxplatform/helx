@@ -48,7 +48,8 @@ secret:
     enabled: false
 
 requirePublishSecret: true
-# If running outside helx-chart, you will need to override this value.
+# The appstore chart names its Service "appstore" unless its fullnameOverride
+# is set. Set this to that same value when it is.
 appstoreServiceNameOverride: ""
 
 podAnnotations: {}
@@ -59,7 +60,16 @@ serviceAccount:
   annotations: {}
   name:
 
+# Not applied to any container. The platform values files set runAsUser here,
+# so wiring it in would change the user both containers run as; that is left
+# for a deliberate change. containerSecurityContext below is what reaches them.
 securityContext: {}
+
+# -- Container securityContext, applied to every container this chart renders.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
 
 serviceName: appstore-sockets-service
 service:

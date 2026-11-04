@@ -28,6 +28,7 @@ data:
   ALLOW_SAML_LOGIN: "{{ .Values.django.ALLOW_SAML_LOGIN }}"
   IMAGE_DOWNLOAD_URL: "{{ .Values.django.IMAGE_DOWNLOAD_URL }}"
   DJANGO_SESSION_IDLE_TIMEOUT: "{{ .Values.django.SESSION_IDLE_TIMEOUT }}"
+  DJANGO_COOKIE_SECURE: "{{ .Values.django.DJANGO_COOKIE_SECURE }}"
 
   # Tycho-launched app pod settings
   TYCHO_INIT_RESOURCES_CPUS: "{{ .Values.tycho.init.resources.cpus }}"

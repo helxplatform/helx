@@ -1,27 +1,34 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this service.
+
+This service is part of the HeLx monorepo. The repository-wide rules in the
+root `AGENTS.md` (versioning, chart dependencies, never touching Harbor or
+other registries) take precedence over anything here, and `AGENTSINIT.md`
+explains how user-mutator fits into the platform.
 
 ## Project Overview
 
 This is a Kubernetes Mutating Admission Webhook that dynamically modifies Kubernetes Deployment resources for user-specific customization. The webhook intercepts deployment creation requests and injects user-specific volumes, volume mounts, security contexts, environment variables, and LDAP configurations based on the username label.
 
-**Primary Language**: Go 1.23
+**Primary Language**: Go 1.26 (from `webhook-server/go.mod`)
 **Key Dependencies**: kubernetes client-go, gorilla/mux, go-ldap
 
 ## Build and Development Commands
 
 ### Building
 ```bash
-# Build Docker image (multi-architecture)
-make build
-
 # Build Go binary locally
 make go-build
 
-# Run tests
+# Run tests; CI does not run them
 make go-test
 ```
+
+To build the image exactly as CI does, run `make docker-build SERVICE=user-mutator`
+from the repository root. CI publishes it; never run `make push` here. This
+directory's `make build` tags a hardcoded version that is not the chart's
+`appVersion`.
 
 ### Deployment
 
@@ -80,7 +87,7 @@ Edit `config.env` to customize:
 ### Main Components
 
 **webhook-server/** - Main webhook admission controller
-- Single Go application (`main.go`, ~1560 lines)
+- Single Go application (`main.go`)
 - HTTP server listening on port 8443 with TLS
 - Endpoints:
   - `/mutate` - Admission review handler
@@ -99,6 +106,7 @@ Edit `config.env` to customize:
 - Generates the webhook serving certificate and renders the cluster-scoped `MutatingWebhookConfiguration` by default (`secret.mode: generate` and `webhook.enabled: true`), so `helm install` needs no `make` targets
 - To opt out, select `secret.mode: existingSecret`, `values`, or `externalSecret`; there is no implicit fallback to a historical Secret name
 - `make deploy-webhook-server` passes those two opt-outs, because that target still creates the certificate and the webhook configuration out of band
+- `webhook.mode` is `create` (default, applies the configuration) or `saveToConfigMap`, which renders the identical manifest into a same-named ConfigMap for a cluster admin to apply, so a deployer without cluster-level permission can install the chart. Both modes render the manifest from one `define` in `templates/webhook.yaml`
 - `templates/webhook.yaml` renders the generated Secret and the webhook configuration together on purpose: Helm templates are pure functions, so splitting them would produce a CA bundle that does not match the serving certificate on a fresh install
 - Namespaces are selected by the automatic `kubernetes.io/metadata.name` label, so no namespace has to be labelled and the chart needs no namespace-patching RBAC
 - Mounts TLS certificates, optional LDAP credentials, caller-managed additional Secrets, and configuration
@@ -226,7 +234,7 @@ The webhook includes extensive debug logging (use `slog.LevelDebug` in main):
 - `printVolumeMounts`: Logs all volume mounts being added
 - `printPatchOperations`: Logs JSONPatch operations
 
-Set log level in `webhook-server/main.go:1533`:
+Set log level where `main` in `webhook-server/main.go` creates the logger:
 ```go
 logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
     Level: slog.LevelDebug, // Change to Debug for verbose logs
@@ -250,21 +258,21 @@ Python scripts for setup and testing:
 
 ### Adding a New Volume Source Type
 
-1. Add case in `parseVolumeSources` switch (line 643)
+1. Add case in the `parseVolumeSources` switch
 2. Implement resource discovery logic (similar to PVC/Secret cases)
 3. Return slice of `VolumeContext` with unique volume names and vars map
 4. Update documentation for new scheme syntax
 
 ### Modifying User Profile Schema
 
-1. Update `UserProfiles` struct (line 90)
-2. Update profile loading in `ReadUserProfilesFromFile` (line 313)
-3. Update `appendProfiles` to handle new fields (line 1316)
+1. Update the `UserProfiles` struct
+2. Update profile loading in `ReadUserProfilesFromFile`
+3. Update `appendProfiles` to handle new fields
 4. Regenerate test data with `tools/generate_testdata.py`
 
 ### Adding New LDAP Attributes
 
-1. Add field to `User` struct (line 102)
-2. Add attribute name to `searchLDAP` SearchRequest (line 375)
-3. Map attribute in `searchLDAP` result parsing (line 416)
+1. Add field to the `User` struct
+2. Add attribute name to the `searchLDAP` SearchRequest
+3. Map attribute in `searchLDAP` result parsing
 4. Use attribute in `constructSecurityContexts` or `constructEnv` as needed

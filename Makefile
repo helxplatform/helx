@@ -18,7 +18,7 @@ USER_MUTATOR_URL                ?= https://github.com/helxplatform/user-mutator.
 APPSTORE_PREFIX                 ?= services/appstore
 APPSTORE_BRANCH                 ?= master
 APPSTORE_CHART_PREFIX           ?= services/appstore/chart
-APPSTORE_CHART_BRANCH           ?= develop
+APPSTORE_CHART_BRANCH           ?= main
 APPSTORE_PREPULLER_PREFIX       ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH       ?= main
 APPSTORE_SOCKETS_PREFIX         ?= services/appstore-sockets
@@ -63,7 +63,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 # Defaults for the developer-facing targets. All are overridable on the command
 # line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked --umbrella-above-release
+CHECK_VERSIONS_FLAGS            ?= --include-untracked
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -140,9 +140,10 @@ HELM_FLAGS                      ?=
 # volumeClaimTemplates, which helm never owned in the first place. Names the
 # charts build out of the release name are written with $(RELEASE); the rest are
 # fixed by whichever chart creates them. Set either variable empty to leave that
-# kind of resource alone.
+# kind of resource alone. The shared user storage claim stdnfs is deliberately
+# not in the default: it holds every user's home directory, so deleting it has
+# to be asked for by name, e.g. UNINSTALL_PVCS="stdnfs ...".
 UNINSTALL_PVCS                  ?= appstore-postgresql-pvc \
-                                   stdnfs \
                                    data-$(RELEASE)-postgresql-0 \
                                    data-$(RELEASE)-ldap-sync-postgres-0 \
                                    data-openldap-0
@@ -234,7 +235,7 @@ help:
 	@echo
 	@echo 'More help:'
 	@echo '  make help-subtrees    Pulling service subtrees, mirroring vendored charts'
-	@echo '  make help-ci          Checks and lock maintenance that mirror CI'
+	@echo '  make help-ci          Checks that mirror CI'
 	@echo '  make help-build       Building and inspecting service charts and images'
 	@echo '  make help-local-dev   Building, deploying, and tearing down local builds'
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
@@ -246,7 +247,7 @@ help-subtrees:
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
-#help-ci: Show the CI-shaped checks and lock-maintenance targets
+#help-ci: Show the CI-shaped checks
 help-ci:
 	@awk -f $(HELP_AWK) -v topic=ci $(THIS_MAKEFILE)
 	@echo
@@ -364,7 +365,12 @@ help-all-vars:
 setup: $(PYTHON_READY) add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected
-# URL.
+# URL. Either way, stop it fetching tags: the upstream repos have their own v*
+# tags (e.g. helx-ui v6.4.4) that only clutter the clone; check-versions ignores
+# them, since they carry no umbrella chart. A clone that already has them can
+# drop them with:
+# git tag -l | sort | comm -23 - <(git ls-remote --tags origin |
+#   sed 's#.*refs/tags/##;s#\^{}##' | sort -u) | xargs -r git tag -d
 define ensure-remote
 	@if git remote get-url "$(1)" >/dev/null 2>&1; then \
 		if test "$$(git remote get-url "$(1)")" != "$(2)"; then \
@@ -377,7 +383,8 @@ define ensure-remote
 	else \
 		echo "Adding remote $(1) -> $(2)"; \
 		git remote add "$(1)" "$(2)"; \
-	fi
+	fi; \
+	git config "remote.$(1).tagOpt" --no-tags
 endef
 
 # check-incoming: Refuse to pull a subtree whose incoming tree has oversized
@@ -671,11 +678,12 @@ add-vendored-remote:
 # check-vendored-sync: Report whether each vendored chart still matches the
 # upstream subdirectory it was taken from. Read-only: it fetches and compares,
 # and never merges or edits files. Succeeds even when a chart is behind, so it
-# reads as the status report it is; STRICT=1 exits non-zero instead, which is
-# how CI gates on it. "local edits" means the chart also differs from upstream
-# at its recorded commit, so a pull may conflict; it is the expected state for
-# resty. Like check-versions, this compares committed content, so an
-# uncommitted or staged chart edit is invisible to it.
+# reads as the status report it is; STRICT=1 exits non-zero instead, for a
+# caller that wants to gate on it (no workflow runs this target). "local edits"
+# means the chart also differs from upstream at its recorded commit, so a pull
+# may conflict; it is the expected state for resty. Like check-versions, this
+# compares committed content, so an uncommitted or staged chart edit is
+# invisible to it.
 # [HELX_CHART_URL, HELX_CHART_BRANCH, VENDORED_CHARTS, STRICT]
 check-vendored-sync: add-vendored-remote
 	@set -euo pipefail; \
@@ -907,6 +915,10 @@ ci-validate-everything: $(PYTHON_READY)
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
+	@# The release floor is read from origin/main and the v* tags on it.
+	@# A stale copy sets the floor too low, so a local pass could fail in CI.
+	@git fetch --quiet origin main 2>/dev/null || \
+		echo "warning: could not fetch origin main; the release floor may be stale." >&2
 	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
 
 # ci-tests: Run the unit tests for the CI helpers. [PYTHON, VENV]
@@ -969,6 +981,7 @@ pull-develop:
 		exit 1; \
 	fi; \
 	GIT_EDITOR=true git commit --no-edit
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 # Recreate generated locks, then stage only locks that were unmerged before
 # regeneration. Ordinary stale locks remain unstaged, as before.
@@ -984,6 +997,7 @@ define sync-lock-and-resolve
 	fi
 endef
 
+##@ locks Chart.lock maintenance
 # sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
 # Charts without dependencies are skipped rather than treated as an error.
 # [PYTHON, VENV]
@@ -1002,7 +1016,6 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
-##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ build Building and inspecting one service
 # build-chart SERVICE=<name>: Vendor dependencies, lint, and package one

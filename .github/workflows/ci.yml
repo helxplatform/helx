@@ -33,12 +33,11 @@ env:
 jobs:
   self-test:
     name: Self-test CI
-    if: github.event.action != 'edited' || github.event.changes.base.ref.from
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -60,20 +59,28 @@ jobs:
       - name: Validate CI configuration
         run: python .github/scripts/ci.py validate-config
 
-      # Every pull request is gated, not just those targeting the default branch.
-      # A chart edited without a version bump would otherwise reach develop and be
-      # vendored into a candidate under a version that is already published with
-      # different content.
-      # The umbrella is only published immutably from the default branch. On a
-      # pull request into any other branch it is judged against the last
-      # published release rather than the base, so only the first pull request
-      # after a release has to choose the next version -- and whoever chooses it
-      # knows whether the change is a patch, a minor, or a major. Its dependency
-      # pins are still enforced and it still may not regress. Raising it starts
+      # This step fails a pull request into main or develop when a chart or
+      # image whose packaged files changed does not carry a higher version than
+      # the last release. A pull request into any other branch skips it. Its
+      # changes are checked when that branch's own pull request into develop or
+      # main runs CI.
+      # On a pull request into main, the base is what is currently released, so
+      # every changed version must increase over it.
+      # On a pull request into develop, changes are judged against what was
+      # last released rather than the base, so that not every pull request into
+      # develop has to bump versions. What was last released is the highest v*
+      # tag on main whose umbrella Chart.yaml carries that version, and main's
+      # Chart.yaml for each service chart and appVersion. So only the first
+      # pull request after a release has to pick the next version; a later one
+      # can raise it further if its changes call for a bigger bump. The
+      # umbrella's dependency pins are still enforced, and no version may
+      # regress against the base. Raising the umbrella's version starts
       # publishing a new <version>-develop channel automatically, because the
-      # candidate tag is derived from this version.
+      # candidate tag is derived from it.
       - name: Require chart and image version increases
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request' &&
+          (github.base_ref == github.event.repository.default_branch || github.base_ref == 'develop')
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -82,9 +89,12 @@ jobs:
         run: |
           set -euo pipefail
           arguments=(check-versions --base "$BASE_SHA")
-          if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
-            arguments+=(--umbrella-above-release)
-            echo "Base is $BASE_REF, not $DEFAULT_BRANCH: the umbrella is judged against the last release."
+          if [[ "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
+            # The base is what is released.
+            arguments+=(--release-ref "$BASE_SHA")
+          else
+            arguments+=(--release-ref "origin/$DEFAULT_BRANCH")
+            echo "Base is $BASE_REF, not $DEFAULT_BRANCH: versions are judged against the last release."
           fi
           python .github/scripts/ci.py "${arguments[@]}"
 
@@ -105,7 +115,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -126,7 +136,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -153,7 +163,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -175,7 +185,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -196,7 +206,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Check out complete history
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -244,7 +254,7 @@ jobs:
         run: echo 'No image source changes require a build.'
       - name: Check out complete history
         if: matrix.image.repository != ''
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -260,6 +270,9 @@ jobs:
 
   ci-gate:
     name: CI gate
+    # always(), so a cancelled run still reports, as a failure. Branch
+    # protection counts a skipped check as passing, so a gate that skipped
+    # itself on cancellation would show a run that checked nothing as green.
     if: always()
     needs:
       - self-test
@@ -272,6 +285,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      # Only success passes. No job here skips on purpose: the chart matrix
+      # always lists every service chart, and the image matrix falls back to a
+      # "No images to build" entry. So a skipped job means something it needs
+      # failed, or a condition skipped it by mistake, and a gate that let that
+      # through would pass a run that checked nothing. Cancelled fails too. A
+      # run cancelled because a newer one replaced it, after a push or a PR
+      # edit, leaves a failed gate behind, but the newer run's gate reports
+      # after it and is the one branch protection reads.
       - name: Require every CI job to pass
         shell: bash
         env:
@@ -298,7 +319,7 @@ jobs:
             name=${status%%|*}
             result=${status#*|}
             printf '%-28s %s\n' "$name" "$result"
-            if [[ "$result" != success && "$result" != skipped ]]; then
+            if [[ "$result" != success ]]; then
               echo "::error::$name finished with result: $result"
               failed=1
             fi

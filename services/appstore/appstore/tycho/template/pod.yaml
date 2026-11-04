@@ -53,15 +53,14 @@ spec:
   - name: volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     imagePullPolicy: IfNotPresent
-    {% if system.init_security_context.run_as_user or system.init_security_context.run_as_group %}
     securityContext:
+      allowPrivilegeEscalation: false
       {% if system.init_security_context.run_as_user %}
       runAsUser: {{ system.init_security_context.run_as_user }}
       {% endif %}
       {% if system.init_security_context.run_as_group %}
       runAsGroup: {{ system.init_security_context.run_as_group }}
       {% endif %}
-    {% endif %}
     # Fixed resources
     resources:
       requests:
@@ -111,6 +110,7 @@ spec:
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     imagePullPolicy: IfNotPresent
     securityContext:
+      allowPrivilegeEscalation: false
       runAsUser: {{ system.init_nobody_uid }}
       runAsGroup: {{ system.init_nobody_gid }}
     # Fixed resources
@@ -231,15 +231,16 @@ spec:
 {% for container in system.containers %}    
   - name: {{ container.name }}
     image: {{ container.image }}
-    {% if system.security_context.run_as_user or system.security_context.run_as_group %}
+    # Always set: AKS denies pods whose containers leave it unset, and the
+    # user-mutator webhook is not guaranteed to have added it.
     securityContext:
+      allowPrivilegeEscalation: false
       {% if system.security_context.run_as_user %}
       runAsUser: {{ system.security_context.run_as_user }}
       {% endif %}
       {% if system.security_context.run_as_group %}
       runAsGroup: {{ system.security_context.run_as_group }}
       {% endif %}
-    {% endif %}
 {% if container.command %}
     command: {{ container.command }}
 {% endif %}

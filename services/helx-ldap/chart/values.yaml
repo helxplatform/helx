@@ -42,6 +42,22 @@ secret:
     legacySecret: ""
 
 openldap:
+  # Upstream leaves this disabled. Enabled, it applies to every OpenLDAP
+  # container (init-schema, init-tls-secret, openldap), which is how
+  # allowPrivilegeEscalation: false reaches them; the AKS policy that denies
+  # privilege escalation requires it. Upstream's runAsUser and runAsNonRoot come
+  # with it and are spelled out here, because a null set here is dropped before
+  # it reaches the subchart when this chart is itself a dependency of the
+  # umbrella. 1001 is the OpenLDAP image's own user, so only the two init
+  # containers change identity; they write only to emptyDir volumes, which
+  # podSecurityContext.fsGroup 1001 keeps writable. On OpenShift, set enabled
+  # to false so the SCC allocates IDs.
+  containerSecurityContext:
+    enabled: true
+    allowPrivilegeEscalation: false
+    runAsUser: 1001
+    runAsNonRoot: true
+
   # Keep the service name stable for HeLx consumers, including appstore's
   # default ldap://openldap URI.
   fullnameOverride: openldap
@@ -100,6 +116,10 @@ openldap:
       tag: v1.31.0
       # -- Image pull policy for the migration hook.
       pullPolicy: IfNotPresent
+    # -- Container securityContext for the migration hook. allowPrivilegeEscalation:
+    # false is required by the AKS policy that denies privilege escalation.
+    securityContext:
+      allowPrivilegeEscalation: false
     job:
       # -- Number of retries for the migration hook Job.
       backoffLimit: 0

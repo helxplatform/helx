@@ -6,12 +6,12 @@
 **/chart/charts/
 deploy/helm/helx-chart/charts/
 
-# Virtual environment (created by `make venv`)
+# Virtual environment (created on demand, or by `make ci-pip-install`)
 .venv
 
-# Packaged charts from `make ci-build-helx-chart`
+# Packaged charts from `make build-helx-chart`
 dist/
 
 # Local development. The tooling in deploy/local-dev/ is tracked; only a
-# developer's own list of values files, read by `make ci-helm-deploy`, is not.
+# developer's own list of values files, read by `make helm-deploy`, is not.
 deploy/local-dev/local-values-files.env

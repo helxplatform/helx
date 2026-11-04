@@ -1465,8 +1465,12 @@ class HelpLayoutTests(unittest.TestCase):
                 "load-helx-images",
                 "push-helx-images",
                 "build-helx-chart",
-                "helm-deploy",
+                "helm-deploy-from-local",
             ),
+        ),
+        (
+            "##@ local-dev Deploying a published candidate",
+            ("chart-registry-login", "helm-deploy-from-ghcr"),
         ),
         ("##@ local-dev Tearing down a release", ("uninstall-release",)),
     )

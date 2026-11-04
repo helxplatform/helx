@@ -76,6 +76,7 @@ in the right group no matter where it sits in the file. Comments cannot expand
 | `make build-helx-chart` | Package the umbrella chart |
 | `make docker-build SERVICE=<name>` | Build one service image as CI builds it |
 | `make candidate-version` | Print the version the candidate channel publishes under |
+| `make helm-deploy-from-ghcr` | Deploy the current `develop` candidate from GHCR |
 | `make help` | Help documentation
 
 ### Working on a chart
@@ -184,16 +185,37 @@ leaves the umbrella pin stale, which is a failure this will catch.
 ### Deploying a branch
 
 Every push to `develop` publishes a mutable candidate of the umbrella, pinned to
-that commit's images:
+that commit's images, at
+`oci://ghcr.io/helxplatform/helm-charts/helx:<umbrella-version>-develop`. It is
+a SemVer prerelease, so it always sorts below the matching release. To deploy
+the current one:
 
 ```bash
-helm registry login ghcr.io
-helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version <umbrella-version>-develop -n <deploy-namespace>
+make chart-registry-login
+make helm-deploy-from-ghcr RELEASE=helx NAMESPACE=<deploy-namespace>
 ```
 
-It is a SemVer prerelease, so it always sorts below the matching release. To
-find the version without opening the workflow run:
+The version comes from the umbrella's `Chart.yaml` on `origin/develop`, which
+the target fetches first, not from your working tree: your branch may carry an
+umbrella version `develop` never published, or an older one whose candidate has
+been abandoned. Before deploying it prints the chart, version, release, context,
+namespace, and values files, reminds you to be logged in to GHCR, and asks for a
+`y`. Values files come from the same two places as for a local build (see
+[Installing](#installing)), and `ASSUME_YES` and `HELM_FLAGS` work the same way.
+
+`make chart-registry-login` runs `helm registry login` for the host of
+`CHART_REGISTRY`: `ghcr.io` by default, or whatever host you point
+`CHART_REGISTRY` at. For GHCR the username is your GitHub username and the
+password a personal access token (classic) with the `read:packages` scope. helm
+keeps the login, so you only repeat this when the token changes or expires.
+
+`CHART_VERSION=<version>` deploys any other published umbrella version
+instead, such as a release. Because a candidate is republished under the same
+version on every push, you get whatever CI published last; a `develop` run
+still in progress has not replaced it yet.
+
+On an up-to-date `develop` checkout, this prints the candidate version without
+deploying anything:
 
 ```bash
 make candidate-version
@@ -222,13 +244,12 @@ vendors every dependency and produces a self-contained `.tgz` you can install
 anywhere.
 
 **If your change is already on `develop`**, you have the option to use the already
-published candidate with your commit's images already pinned:
+published candidate with your commit's images already pinned; see [Deploying a
+branch](#deploying-a-branch):
 
 ```bash
-helm registry login ghcr.io
-helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version $(make -s candidate-version) -n <deploy-namespace> \
-  --values my-values.yaml
+make chart-registry-login
+make helm-deploy-from-ghcr RELEASE=helx NAMESPACE=<deploy-namespace>
 ```
 
 **For work that is not pushed yet**, or if you just want to build everything locally:
@@ -342,29 +363,31 @@ helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
      -n <deploy-namespace> --values my-values.yaml
    ```
 
-   Or let `make helm-deploy` find that archive and your values files for
-   you; see [Deploying and tearing down a local
+   Or let `make helm-deploy-from-local` find that archive and your values
+   files for you; see [Deploying and tearing down a local
    build](#deploying-and-tearing-down-a-local-build).
 
 ### Deploying and tearing down a local build
 
-`make helm-deploy` installs what `make build-helx-chart` just packaged,
-and `make uninstall-release` removes an installed release along with most of the
-storage and credentials Helm deliberately leaves behind. Both talk to whatever
-cluster your current `kubectl` context points at, and both print the context and
-namespace before they do anything.
+`make helm-deploy-from-local` installs what `make build-helx-chart` just
+packaged, and `make uninstall-release` removes an installed release along with
+most of the storage and credentials Helm deliberately leaves behind. Both talk
+to whatever cluster your current `kubectl` context points at, and both print the
+context and namespace before they do anything. Everything below about
+`RELEASE`, `NAMESPACE`, values files, `ASSUME_YES`, and `HELM_FLAGS` applies to
+`make helm-deploy-from-ghcr` too.
 
 #### Installing
 
 ```bash
 make build-helx-chart SERVICES="user-mutator ui"
-make helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace>
+make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace>
 ```
 
 You do not need to name the archive. `build-helx-chart` writes its path to
-`dist/charts/.helx-chart.path`, and `helm-deploy` reads it from there, so
-the two always agree on which build is being installed — a candidate build
-derives its version from the channel and commit, so the file name is not
+`dist/charts/.helx-chart.path`, and `helm-deploy-from-local` reads it from
+there, so the two always agree on which build is being installed — a candidate
+build derives its version from the channel and commit, so the file name is not
 something you could predict anyway. If that pointer is missing, or names an
 archive that has been deleted, the deploy stops and tells you to package again.
 
@@ -399,15 +422,16 @@ deploy/helm/values/azure/envs/ai-sb-test/values.yaml
 
 A missing list, an empty one, or a line naming a file that is not there is a
 warning rather than an error — but since the usual result is a release quietly
-missing its secrets, the deploy asks before continuing. `ASSUME_YES=1` answers
-that in advance for a non-interactive run, and with no terminal to ask on it
-cancels instead of assuming yes.
+missing its secrets, the deploy asks before continuing.
+`helm-deploy-from-ghcr` asks every time, warnings or not. `ASSUME_YES=1`
+answers either prompt in advance for a non-interactive run, and with no
+terminal to ask on the deploy cancels instead of assuming yes.
 
 `HELM_FLAGS` is passed through to `helm upgrade --install` last, which is how
 you get a dry run:
 
 ```bash
-make helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace> \
+make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace> \
   HELM_FLAGS="--dry-run --debug"
 ```
 

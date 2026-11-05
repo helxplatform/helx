@@ -184,8 +184,8 @@ leaves the umbrella pin stale, which is a failure this will catch.
 
 ### Deploying a branch
 
-Every push to `develop` publishes a mutable candidate of the umbrella, pinned to
-that commit's images, at
+Every push to `develop` publishes a mutable "candidate" of the umbrella, pinned
+to that commit's images, at
 `oci://ghcr.io/helxplatform/helm-charts/helx:<umbrella-version>-develop`. It is
 a SemVer prerelease, so it always sorts below the matching release. To deploy
 the current one:
@@ -203,11 +203,13 @@ namespace, and values files, reminds you to be logged in to GHCR, and asks for a
 `y`. Values files come from the same two places as for a local build (see
 [Installing](#installing)), and `ASSUME_YES` and `HELM_FLAGS` work the same way.
 
-`make chart-registry-login` runs `helm registry login` for the host of
-`CHART_REGISTRY`: `ghcr.io` by default, or whatever host you point
-`CHART_REGISTRY` at. For GHCR the username is your GitHub username and the
-password a personal access token (classic) with the `read:packages` scope. helm
-keeps the login, so you only repeat this when the token changes or expires.
+`make chart-registry-login` runs `helm registry login` for the host part of
+`CHART_REGISTRY`, which is `ghcr.io` for the default
+`oci://ghcr.io/helxplatform/helm-charts`. Helm logs in to a registry host, not
+to a path inside it, and that one login covers every pull from the host. For
+GHCR the username is your GitHub username and the password a personal access
+token (classic) with the `read:packages` scope. Helm keeps the login, so you
+only repeat this when the token changes or expires.
 
 `CHART_VERSION=<version>` deploys any other published umbrella version
 instead, such as a release. Because a candidate is republished under the same

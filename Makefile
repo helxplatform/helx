@@ -129,8 +129,8 @@ NAMESPACE                       ?=
 # such as a release.
 CHART_REGISTRY                  ?= oci://ghcr.io/helxplatform/helm-charts
 CHART_VERSION                   ?=
-# The host alone -- ghcr.io for the default -- since helm registry login takes a
-# host, not a chart URL, and keeps one login per host.
+# The host alone -- ghcr.io for the default -- since Helm logs in to a host,
+# not a chart URL, and keeps one login per host.
 CHART_REGISTRY_HOST              = $(firstword $(subst /, ,$(patsubst oci://%,%,$(CHART_REGISTRY))))
 # Values files for the helm-deploy-* targets, space separated; each is passed
 # as one -f. These are applied after LOCAL_VALUES_FILE's, so they win on any
@@ -145,13 +145,13 @@ LOCAL_VALUES_FILE               ?= deploy/local-dev/local-values-files.env
 # Answer that confirmation prompt -- and the one uninstall-release always
 # asks -- in advance, for a non-interactive run.
 ASSUME_YES                      ?=
-# Anything else to hand helm, e.g. HELM_FLAGS="--dry-run --debug"
+# Anything else to hand Helm, e.g. HELM_FLAGS="--dry-run --debug"
 HELM_FLAGS                      ?=
-# What uninstall-release deletes once the release itself is gone. helm
+# What uninstall-release deletes once the release itself is gone. Helm's
 # uninstall leaves every one of these behind: the Secrets are chart-managed and
 # annotated helm.sh/resource-policy: keep, the appstore and user storage claims
 # carry that same annotation, and the data-* claims come from StatefulSet
-# volumeClaimTemplates, which helm never owned in the first place. Names the
+# volumeClaimTemplates, which Helm never owned in the first place. Names the
 # charts build out of the release name are written with $(RELEASE); the rest are
 # fixed by whichever chart creates them. Set either variable empty to leave that
 # kind of resource alone. The shared user storage claim stdnfs is deliberately
@@ -322,7 +322,7 @@ help-all-vars:
 	@echo '  ASSUME_YES=1             Skip confirmation prompts.'
 	@echo '  HELP_WIDTH=<columns>     Width make help wraps to.'
 	@echo '                           Default: the terminal width (60-120), else 80.'
-	@echo '  HELM_FLAGS=<flags>       Extra helm arguments, e.g. --dry-run --debug.'
+	@echo '  HELM_FLAGS=<flags>       Extra Helm arguments, e.g. --dry-run --debug.'
 	@echo '  CHART_DIST=<dir>         Where packaged charts land. Default: dist/charts.'
 	@echo '  BASE=<ref>               Base revision for ci-check-versions.'
 	@echo '                           Default: develop.'
@@ -1338,12 +1338,12 @@ helm-deploy-from-local:
 ##> each command. Unset SERVICES to leave every image on its released tag.
 
 ##@ local-dev Deploying a published candidate
-# chart-registry-login: Log helm in to the host of CHART_REGISTRY, ghcr.io by
-# default, so helm-deploy-from-ghcr can pull from it. helm asks for a username
+# chart-registry-login: Log Helm in to the host of CHART_REGISTRY, ghcr.io by
+# default, so helm-deploy-from-ghcr can pull from it. Helm asks for a username
 # and password; for GHCR they are your GitHub username and a personal access
 # token (classic) with the read:packages scope. [CHART_REGISTRY]
 chart-registry-login:
-	@echo 'Logging helm in to $(CHART_REGISTRY_HOST), the host of $(CHART_REGISTRY).'
+	@echo 'Logging Helm in to $(CHART_REGISTRY_HOST), the host of $(CHART_REGISTRY).'
 	$(if $(filter ghcr.io,$(CHART_REGISTRY_HOST)),@echo 'Username: your GitHub username. Password: a personal access token (classic) with read:packages.')
 	@helm registry login "$(CHART_REGISTRY_HOST)"
 
@@ -1381,7 +1381,7 @@ helm-deploy-from-ghcr: $(PYTHON_READY)
 	echo "Deploying $$chart"; \
 	echo "  version   $$version$$version_source"; \
 	$(call deploy-summary); \
-	echo 'You must be logged in to $(CHART_REGISTRY_HOST) before continuing, since helm pulls'; \
+	echo 'You must be logged in to $(CHART_REGISTRY_HOST) before continuing, since Helm pulls'; \
 	echo 'the chart from there. If you are not, answer n, then run:'; \
 	echo '  make chart-registry-login$(if $(filter-out file,$(origin CHART_REGISTRY)), CHART_REGISTRY=$(CHART_REGISTRY))'; \
 	$(call deploy-confirm,always); \
@@ -1393,7 +1393,7 @@ helm-deploy-from-ghcr: $(PYTHON_READY)
 
 ##@ local-dev Tearing down a release
 # uninstall-release RELEASE=<name>: Uninstall RELEASE, then delete the
-# storage and credentials helm leaves behind -- UNINSTALL_PVCS and
+# storage and credentials Helm leaves behind -- UNINSTALL_PVCS and
 # UNINSTALL_SECRETS name them, and only the ones that exist are touched.
 # Everything is listed for confirmation before anything is deleted. RELEASE has
 # to be named explicitly: this deletes data, so the default is not assumed. A

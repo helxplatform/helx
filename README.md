@@ -77,112 +77,72 @@ in the right group no matter where it sits in the file. Comments cannot expand
 | `make docker-build SERVICE=<name>` | Build one service image as CI builds it |
 | `make candidate-version` | Print the version the candidate channel publishes under |
 | `make helm-deploy-from-ghcr` | Deploy the current `develop` candidate from GHCR |
-| `make help` | Help documentation
+| `make helm-deploy-from-local` | Deploy the umbrella chart `make build-helx-chart` packaged |
+| `make uninstall-release RELEASE=<name>` | Uninstall a release and delete the storage and credentials Helm leaves behind |
+| `make help` | List the setup targets and index the rest by topic |
 
-### Working on a chart
-
-Edit the chart, then:
-
-```bash
-make build-chart SERVICE=<name>
-```
-
-That runs exactly what CI runs: it vendors each locked dependency (preferring an
-in-tree chart over the registry), runs `helm lint`, and packages the chart. It
-prints the resulting `.tgz`, which you can install directly:
+### Before you push
 
 ```bash
-helm upgrade --install <release-name> /path/to/<name>-<version>.tgz -n <namespace>
+make pre-push
 ```
 
-Three rules the version gate will hold you to, so it's cheaper to do them up
-front:
+That runs the unit tests, `validate-config`, the version gate, the lock check,
+and a whitespace check. `make setup` also points `core.hooksPath` at
+[`.githooks/`](.githooks), so `git push` runs the same checks. No package
+manager, nothing downloaded. Bypass a single push with
+`git push --no-verify`, and uninstall with `git config --unset core.hooksPath`.
 
-1. **Bump `version:` in `Chart.yaml`** if you changed anything in the service at all.
-   Editing `.gitignore` does not count; editing `templates/`, `values.yaml`,
-   `Chart.yaml`, `Chart.lock`, or `.helmignore` does. The chart's own
-   `.helmignore` is the authority.
-2. **If the chart is an umbrella dependency, bump its pin too.** The declared
-   version in `deploy/helm/helx-chart/Chart.yaml` must equal the in-tree version.
-   Without this the umbrella silently keeps shipping the previous version.
-3. **Run `make sync-locks`** if you touched any `dependencies:` block, and commit
-   the lock alongside the chart.
+The umbrella chart's version only has to sit **above the last release**, not
+increase on every change. So the first pull request after a release picks the
+next version — patch, minor, or major, whichever fits — and later pull requests
+leave it alone. Raising it starts publishing a new `<version>-develop` candidate
+channel; `make candidate-version` tells you which is current. Umbrella
+dependency pins still have to move with the charts they point at.
 
-### Adding or changing a dependency
+The version gate compares against `develop` by default and includes uncommitted
+and untracked files. That last part matters: without it a chart file you have
+created but not yet committed is invisible, and a local pass can still fail in
+CI. Override with `BASE=<ref>`, or `CHECK_VERSIONS_FLAGS=` for committed-only.
+It also fetches `origin main` first, because the release floor is read from
+`origin/main` and the `v*` tags; if the fetch fails it warns and uses what you
+have.
 
-Edit `dependencies:` in `Chart.yaml`, then:
+### Values Files
+
+`make helm-deploy-from-ghcr` and `make helm-deploy-from-local` both take values
+files from two places, applied in this order:
+
+1. every path listed in `deploy/local-dev/local-values-files.env`
+2. every path in `VALUES="a.yaml b.yaml"`, so those win on any shared key
+
+That first file is a useful place to enumerate local values files. Local
+deploys usually need several values files, including ones holding secrets,
+and retyping `--values` for each of them every time is how they get
+forgotten. It is one path per line, each relative to the repository root,
+with `~/` expanded for you; blank lines and `#` comments are ignored. It
+is gitignored, so your cluster's paths and secrets stay out of the
+repository. Start from the sample:
 
 ```bash
-make sync-locks
+cp deploy/local-dev/local-values-files.env.sample deploy/local-dev/local-values-files.env
 ```
 
-Do **not** use `helm dependency update`. Every dependency here is pinned to an
-exact version, so the lock needs no resolution and `sync-locks` derives it with
-no network and no registry login. That also means it works for a version that is
-not published yet. A bumped service chart is not in GHCR until the merge to
-`main`, which `helm dependency update` cannot handle.
+Then list your own files in it. For example:
 
-Semantic ranges such as `^1.0.0` are rejected. A range can never equal a
-resolved lock entry, so `validate-config` fails. Use exact versions!
-
-`sync-locks` writes only the lock. If it finds an unresolved `Chart.lock` merge
-conflict, it recreates that lock from the merged `Chart.yaml` and stages only the
-resolved lock; ordinary regenerated locks remain unstaged. `make pull-develop`
-uses this behavior after merging `origin/develop`, but stops rather than commits
-when conflicts outside generated locks need manual resolution. If you need
-`charts/` populated to render or install a chart locally, use
-`helm-build-chart.sh` above, which vendors them.
-
-If validation reports that `Chart.yaml` and `Chart.lock` "dependency
-name/version/repository tuples differ", this prints exactly what is being
-compared:
-
-```bash
-make locked-deps SERVICE=<name>
+```text
+# deploy/local-dev/local-values-files.env
+deploy/helm/values/azure/defaults/values.yaml
+deploy/helm/values/azure/envs/ai-sb-test/values.yaml
+~/helm-values/ai-sandbox/ai-sb-test-modern/secrets.yaml
+...
 ```
 
-### Working on a service's image
+A missing list, an empty one, or a line naming a file that is not there is a
+warning rather than an error — but since the usual result is a release quietly
+missing its secrets, the deploy asks before continuing.
 
-Build it the way CI does:
-
-```bash
-make docker-build SERVICE=<name>
-```
-
-Bump `appVersion:` in the owning chart if you changed anything that reaches the
-build context. The service's `.dockerignore` decides what that means, so if a
-file never belongs in the image, add it there rather than asking for a CI
-exception. Published image tags come from chart metadata (`v<appVersion>`), never
-from commit messages or git tags. And if you bump `appVersion:`, you must also
-bump `version:` in the owning chart.
-
-### Pulling upstream updates
-
-Most services are git subtrees:
-
-```bash
-make pull-user-mutator      # or pull-appstore, pull-ui, ... ; make help-subtrees lists them
-make pull-remotes           # every subtree in sequence
-```
-
-`ambassador`, `pod-reaper`, and `resty` are not subtrees. Their charts were
-vendored from subdirectories of `helxplatform/helx-chart` (`charts/<name>`),
-which `git subtree` cannot map. Each records the upstream commit it has
-incorporated in `services/<name>/UPSTREAM_COMMIT`, and a pull replays only the
-upstream commits since then, so local divergence survives:
-
-```bash
-make check-vendored-sync                # how far behind each one is
-make pull-vendored-chart NAME=resty     # or pull-vendored for all three
-```
-
-`resty` is deliberately ahead of upstream, so never replace it wholesale with
-an upstream copy. `make help-subtrees` covers resolving a replay that conflicts.
-
-After any upstream pull, run `validate-config`. An upstream chart version bump
-leaves the umbrella pin stale, which is a failure this will catch.
-
-### Deploying a branch
+### Deploying from GHCR
 
 Every push to `develop` publishes a mutable "candidate" of the umbrella, pinned
 to that commit's images, at
@@ -192,16 +152,8 @@ the current one:
 
 ```bash
 make chart-registry-login
-make helm-deploy-from-ghcr RELEASE=helx NAMESPACE=<deploy-namespace>
+make helm-deploy-from-ghcr RELEASE=<release-name> NAMESPACE=<deploy-namespace>
 ```
-
-The version comes from the umbrella's `Chart.yaml` on `origin/develop`, which
-the target fetches first, not from your working tree: your branch may carry an
-umbrella version `develop` never published, or an older one whose candidate has
-been abandoned. Before deploying it prints the chart, version, release, context,
-namespace, and values files, reminds you to be logged in to GHCR, and asks for a
-`y`. Values files come from the same two places as for a local build (see
-[Installing](#installing)), and `ASSUME_YES` and `HELM_FLAGS` work the same way.
 
 `make chart-registry-login` runs `helm registry login` for the host part of
 `CHART_REGISTRY`, which is `ghcr.io` for the default
@@ -211,29 +163,29 @@ GHCR the username is your GitHub username and the password a personal access
 token (classic) with the `read:packages` scope. Helm keeps the login, so you
 only repeat this when the token changes or expires.
 
-`CHART_VERSION=<version>` deploys any other published umbrella version
-instead, such as a release. Because a candidate is republished under the same
-version on every push, you get whatever CI published last; a `develop` run
-still in progress has not replaced it yet.
-
-On an up-to-date `develop` checkout, this prints the candidate version without
-deploying anything:
+By default, the version deployed is the current candidate version, which comes
+from concatenating the umbrella's version in `Chart.yaml` on `origin/develop`
+with `-develop`. On an up-to-date `develop` checkout, this prints the candidate
+version without deploying anything:
 
 ```bash
 make candidate-version
 ```
 
-To reproduce what CI builds, from your branch:
+`CHART_VERSION=<version>` deploys any other published umbrella version
+instead, such as a release. Because a candidate is republished under the same
+version on every push, you get whatever CI published last; a `develop` run
+still in progress has not replaced it yet.
 
-```bash
-make build-helx-chart CHART_CHANNEL=develop
-```
+Before deploying it prints the chart, version, release, context, namespace, and
+values files, reminds you to be logged in to GHCR, and asks for a `y`
+confirmation every time, warnings or not. `ASSUME_YES=1` answers it in advance
+for a non-interactive run; with no terminal to ask on, the deploy cancels
+rather than assuming yes. To pass in your values files, see
+[Values Files](#values-files).
+`HELM_FLAGS` works as it does for a local build; see [Installing a local
+build](#installing-a-local-build).
 
-That vendors your branch's service charts by name, ignoring the locked versions,
-and pins image tags to `develop-<short-sha>`. `CHART_CHANNEL_COMMIT` defaults to
-`HEAD`. Your working tree is restored afterwards.
-
-Note that those `develop-<sha>` images only exist if CI built that exact commit.
 For deploying uncommitted work, see the next section.
 
 ### Deploying HeLx with your own build of one or more services
@@ -245,26 +197,21 @@ only `Chart.lock`, which is metadata. `make build-helx-chart` is what actually
 vendors every dependency and produces a self-contained `.tgz` you can install
 anywhere.
 
-**If your change is already on `develop`**, you have the option to use the already
-published candidate with your commit's images already pinned; see [Deploying a
-branch](#deploying-a-branch):
-
-```bash
-make chart-registry-login
-make helm-deploy-from-ghcr RELEASE=helx NAMESPACE=<deploy-namespace>
-```
-
 **For work that is not pushed yet**, or if you just want to build everything locally:
 
 1. Make your changes, then bump the service chart `version:` and its pin in
    `deploy/helm/helx-chart/Chart.yaml`. `make ci-validate-everything` will tell
    you if you miss either one.
-2. Set environment variables for make targets. Only `SERVICES` is required.
+2. Set environment variables for make targets. Only `SERVICES` is required,
+   but set `TAG` as well: left unset, it is recomputed from HEAD on every
+   command, so a commit between building the images and packaging the chart
+   leaves the chart pointing at a tag nothing was built under.
+   `IMAGE_REGISTRY` is optional and defaults to Harbor.
 
    ```bash
    export SERVICES="user-mutator ui"  # to build just these services; otherwise use "all"
-   export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform  # default Harbor
    export TAG=test-my-branch  # default test-<short-sha>
+   # export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform  # only for a registry other than Harbor
    ```
 
 3. Build images for just the services you changed:
@@ -376,10 +323,10 @@ packaged, and `make uninstall-release` removes an installed release along with
 most of the storage and credentials Helm deliberately leaves behind. Both talk
 to whatever cluster your current `kubectl` context points at, and both print the
 context and namespace before they do anything. Everything below about
-`RELEASE`, `NAMESPACE`, values files, `ASSUME_YES`, and `HELM_FLAGS` applies to
+`RELEASE`, `NAMESPACE`, `ASSUME_YES`, and `HELM_FLAGS` applies to
 `make helm-deploy-from-ghcr` too.
 
-#### Installing
+#### Installing a local build
 
 ```bash
 make build-helx-chart SERVICES="user-mutator ui"
@@ -388,46 +335,17 @@ make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace>
 
 You do not need to name the archive. `build-helx-chart` writes its path to
 `dist/charts/.helx-chart.path`, and `helm-deploy-from-local` reads it from
-there, so the two always agree on which build is being installed — a candidate
-build derives its version from the channel and commit, so the file name is not
-something you could predict anyway. If that pointer is missing, or names an
+there, so the two always agree on which build is being installed. If that pointer is missing, or names an
 archive that has been deleted, the deploy stops and tells you to package again.
 
 `RELEASE` defaults to `helx`. `NAMESPACE` defaults to whatever your context
 selects; if you don't have a selected namespace, the deploy stops rather than
 assuming something.
 
-Values files come from two places, applied in this order:
-
-1. every path listed in `deploy/local-dev/local-values-files.env`
-2. every path in `VALUES="a.yaml b.yaml"`, so those win on any shared key
-
-That first file is a useful place to enumerate local values files. Local
-deploys usually need several values files, including ones holding secrets,
-and retyping `--values` for each of them every time is how they get
-forgotten. It is one path per line, each relative to the repository root,
-with `~/` expanded for you; blank lines and `#` comments are ignored. It
-is gitignored, so your cluster's paths and secrets stay out of the
-repository. For example:
-
-```text
-# deploy/local-dev/local-values-files.env
-deploy/helm/values/azure/defaults/values.yaml
-deploy/helm/values/azure/envs/ai-sb-test/values.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/appstore/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/appstore-sockets/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/helx-ldap/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/ldap-sync/secrets.yaml
-~/helm-values/ai-sandbox/ai-sb-test-modern/user-mutator/secrets.yaml
-...
-```
-
-A missing list, an empty one, or a line naming a file that is not there is a
-warning rather than an error — but since the usual result is a release quietly
-missing its secrets, the deploy asks before continuing.
-`helm-deploy-from-ghcr` asks every time, warnings or not. `ASSUME_YES=1`
-answers either prompt in advance for a non-interactive run, and with no
-terminal to ask on the deploy cancels instead of assuming yes.
+To pass in your values files, see [Values Files](#values-files). The deploy
+asks for a `y` confirmation only when that values-file check warns.
+`ASSUME_YES=1` answers it in advance for a non-interactive run; with no
+terminal to ask on, the deploy cancels rather than assuming yes.
 
 `HELM_FLAGS` is passed through to `helm upgrade --install` last, which is how
 you get a dry run:
@@ -436,59 +354,6 @@ you get a dry run:
 make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace> \
   HELM_FLAGS="--dry-run --debug"
 ```
-
-#### Artifact Cache
-
-If deploying to an environment like ASHE, where the Github for `helx-apps` is
-not accessible, you can use the artifact cache to host `helx-apps` within your
-namespace. Get started by cloning the artifact-cache repo, installing the chart,
-and running `make archive`:
-
-```bash
-git clone https://github.com/helxplatform/artifact-cache
-cd artifact-cache
-helm install artifact-cache -n <namespace> ./chart
-set -a && source .env.sample && export NAMESPACE=<namespace>
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Before running the next command, make sure the actual `helx-apps` repo at
-`https://github.com/helxplatform/helx-apps.git` has a branch that contains the 
-context data you want to deploy, with a brand and the apps all the way you
-want them. Once that's the case, run this:
-
-```bash
-make archive
-```
-
-Then, add these lines to your environment's override values file:
-
-```yaml
-resty:
-  artifactCache:    # <------ 
-    enabled: true   # <------ 
-```
-
-and add change your `appstore:tycho:externalAppRegistryRepo:` and 
-`appstore-prepuller:appRegistry:repo:` values to be equal to:
-
-```yaml
-appstore:
-  tycho:
-    externalAppRegistryRepo: <your-app-base-url>/artifact/assets/helx-apps
-appstore-prepuller:
-  appRegistry:
-    repo: <your-app-base-url>/artifact/assets/helx-apps
-```
-
-Once those lines are added, you've deployed, and `make archive` has been run successfully,
-you should see the artifact cache enabled in the `helx` namespace. You might need to bounce
-the `appstore` pod for the changes to take effect. Note that any time you need to make changes
-to your `helx-apps` branch, you will need to run `make archive` again and bounce the `appstore`
-pod.
-
 
 #### Tearing down
 
@@ -563,6 +428,162 @@ create, `PersistentVolume`s included: a `Retain` volume outlives its claim, and
 removing it is yours to do. And it takes no `HELM_FLAGS` — there is no dry run,
 because the confirmation listing already is one.
 
+### Artifact Cache
+
+If deploying to an environment like ASHE, where the GitHub for `helx-apps` is
+not accessible, you can use the artifact cache to host `helx-apps` within your
+namespace. Get started by cloning the artifact-cache repo, installing the chart,
+and running `make archive`:
+
+```bash
+git clone https://github.com/helxplatform/artifact-cache
+cd artifact-cache
+helm install artifact-cache -n <namespace> ./chart
+set -a && source .env.sample && export NAMESPACE=<namespace>
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Before running the next command, make sure the actual `helx-apps` repo at
+`https://github.com/helxplatform/helx-apps.git` has a branch that contains the 
+context data you want to deploy, with a brand and the apps all the way you
+want them. Once that's the case, run this:
+
+```bash
+make archive
+```
+
+Then, add these lines to your environment's override values file:
+
+```yaml
+resty:
+  artifactCache:    # <------ 
+    enabled: true   # <------ 
+```
+
+and change your `appstore:tycho:externalAppRegistryRepo:` and
+`appstore-prepuller:appRegistry:repo:` values to be equal to:
+
+```yaml
+appstore:
+  tycho:
+    externalAppRegistryRepo: <your-app-base-url>/artifact/assets/helx-apps
+appstore-prepuller:
+  appRegistry:
+    repo: <your-app-base-url>/artifact/assets/helx-apps
+```
+
+Once those lines are added, you've deployed, and `make archive` has been run successfully,
+you should see the artifact cache enabled in the `helx` namespace. You might need to bounce
+the `appstore` pod for the changes to take effect. Note that any time you need to make changes
+to your `helx-apps` branch, you will need to run `make archive` again and bounce the `appstore`
+pod.
+
+### Working on a chart
+
+Edit the chart, then:
+
+```bash
+make build-chart SERVICE=<name>
+```
+
+That runs exactly what CI runs: it vendors each locked dependency (preferring an
+in-tree chart over the registry), runs `helm lint`, and packages the chart. It
+prints the resulting `.tgz`, which you can install directly:
+
+```bash
+helm upgrade --install <release-name> /path/to/<name>-<version>.tgz -n <namespace>
+```
+
+Three rules the version gate will hold you to, so it's cheaper to do them up
+front:
+
+1. **Bump `version:` in `Chart.yaml`** if you changed anything in the service at all.
+   Editing `.gitignore` does not count; editing `templates/`, `values.yaml`,
+   `Chart.yaml`, `Chart.lock`, or `.helmignore` does. The chart's own
+   `.helmignore` is the authority.
+2. **If the chart is an umbrella dependency, bump its pin too.** The declared
+   version in `deploy/helm/helx-chart/Chart.yaml` must equal the in-tree version.
+   Without this the umbrella silently keeps shipping the previous version.
+3. **Run `make sync-locks`** if you touched any `dependencies:` block, and commit
+   the lock alongside the chart.
+
+### Adding or changing a dependency
+
+Edit `dependencies:` in `Chart.yaml`, then:
+
+```bash
+make sync-locks
+```
+
+Do **not** use `helm dependency update`. Every dependency here is pinned to an
+exact version, so the lock needs no resolution and `sync-locks` derives it with
+no network and no registry login. That also means it works for a version that is
+not published yet. A bumped service chart is not in GHCR until the merge to
+`main`, which `helm dependency update` cannot handle.
+
+Semantic ranges such as `^1.0.0` are rejected. A range can never equal a
+resolved lock entry, so `validate-config` fails. Use exact versions!
+
+`sync-locks` writes only the lock. If it finds an unresolved `Chart.lock` merge
+conflict, it recreates that lock from the merged `Chart.yaml` and stages only the
+resolved lock; ordinary regenerated locks remain unstaged. `make pull-develop`
+uses this behavior after merging `origin/develop`, but stops rather than commits
+when conflicts outside generated locks need manual resolution. If you need
+`charts/` populated to render or install a chart locally, use
+`make build-chart SERVICE=<name>` from [Working on a chart](#working-on-a-chart),
+or `make build-helx-chart` for the umbrella; both vendor them.
+
+If validation reports that `Chart.yaml` and `Chart.lock` "dependency
+name/version/repository tuples differ", this prints exactly what is being
+compared:
+
+```bash
+make locked-deps SERVICE=<name>
+```
+
+### Working on a service's image
+
+Build it the way CI does:
+
+```bash
+make docker-build SERVICE=<name>
+```
+
+Bump `appVersion:` in the owning chart if you changed anything that reaches the
+build context. The service's `.dockerignore` decides what that means, so if a
+file never belongs in the image, add it there rather than asking for a CI
+exception. Published image tags come from chart metadata (`v<appVersion>`), never
+from commit messages or git tags. And if you bump `appVersion:`, you must also
+bump `version:` in the owning chart.
+
+### Pulling upstream updates
+
+Most services are git subtrees:
+
+```bash
+make pull-user-mutator      # or pull-appstore, pull-ui, ... ; make help-subtrees lists them
+make pull-remotes           # every subtree in sequence
+```
+
+`ambassador`, `pod-reaper`, and `resty` are not subtrees. Their charts were
+vendored from subdirectories of `helxplatform/helx-chart` (`charts/<name>`),
+which `git subtree` cannot map. Each records the upstream commit it has
+incorporated in `services/<name>/UPSTREAM_COMMIT`, and a pull replays only the
+upstream commits since then, so local divergence survives:
+
+```bash
+make check-vendored-sync                # how far behind each one is
+make pull-vendored-chart NAME=resty     # or pull-vendored for all three
+```
+
+`resty` is deliberately ahead of upstream, so never replace it wholesale with
+an upstream copy. `make help-subtrees` covers resolving a replay that conflicts.
+
+After any upstream pull, run `validate-config`. An upstream chart version bump
+leaves the umbrella pin stale, which is a failure this will catch.
+
 ### Working on the CI itself
 
 The logic lives in `.github/scripts/ci.py` and is unit tested. If you change it:
@@ -578,38 +599,6 @@ Workflow YAML itself is linted by `actionlint` in CI only — there is no local
 target, since workflow files change rarely and CI gates them on every pull
 request. If you are editing them often, `brew install actionlint` and run
 `actionlint .github/workflows/*.yml` yourself; CI pins 1.7.12.
-
-### Before you push
-
-```bash
-make pre-push
-```
-
-That runs the unit tests, `validate-config`, the version gate, the lock check,
-and a whitespace check. To have it run automatically:
-
-```bash
-make install-hooks
-```
-
-That points `core.hooksPath` at [`.githooks/`](.githooks), so `git push` runs the
-same checks. No package manager, nothing downloaded. Bypass a single push with
-`git push --no-verify`, and uninstall with `git config --unset core.hooksPath`.
-
-The umbrella chart's version only has to sit **above the last release**, not
-increase on every change. So the first pull request after a release picks the
-next version — patch, minor, or major, whichever fits — and later pull requests
-leave it alone. Raising it starts publishing a new `<version>-develop` candidate
-channel; `make candidate-version` tells you which is current. Umbrella
-dependency pins still have to move with the charts they point at.
-
-The version gate compares against `develop` by default and includes uncommitted
-and untracked files. That last part matters: without it a chart file you have
-created but not yet committed is invisible, and a local pass can still fail in
-CI. Override with `BASE=<ref>`, or `CHECK_VERSIONS_FLAGS=` for committed-only.
-It also fetches `origin main` first, because the release floor is read from
-`origin/main` and the `v*` tags; if the fetch fails it warns and uses what you
-have.
 
 ### Gotchas
 

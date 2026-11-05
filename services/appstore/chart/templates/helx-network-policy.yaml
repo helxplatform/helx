@@ -5,7 +5,13 @@ metadata:
 spec:
   # Allow resty and appstore-socket pods to communicate with the appstore pod.
   # (Ambassador and nginx are retired in the de-Ambassador design; resty is the
-  # edge/data plane.)
+  # edge/data plane.) The podSelector must name the appstore pod: left out, it
+  # defaults to every pod in the namespace, which on a cluster that enforces
+  # NetworkPolicy denies all traffic not allowed here, cutting off the ingress
+  # controller, helx-ldap, ldap-sync's postgres, and the user-mutator webhook.
+  podSelector:
+    matchLabels:
+      {{- include "appstore.selectorLabels" . | nindent 6 }}
   ingress:
   - from:
     - podSelector:

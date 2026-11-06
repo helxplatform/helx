@@ -3,7 +3,7 @@ monitoring:
     repository: containers.renci.org/helxplatform/appstore-sockets/monitoring
     pullPolicy: IfNotPresent
     tag: ""
-  
+
   resources: {}
 
 image:
@@ -70,6 +70,7 @@ securityContext: {}
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
 
 serviceName: appstore-sockets-service
 service:

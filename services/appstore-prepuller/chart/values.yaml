@@ -7,9 +7,16 @@ appRegistry:
 # -- Container securityContext for the controller and the DaemonSet's pause
 # container. allowPrivilegeEscalation: false is required by the AKS policy
 # that denies privilege escalation, and is harmless elsewhere; keep it when
-# overriding. The pre-pull init containers get theirs from the controller.
+# overriding. UNCDSR-182: readOnlyRootFilesystem: true is safe here -- the
+# pause container only sleeps, and the controller (prepuller.py) only talks
+# to the Kubernetes API and the app registry, with no local file writes
+# (confirmed by inspection: no open()/tempfile/write()/mkdir calls). The
+# pre-pull init containers get their allowPrivilegeEscalation/capabilities
+# from the controller itself (prepuller.py's build_init_containers), not from
+# this value; they run only "exit 0".
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
 
 # -- Controller (CronJob that fetches images and patches the DaemonSet)
 controller:

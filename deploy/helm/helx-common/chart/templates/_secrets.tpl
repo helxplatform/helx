@@ -138,10 +138,17 @@ line break of the last block scalar, such as a PEM key.
   {{- end -}}
 {{- end -}}
 
-{{- $existingAnnotations := dict -}}
-{{- if and $targetSecret $targetSecret.metadata $targetSecret.metadata.annotations -}}
-  {{- $existingAnnotations = $targetSecret.metadata.annotations -}}
-{{- end -}}
+{{/*
+"and"'s arguments are all evaluated eagerly before it's called -- Go
+templates have no short-circuiting "and" -- so
+"and $targetSecret $targetSecret.metadata $targetSecret.metadata.annotations"
+evaluates the final chained lookup even when an earlier argument is nil,
+which is exactly what lookup returns for a Secret that doesn't exist yet
+(a fresh install, or any render with no live cluster to look up against,
+such as `helm template`/lint). dig navigates the nested path safely,
+returning the given default the moment any level along it is missing.
+*/}}
+{{- $existingAnnotations := dig "metadata" "annotations" (dict) (default (dict) $targetSecret) -}}
 {{- $wasMigrated := and $legacyName (hasKey $existingAnnotations $migrationAnnotation) -}}
 
 {{- $annotations := dict -}}

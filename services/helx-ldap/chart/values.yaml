@@ -52,11 +52,38 @@ openldap:
   # containers change identity; they write only to emptyDir volumes, which
   # podSecurityContext.fsGroup 1001 keeps writable. On OpenShift, set enabled
   # to false so the SCC allocates IDs.
+  # UNCDSR-182: confirmed via a live crash (bind(6) failed errno=2 -- slapd
+  # couldn't create its pid/args files) and direct image inspection
+  # (jpgouin/openldap, a Bitnami-pattern build) that a single emptyDir
+  # mounted over the whole /opt/bitnami/openldap/var directory wipes out the
+  # var/run subdirectory baked into the image, which slapd needs to already
+  # exist (libopenldap.sh references var/run/slapd.{args,pid} directly).
+  # Mounting an emptyDir at that subdirectory directly, instead of its
+  # parent, avoids wiping anything else out while still making it writable.
+  #
+  # var/data needs no volume at all: it's a symlink (baked into the image) to
+  # /bitnami/openldap/data, already inside the `persistence` PVC this chart
+  # already mounts at /bitnami/openldap -- confirmed via a real test pod that
+  # Kubernetes resolves through a symlink when preparing a mount at its
+  # location, so writes through it already land on that existing, persisted
+  # PVC without any extra mount.
+  #
+  # No volume at all for /opt/bitnami/openldap/share either: grepping the
+  # image's own scripts shows nothing writes there (slapd.ldif is read-only
+  # reference data), so a volume there was both unnecessary and (confirmed)
+  # actively destructive to mount over.
   containerSecurityContext:
     enabled: true
     allowPrivilegeEscalation: false
     runAsUser: 1001
     runAsNonRoot: true
+    readOnlyRootFilesystem: true
+  extraVolumes:
+    - name: openldap-var-run
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: openldap-var-run
+      mountPath: /opt/bitnami/openldap/var/run
 
   # Keep the service name stable for HeLx consumers, including appstore's
   # default ldap://openldap URI.

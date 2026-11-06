@@ -227,6 +227,11 @@ configuration:
       runAsGroup: 1001
       runAsNonRoot: true
       allowPrivilegeEscalation: false
+      # UNCDSR-182: readOnlyRootFilesystem: true is safe here -- configure.sh
+      # only runs ldapsearch/ldapmodify against the LDAP server and reads its
+      # LDIFs from the read-only configure-script/ldif volume mounts, with no
+      # local file writes.
+      readOnlyRootFilesystem: true
       capabilities:
         drop:
           - ALL

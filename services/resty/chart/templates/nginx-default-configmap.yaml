@@ -13,11 +13,11 @@ data:
     # to backend services by path prefix, including one dynamically
     # created Mapping per launched app (/private/{app}/{user}/{guid}).
     #
-    # Because a launched app's Kubernetes Service name is a pure function
-    # of the URL path ({app}-{guid}, see Tycho model.py System.name), we
-    # can resolve and proxy to it directly from OpenResty with cluster DNS
-    # -- no Ambassador, no per-app config, no reloads. Static services
-    # (appstore / ui / sockets) become explicit location blocks below.
+    # Because appstore names the Service it authorized for each /private
+    # request (see /appstore-resolve below), OpenResty can proxy to it
+    # directly with cluster DNS -- no Ambassador, no per-app config, no
+    # reloads. Static services (appstore / ui / sockets) become explicit
+    # location blocks below.
     #####################################################################
 
     # Cluster DNS is required so proxy_pass to a *variable* upstream is
@@ -129,6 +129,7 @@ data:
           local raw = ngx.var.request_uri
           local after = raw:sub(#matched + 1, #matched + 1)
           if raw:sub(1, #matched) ~= matched or (after ~= "" and after ~= "/" and after ~= "?") then
+            ngx.log(ngx.WARN, "private route: rejected, the path as sent does not match its normalized form: ", raw)
             ngx.exit(ngx.HTTP_BAD_REQUEST)
           end
 

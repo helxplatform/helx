@@ -96,7 +96,12 @@ openldap:
       command:
         - sh
         - -c
-        - cp -a /opt/bitnami/openldap/share/. /openldap-share-seed/
+        # Not "cp -a": preserving the source directory's own timestamps needs
+        # CAP_FOWNER as a non-owning user, which capabilities.drop: [ALL]
+        # denies -- cp still copies every file, but exits 1 on that failed
+        # attribute-preservation step, which Kubernetes then reports as a
+        # crash. Plain -r copies the content without touching timestamps.
+        - cp -r /opt/bitnami/openldap/share/. /openldap-share-seed/
       securityContext:
         allowPrivilegeEscalation: false
         runAsUser: 1001

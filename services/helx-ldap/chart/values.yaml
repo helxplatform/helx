@@ -68,22 +68,56 @@ openldap:
   # location, so writes through it already land on that existing, persisted
   # PVC without any extra mount.
   #
-  # No volume at all for /opt/bitnami/openldap/share either: grepping the
-  # image's own scripts shows nothing writes there (slapd.ldif is read-only
-  # reference data), so a volume there was both unnecessary and (confirmed)
-  # actively destructive to mount over.
+  # UNCDSR-182 correction: /opt/bitnami/openldap/share is NOT read-only after
+  # all. On a genuinely fresh install (empty /bitnami/openldap, no live
+  # cluster to test against), libopenldap.sh generates
+  # /opt/bitnami/openldap/share/slapd.ldif on first start; that write was
+  # missed earlier because it was verified only against cdsr-stage, whose
+  # data volume already held an initialized directory, which skips this step
+  # entirely (reported against #66 by PhillipOwen, reproduced with
+  # jpgouin/openldap:2.6.9-fix --read-only). Seed an emptyDir from the
+  # image's own copy of share/ via an init container -- the same seed-then-
+  # mount-over pattern Tycho's emptyDirSeeded:// uses for this exact problem
+  # (see services/appstore/appstore/tycho/model.py) -- rather than granting
+  # the main container a writable root. The init container mounts the seed
+  # volume at a staging path, not at /opt/bitnami/openldap/share itself, so
+  # it can still see the image's real share/ as its copy source; only the
+  # main container's mount replaces share/ outright.
   containerSecurityContext:
     enabled: true
     allowPrivilegeEscalation: false
     runAsUser: 1001
     runAsNonRoot: true
     readOnlyRootFilesystem: true
+  initContainers:
+    - name: seed-openldap-share
+      image: '{{ include "openldap.image" . }}'
+      imagePullPolicy: '{{ .Values.image.pullPolicy }}'
+      command:
+        - sh
+        - -c
+        - cp -a /opt/bitnami/openldap/share/. /openldap-share-seed/
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsUser: 1001
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      volumeMounts:
+        - name: openldap-share
+          mountPath: /openldap-share-seed
   extraVolumes:
     - name: openldap-var-run
+      emptyDir: {}
+    - name: openldap-share
       emptyDir: {}
   extraVolumeMounts:
     - name: openldap-var-run
       mountPath: /opt/bitnami/openldap/var/run
+    - name: openldap-share
+      mountPath: /opt/bitnami/openldap/share
 
   # Keep the service name stable for HeLx consumers, including appstore's
   # default ldap://openldap URI.

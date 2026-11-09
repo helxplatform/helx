@@ -70,3 +70,23 @@ class UsernameFromLdapTests(TestCase):
     def test_switch_off(self, login_uid):
         self.assertEqual(self._pre_social_login(self._login()), "jdoe@unc.edu")
         login_uid.assert_not_called()
+
+
+class PasswordLoginTests(TestCase):
+    """The allauth password login form, as the HeLx login page posts it."""
+
+    def test_rate_limit_setting_parses(self):
+        from allauth.account import app_settings
+        from allauth.core.ratelimit import _parse_rates
+
+        rates = _parse_rates(app_settings.RATE_LIMITS["login_failed"])
+        self.assertIn((10, 86400, "key"), [tuple(r) for r in rates])
+
+    def test_password_login_reaches_the_password_check(self):
+        # Used to raise AttributeError ('int' object has no attribute 'strip')
+        # from allauth's rate limiter before checking the password.
+        get_user_model().objects.create_user(username="breakglass", password="right-password")
+        wrong = self.client.post("/accounts/login/", {"login": "breakglass", "password": "wrong"})
+        self.assertEqual(wrong.status_code, 200)  # form shown again with an error
+        right = self.client.post("/accounts/login/", {"login": "breakglass", "password": "right-password"})
+        self.assertEqual(right.status_code, 302)  # logged in, redirected

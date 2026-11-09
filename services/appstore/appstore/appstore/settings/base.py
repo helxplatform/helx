@@ -279,8 +279,11 @@ ACCOUNT_ADAPTER = "appstore.adapter.LoginRedirectAdapter"
 ACCOUNT_DEFAULT_HTTP_PROTOCOL = os.environ.get("ACCOUNT_DEFAULT_HTTP_PROTOCOL", "http")
 ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 1
 ACCOUNT_EMAIL_VERIFICATION = "none"
-ACCOUNT_RATE_LIMITS= {'login_failed':10}
-#deprecated ACCOUNT_LOGIN_ATTEMPTS_TIMEOUT = 86400  # 1 day in seconds
+# allauth reads each limit as a rate string, "<amount>/<duration>[/<per>]";
+# a bare number crashes every password login. Failed logins: at most 10 per
+# username per day, plus allauth's usual 10 per minute per IP. A daily per-IP
+# limit would lock out everyone behind a shared campus address.
+ACCOUNT_RATE_LIMITS = {"login_failed": "10/m/ip,10/1d/key"}
 ACCOUNT_LOGOUT_REDIRECT_URL = "/helx"
 LOGIN_REDIRECT_URL = "/helx/workspaces/login/success"
 LOGIN_URL = "/accounts/login"

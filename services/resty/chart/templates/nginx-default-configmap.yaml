@@ -122,6 +122,16 @@ data:
         # dev: appstore/tycho run locally, no in-cluster resolution.
         {{- else }}
         access_by_lua_block {
+          -- The captures come from the normalized URI (dot-segments resolved,
+          -- %XX decoded) but appstore authorizes the raw one, so refuse any
+          -- request whose raw prefix differs from what nginx matched.
+          local matched = "/private/" .. ngx.var.app .. "/" .. ngx.var.user .. "/" .. ngx.var.guid
+          local raw = ngx.var.request_uri
+          local after = raw:sub(#matched + 1, #matched + 1)
+          if raw:sub(1, #matched) ~= matched or (after ~= "" and after ~= "/" and after ~= "?") then
+            ngx.exit(ngx.HTTP_BAD_REQUEST)
+          end
+
           -- Ask appstore to authorize + resolve this /private URL. Cookies
           -- are inherited by the subrequest; pass the original path along.
           local res = ngx.location.capture(
@@ -134,21 +144,22 @@ data:
           end
 
           local h = res.header
+          local host    = h["X-Backend-Host"]
           local port    = h["X-Backend-Port"]
           local rewrite = h["X-Rewrite"] or ""
           local prefix  = h["X-Prefix"] or ""
 
-          if not port then
-            ngx.log(ngx.ERR, "private resolve: missing backend port")
+          -- host is spliced into the proxy_pass URL, so allow only a lowercase
+          -- DNS label, the form Tycho gives every app Service. A slash, colon
+          -- or dot would let it point the proxy somewhere else.
+          if not host or not host:match("^[%l%d][%l%d-]*$") or not port then
+            ngx.log(ngx.ERR, "private resolve: missing or invalid backend host/port")
             ngx.exit(502)
           end
 
-          -- The backend Service name is deterministic from the URL path:
-          -- {app}-{guid} (Tycho System.name = f"{app_id}-{identifier}").
-          -- Build it from the regex captures rather than trusting a
-          -- resolver-returned name, so it can't drift.
-          local svc = ngx.var.app .. "-" .. ngx.var.guid
-          ngx.var.upstream = svc .. ".{{ $appsNamespace }}.{{ $dnsSuffix }}:" .. port
+          -- Proxy only to the Service appstore just authorized. Never rebuild
+          -- it from the URL captures: those can name a different user's app.
+          ngx.var.upstream = host .. ".{{ $appsNamespace }}.{{ $dnsSuffix }}:" .. port
 
           local uri = ngx.var.request_uri
           if rewrite ~= "" then

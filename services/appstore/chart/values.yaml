@@ -197,6 +197,7 @@ podSecurityContext: {}
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
 
 service:
   type: ClusterIP
@@ -556,6 +557,11 @@ postgresql:
   primary:
     labels: {"np-label": "appstore-db"}
     podLabels: {"np-label": "appstore-db"}
+    # The dependency already defaults to this; set explicitly so it survives
+    # a future chart bump, and so the deployed release (pinned to an older
+    # lock predating this default) picks it up on the next upgrade.
+    containerSecurityContext:
+      readOnlyRootFilesystem: true
   # -- postgresql logs
   audit:
     logHostname: true

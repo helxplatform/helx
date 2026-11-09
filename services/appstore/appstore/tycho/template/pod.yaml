@@ -305,6 +305,11 @@ spec:
     {% endif %}
   {% endfor %}
 {% endif %}
+    # Referenced rather than read so appstore needs no access to secrets.
+    envFrom:
+    - secretRef:
+        name: {{ system.system_name }}-env
+        optional: true
 {% if container.expose|length > 0 %}
     ports:
 {% for port in container.expose %}

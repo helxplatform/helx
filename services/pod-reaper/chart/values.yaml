@@ -32,8 +32,11 @@ reapers:
 # -- Container securityContext, applied to every container this chart renders.
 # allowPrivilegeEscalation: false is required by the AKS policy that denies
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
+# UNCDSR-182: readOnlyRootFilesystem: true is safe here -- pod-reaper only
+# watches and deletes pods via the Kubernetes API, with no local file writes.
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
 resources:
   limits:
     cpu: 30m

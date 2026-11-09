@@ -11,10 +11,10 @@ search_enabled="${REACT_APP_SEMANTIC_SEARCH_ENABLED:-true}"
 default_space="${REACT_APP_DEFAULT_SPACE:-search}"
 search_url="${REACT_APP_HELX_SEARCH_URL}"
 brand_name="${REACT_APP_UI_BRAND_NAME}"
-tranql_url="${REACT_APP_TRANQL_URL:-\/tranql}"
+tranql_url="${REACT_APP_TRANQL_URL:-/tranql}"
 hidden_result_tabs="${REACT_APP_HIDDEN_RESULT_TABS}"
 deployment_namespace="${REACT_APP_DEPLOYMENT_NAMESPACE}"
-appstore_asset_base_url="${REACT_APP_APPSTORE_ASSET_BASE_URL:-https:\/\/raw.githubusercontent.com\/helxplatform\/appstore}"
+appstore_asset_base_url="${REACT_APP_APPSTORE_ASSET_BASE_URL:-https://raw.githubusercontent.com/helxplatform/appstore}"
 appstore_asset_branch="${REACT_APP_APPSTORE_ASSET_BRANCH:-master}"
 analytics_enabled="${REACT_APP_ANALYTICS_ENABLED:-false}"
 analytics_platform="${REACT_APP_ANALYTICS_PLATFORM}"
@@ -62,27 +62,39 @@ template='{
     "search_tour_enabled": "%SEARCH_TOUR_ENABLED%"
 }'
 
-echo "$template" | sed \
-  -e "s/%WORKSPACES_ENABLED%/$workspaces_enabled/" \
-  -e "s/%SEARCH_ENABLED%/$search_enabled/" \
-  -e "s/%DEFAULT_SPACE%/$default_space/" \
-  -e "s/%SEARCH_URL%/$search_url/" \
-  -e "s/%BRAND%/$brand_name/" \
-  -e "s/%HIDDEN_RESULT_TABS%/$hidden_result_tabs/" \
-  -e "s/%TRANQL_URL%/$tranql_url/" \
-  -e "s/%DEPLOYMENT_NAMESPACE%/$deployment_namespace/" \
-  -e "s/%APPSTORE_ASSET_BASE_URL%/$appstore_asset_base_url/" \
-  -e "s/%APPSTORE_ASSET_BRANCH%/$appstore_asset_branch/" \
-  -e "s/%ANALYTICS_ENABLED%/$analytics_enabled/" \
-  -e "s/%ANALYTICS_PLATFORM%/$analytics_platform/" \
-  -e "s/%ANALYTICS_TOKEN%/$analytics_token/" \
-  -e "s/%META_TITLE%/$meta_title/" \
-  -e "s/%META_DESCRIPTION%/$meta_description/" \
-  -e "s/%LOGIN_TITLE%/$login_title/" \
-  -e "s/%SUPPORT_HELP_PORTAL_URL%/$support_help_url/" \
-  -e "s/%SUPPORT_USER_GUIDE_URL%/$support_user_guide_url/" \
-  -e "s/%SUPPORT_FAQS_URL%/$support_faqs_url/" \
-  -e "s/%SUPPORT_INTRO_VIDEO_URL%/$support_intro_video_url/" \
-  -e "s/%SUPPORT_HOWTO_VIDEO_URL%/$support_howto_video_url/" \
-  -e "s/%SEARCH_TOUR_ENABLED%/$search_tour_enabled/" \
-  > $1
+# UNCDSR-182 fallout, found 2026-11-06: sed with "/" as its delimiter breaks
+# as soon as a replacement value contains a "/" -- which REACT_APP_HELX_SEARCH_URL,
+# REACT_APP_APPSTORE_ASSET_BASE_URL, and the support/video URLs all routinely do
+# (e.g. https://cdsr-staging.renci.unc.edu/artifact/appstore), aborting with
+# "bad option in substitution expression" and leaving env.json empty -- with
+# no error surfaced anywhere nginx's own logs are visible, since this runs
+# before nginx starts. Confirmed live: this has been silently failing on any
+# deployment that sets one of those URLs to anything other than sed's own
+# escaped-slash default. Bash's own string substitution has no delimiter to
+# collide with (and, unlike sed's replacement text, no special meaning for
+# "&" either), so it's used here instead of sed.
+output="$template"
+output="${output//%WORKSPACES_ENABLED%/$workspaces_enabled}"
+output="${output//%SEARCH_ENABLED%/$search_enabled}"
+output="${output//%DEFAULT_SPACE%/$default_space}"
+output="${output//%SEARCH_URL%/$search_url}"
+output="${output//%BRAND%/$brand_name}"
+output="${output//%HIDDEN_RESULT_TABS%/$hidden_result_tabs}"
+output="${output//%TRANQL_URL%/$tranql_url}"
+output="${output//%DEPLOYMENT_NAMESPACE%/$deployment_namespace}"
+output="${output//%APPSTORE_ASSET_BASE_URL%/$appstore_asset_base_url}"
+output="${output//%APPSTORE_ASSET_BRANCH%/$appstore_asset_branch}"
+output="${output//%ANALYTICS_ENABLED%/$analytics_enabled}"
+output="${output//%ANALYTICS_PLATFORM%/$analytics_platform}"
+output="${output//%ANALYTICS_TOKEN%/$analytics_token}"
+output="${output//%META_TITLE%/$meta_title}"
+output="${output//%META_DESCRIPTION%/$meta_description}"
+output="${output//%LOGIN_TITLE%/$login_title}"
+output="${output//%SUPPORT_HELP_PORTAL_URL%/$support_help_url}"
+output="${output//%SUPPORT_USER_GUIDE_URL%/$support_user_guide_url}"
+output="${output//%SUPPORT_FAQS_URL%/$support_faqs_url}"
+output="${output//%SUPPORT_INTRO_VIDEO_URL%/$support_intro_video_url}"
+output="${output//%SUPPORT_HOWTO_VIDEO_URL%/$support_howto_video_url}"
+output="${output//%SEARCH_TOUR_ENABLED%/$search_tour_enabled}"
+
+echo "$output" > "$1"

@@ -248,6 +248,10 @@ func processUNCUser(req HookRequest) HookResponse {
 		"uid":           uid,
 		"uidNumber":     req.Content["uidNumber"],
 	}
+	// appstore finds a social login's LDAP entry, and so its username, by mail.
+	if mail := req.Content["mail"]; mail != nil && mail != "" {
+		newContent["mail"] = mail
+	}
 	// Only include helxUser attributes when the destination schema has it loaded.
 	// user-mutator copies supplementalGroups into the pod security context.
 	if hasHelxUser() {

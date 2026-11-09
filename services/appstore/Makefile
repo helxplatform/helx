@@ -93,17 +93,31 @@ install:
 test:
 	$(foreach brand,$(BRANDS),SECRET_KEY=${SECRET_KEY} DEV_PHASE=stub DJANGO_SETTINGS_MODULE=appstore.settings.$(brand)_settings ${MANAGE} test $(APP_LIST);)
 
+#migrations: Generate migration files for any model changes. Review the
+# generated file before committing it: Django's autodetector can't ask
+# interactively whether a change is a rename vs. a drop+add, and guessing
+# wrong silently loses data.
+migrations:
+	SECRET_KEY=${SECRET_KEY} DEV_PHASE=stub DJANGO_SETTINGS_MODULE=appstore.settings.helx_settings ${MANAGE} makemigrations --skip-checks
+
+#check-migrations: Fail if a model change is missing its committed migration file
+# --skip-checks: Django's system checks run Tycho's app-registry/Kubernetes
+# bootstrap at import time (see appstore/core/views.py), which needs a cluster
+# and app registry this check has no business depending on. Skipping them
+# only skips Django's system checks, not the migration-vs-model comparison.
+check-migrations:
+	SECRET_KEY=${SECRET_KEY} DEV_PHASE=stub DJANGO_SETTINGS_MODULE=appstore.settings.helx_settings ${MANAGE} makemigrations --check --dry-run --skip-checks
+
 #start: Run the gunicorn server
 start:	build.postgresql.local
 	if [ -z ${DJANGO_SETTINGS_MODULE} ]; then make help && echo "\n\nPlease set the DJANGO_SETTINGS_MODULE environment variable\n\n"; exit 1; fi
-	${MANAGE} makemigrations
 	${MANAGE} migrate
 	${MANAGE} addingwhitelistedsocialapp
 	${MANAGE} shell < bin/superuser.py
 	${MANAGE} shell < bin/authorizeuser.py
 	if [ "${CREATE_TEST_USERS}" = "true" ]; then ${MANAGE} shell < bin/createtestusers.py; fi
 	${MANAGE} collectstatic --clear --no-input
-	${MANAGE} spectacular --file ./appstore/schema.yml
+	${MANAGE} spectacular --file ./appstore/static/schema.yml
 	gunicorn --bind 0.0.0.0:8000 --log-level=${LOG_LEVEL} --pythonpath=./appstore appstore.wsgi:application --workers=${NO_OF_GUNICORN_WORKERS}
 
 #build: Build the Docker image

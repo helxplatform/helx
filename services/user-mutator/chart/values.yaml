@@ -23,6 +23,14 @@ serviceAccount:
   # If not set and create is true, a name is generated using the fullname template
   name: ""
 
+rbac:
+  # -- Allow secret:// volume sources containing a regex capture group, such
+  # as secret://{{.username}}-(.*). This grants the service account list on
+  # secrets, which exposes the contents of every secret in the namespace.
+  # Sources without a capture group, including templated names such as
+  # secret://pguser-{{.username}}, work without it.
+  secretDiscovery: false
+
 podAnnotations: {}
 
 podSecurityContext: {}

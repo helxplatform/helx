@@ -158,6 +158,8 @@ The system supports **regex-based fan-out** where a single `VolumeSource` can ma
 
 **Example**: `pvc://{{.username}}-data-(.*)` matches all PVCs like `alice-data-project1`, `alice-data-project2`
 
+**Secrets**: a `secret://` source without a capture group, including a templated one such as `secret://pguser-{{.username}}`, is expanded and emitted as an optional secret volume without any API call. Sources with a capture group need the chart value `rbac.secretDiscovery: true` (off by default, since `list` on secrets exposes every secret's contents); without it they are logged and skipped.
+
 **Cardinality Rules** (enforced in `buildMountPairs`):
 - **N:N** - N volume matches, N mount specs → pair by index
 - **1:N** - 1 volume match, N mount specs → replicate volume

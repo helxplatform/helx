@@ -9,6 +9,9 @@ spec:
       {{- include "resty.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/nginx-conf: {{ include (print $.Template.BasePath "/nginx-configmap.yaml") . | sha256sum }}
+        checksum/default-nginx-conf: {{ include (print $.Template.BasePath "/nginx-default-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "resty.labels" . | nindent 8 }}
     spec:

@@ -104,6 +104,18 @@ config:
               mountPath: /var/run/helx/postgres/TEST_OMOP
 ```
 
+### Secret volume sources
+
+A `secret://` source without a regex capture group is written into the pod as an optional secret volume without the
+webhook reading anything from the API server. That covers fixed names like the one above and templated names like
+`secret://pguser-{{ "{{ .username }}" }}`, which the webhook fills in for each user. The kubelet mounts the secret, and
+a missing secret leaves an empty directory at the mount path rather than blocking the pod.
+
+A `secret://` source containing a regex capture group, such as `secret://{{ "{{ .username }}" }}-(.*)`, has to list
+secrets to find the matching names. Set `rbac.secretDiscovery: true` to grant that. It is off by default because `list`
+on secrets lets the webhook's ServiceAccount read the contents of every secret in the namespace. Without it, the webhook
+logs an error naming the setting and skips that source; the rest of the profile still applies.
+
 ### Loading profiles from files
 
 `--set-file` reads a file into a value, so each profile can stay a standalone YAML file instead of an indented block

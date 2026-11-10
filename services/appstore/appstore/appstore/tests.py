@@ -79,8 +79,9 @@ class PasswordLoginTests(TestCase):
         from allauth.account import app_settings
         from allauth.core.ratelimit import _parse_rates
 
-        rates = _parse_rates(app_settings.RATE_LIMITS["login_failed"])
-        self.assertIn((10, 86400, "key"), [tuple(r) for r in rates])
+        rates = [tuple(r) for r in _parse_rates(app_settings.RATE_LIMITS["login_failed"])]
+        self.assertIn((10, 86400, "key"), rates)  # per username, per day
+        self.assertIn((25, 60, "ip"), rates)      # per address, per minute
 
     def test_password_login_reaches_the_password_check(self):
         # Used to raise AttributeError ('int' object has no attribute 'strip')

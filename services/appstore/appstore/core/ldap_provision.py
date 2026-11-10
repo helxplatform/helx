@@ -5,8 +5,9 @@ entry whose mail is the login's verified email (see appstore.adapter). ldap-sync
 only syncs UNC users, so users from other institutions have no entry. For an
 email in LDAP_PROVISION_EMAIL_DOMAINS, this creates one, shaped like the ones
 ldap-sync writes, and adds its uid to the LDAP_GROUP_DN posixGroup. Existing
-entries are never changed, and a uid already in use, in LDAP or Django, is never
-reused: the new entry gets a numbered one (jdoe2) instead.
+entries are never changed. The uid is <local part>.<institution> (jdoe.duke), so
+it can never be a UNC onyen, and one already in use, in LDAP or Django, is never
+reused: the new entry gets a numbered one (jdoe.duke2) instead.
 """
 import logging
 import os
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 USER_OBJECT_CLASSES = ["top", "inetOrgPerson", "posixAccount", "helxUser"]
 # Tries at claiming a uidNumber when concurrent logins pick the same one.
 CLAIM_ATTEMPTS = 5
-# Numbered uids tried after the plain one (jdoe2 ... jdoe99).
+# Numbered uids tried after the plain one (jdoe.duke2 ... jdoe.duke99).
 UID_SUFFIXES = 99
 # LDAP result code for adding a value an attribute already has.
 ATTRIBUTE_OR_VALUE_EXISTS = 20
@@ -137,11 +138,22 @@ def _provision(conn, base, group_dn, email, user):
 
 
 def _free_uid(conn, base, email):
-    """The email's local part as a uid, numbered if LDAP or Django already has it."""
+    """<local part>.<institution> as a uid (jdoe@duke.edu -> jdoe.duke), numbered
+    if LDAP or Django already has it.
+
+    ldap-sync writes each UNC user to uid=<onyen>,<base>. The institution suffix
+    keeps a provisioned uid from ever being an onyen (assuming onyens never
+    contain a dot), so a later UNC sync can't overwrite the entry.
+    """
     # Keep characters valid in a uid and a Kubernetes label.
-    stem = re.sub(r"[^a-z0-9._-]", "", email.partition("@")[0].lower())[:30] or "user"
-    if not stem[0].isalpha():
-        stem = "u" + stem
+    clean = lambda s: re.sub(r"[^a-z0-9._-]", "", s.lower())
+    local, _, domain = email.partition("@")
+    institution = clean(domain.split(".")[0]) or "ext"
+    # Linux usernames are at most 32 characters; leave room for a number.
+    local = clean(local)[:29 - len(institution)] or "user"
+    if not local[0].isalpha():
+        local = "u" + local
+    stem = f"{local}.{institution}"
     for n in range(1, UID_SUFFIXES + 1):
         uid = stem if n == 1 else f"{stem}{n}"
         conn.search(base, f"(uid={escape_filter_chars(uid)})", SUBTREE, attributes=[])

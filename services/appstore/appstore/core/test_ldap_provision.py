@@ -59,59 +59,66 @@ class LoginUidTests(TestCase):
         self.assertIsNone(login_uid("jdoe@unc.edu", self.user))
 
     def test_creates_entry_and_group(self):
-        self.assertEqual(login_uid("JDoe@duke.edu", self.user), "jdoe")
-        entry = self._entry("jdoe")
+        self.assertEqual(login_uid("JDoe@duke.edu", self.user), "jdoe.duke")
+        entry = self._entry("jdoe.duke")
         self.assertEqual(entry["uidNumber"], ["2000000"])
         self.assertEqual(entry["gidNumber"], ["1025"])
-        self.assertEqual(entry["homeDirectory"], ["/home/jdoe"])
+        self.assertEqual(entry["homeDirectory"], ["/home/jdoe.duke"])
         self.assertEqual(entry["mail"], ["jdoe@duke.edu"])
         self.assertEqual(entry["cn"], ["Jane Doe"])
-        self.assertEqual(self._members(), ["jdoe"])
+        self.assertEqual(self._members(), ["jdoe.duke"])
 
     def test_repeat_login_finds_the_created_entry(self):
         login_uid("jdoe@duke.edu", self.user)
-        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe")
-        self.assertIsNone(self._entry("jdoe2"))
+        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+        self.assertIsNone(self._entry("jdoe.duke2"))
 
     def test_next_user_gets_next_uid_number(self):
         self._add_account("onyen", uidNumber="45678")  # outside the range
         login_uid("jdoe@duke.edu", self.user)
-        self.assertEqual(login_uid("asmith@duke.edu", self.user), "asmith")
-        self.assertEqual(self._entry("asmith")["uidNumber"], ["2000001"])
-        self.assertEqual(self._members(), ["asmith", "jdoe"])
+        self.assertEqual(login_uid("asmith@duke.edu", self.user), "asmith.duke")
+        self.assertEqual(self._entry("asmith.duke")["uidNumber"], ["2000001"])
+        self.assertEqual(self._members(), ["asmith.duke", "jdoe.duke"])
+
+    def test_onyen_with_the_same_local_part_is_left_alone(self):
+        # ldap-sync writes UNC's jdoe to uid=jdoe; the Duke entry can never be at
+        # that DN, so a later sync can't overwrite it.
+        self._add_account("jdoe", mail="jdoe@unc.edu", uidNumber="45678")
+        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+        self.assertEqual(self._entry("jdoe")["mail"], ["jdoe@unc.edu"])
 
     def test_uid_taken_in_ldap_gets_a_number(self):
-        # UNC's jdoe keeps her uid and entry.
-        self._add_account("jdoe", mail="jdoe@unc.edu", uidNumber="45678")
-        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe2")
-        self.assertEqual(self._entry("jdoe")["mail"], ["jdoe@unc.edu"])
-        self.assertEqual(self._entry("jdoe2")["homeDirectory"], ["/home/jdoe2"])
+        self._add_account("jdoe.duke", mail="other@duke.edu", uidNumber="2000005")
+        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke2")
+        self.assertEqual(self._entry("jdoe.duke2")["homeDirectory"], ["/home/jdoe.duke2"])
 
     def test_uid_taken_in_django_gets_a_number(self):
-        User.objects.create(username="jdoe", email="jdoe@gmail.com")
-        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe2")
+        User.objects.create(username="jdoe.duke", email="jdoe@gmail.com")
+        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke2")
 
     def test_local_part_is_made_a_valid_uid(self):
-        self.assertEqual(login_uid("Jane.Doe+x@duke.edu", self.user), "jane.doex")
-        self.assertEqual(login_uid("1jd@duke.edu", self.user), "u1jd")
+        self.assertEqual(login_uid("Jane.Doe+x@duke.edu", self.user), "jane.doex.duke")
+        self.assertEqual(login_uid("1jd@duke.edu", self.user), "u1jd.duke")
+        uid = login_uid("a" * 40 + "@duke.edu", self.user)
+        self.assertTrue(uid.endswith(".duke") and len(uid) <= 30)
 
     @override_settings(LDAP_PROVISION_EMAIL_DOMAINS=[])
     def test_provisioning_off(self):
         self.assertIsNone(login_uid("jdoe@duke.edu", self.user))
-        self.assertIsNone(self._entry("jdoe"))
+        self.assertIsNone(self._entry("jdoe.duke"))
 
     def test_repeat_login_finishes_group_add(self):
         login_uid("jdoe@duke.edu", self.user)
-        self.conn.modify(GROUP, {"memberUid": [(MODIFY_DELETE, ["jdoe"])]})
-        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe")
-        self.assertEqual(self._members(), ["jdoe"])
+        self.conn.modify(GROUP, {"memberUid": [(MODIFY_DELETE, ["jdoe.duke"])]})
+        self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+        self.assertEqual(self._members(), ["jdoe.duke"])
 
     def test_concurrent_login_with_same_uid_number_retries(self):
         # Another login took 2000000 between our read and our add, and its DN sorts first.
         self._add_account("aaa", uidNumber="2000000")
         with patch("core.ldap_provision._next_uid_number", side_effect=[2000000, 2000001]):
-            self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe")
-        self.assertEqual(self._entry("jdoe")["uidNumber"], ["2000001"])
+            self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+        self.assertEqual(self._entry("jdoe.duke")["uidNumber"], ["2000001"])
         self.assertEqual(self._entry("aaa")["uidNumber"], ["2000000"])
 
     def test_no_connection_is_refused(self):

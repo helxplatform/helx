@@ -48,6 +48,9 @@ spec:
                 configMapKeyRef:
                   key: APPSTORE_HOST
                   name: {{ include "appstore-sockets.fullname" . }}-env
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
         - name: {{ .Chart.Name }}-monitoring
           image: "{{ .Values.monitoring.image.repository }}:{{ .Values.monitoring.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.monitoring.image.pullPolicy }}
@@ -65,6 +68,17 @@ spec:
                 secretKeyRef:
                   key: PUBLISHER_SECRET
                   name: {{ include "appstore-sockets.secretName" . }}
+          # UNCDSR-182: the monitoring sidecar's Python kubernetes client
+          # (dynamic.DynamicClient -> tempfile.gettempdir()) needs a writable
+          # /tmp to cache its API discovery data; it crashes outright
+          # (FileNotFoundError: No usable temporary directory) without one
+          # once the root filesystem is read-only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

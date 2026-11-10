@@ -154,7 +154,9 @@ builds images, nothing more. Run these yourself:
 
 Deploying a local build to a cluster is `build-helx-images`, then
 `load-helx-images` (kind, minikube, k3d) or `push-helx-images`, then
-`build-helx-chart`, then `helm-deploy`; `make help-local-dev` explains each.
+`build-helx-chart`, then `helm-deploy-from-local`. Deploying the current
+`develop` candidate from GHCR instead is one step, `helm-deploy-from-ghcr`.
+`make help-local-dev` explains each.
 
 ## What a change costs
 
@@ -200,7 +202,7 @@ Values are layered per platform, last file wins:
 Keys are nested under the subchart's name (`appstore:`, `resty:`, ...), plus
 `global:`. A `# CHANGEME` in a defaults file marks a value every environment
 must set. `deploy/local-dev/local-values-files.env` (gitignored; copy the
-`.sample`) lists the files `make helm-deploy` passes.
+`.sample`) lists the files both `helm-deploy-*` targets pass.
 
 | Platform | Cluster | Notes |
 |---|---|---|

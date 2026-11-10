@@ -31,6 +31,7 @@ service:
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
 
 resources:
   limits:
@@ -71,6 +72,12 @@ ingress:
       # nginx.ingress.kubernetes.io/whitelist-source-range: "172.25.0.0/16,152.54.0.0/22,152.54.8.0/23,152.54.6.0/24,152.54.4.0/23,152.54.15.132/32"
 
 
+# -- nginx's pid file, proxy/fastcgi/etc. temp dirs, and access/error logs
+# (see nginx-configmap.yaml) need a writable mount now that the root
+# filesystem is read-only. Leave claimName unset to use an emptyDir
+# (default -- these are ephemeral working files, not application data that
+# needs to survive a pod restart). Set claimName to persist them on a PVC
+# instead.
 varStorage:
   existingClaim: false
   claimName:

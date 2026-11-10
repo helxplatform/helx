@@ -1,5 +1,7 @@
 ## HeLxPlatform
+
 This is the HeLxplatform monorepo. From July 2026 and onward all changes to the code should flow through here. In effort to make HeLx simple to maintain, deploy and automate the platform has been united into a Majestic Monorepo!
+
 ## DevEx
 
 Everything CI does can be run locally with the same scripts CI uses, so you can
@@ -13,8 +15,8 @@ You need `git`, `helm` 3.x, and Python 3 on your PATH. CI pins Helm 3.18.6 and
 Python 3.12; anything close works locally. Docker is only needed to build images.
 
 Python tooling lives in a project virtualenv, which `make setup` ensures is
-provisioned automatically, along with git remotes/service subtrees and git hooks. Run
-`make setup` to set these up. Python tooling happens once and is re-run only
+provisioned automatically, along with git remotes/service subtrees and git hooks.
+Run `make setup` to set these up. Python tooling happens once and is re-run only
 when `.github/requirements-ci.txt` changes.
 
 Other Python targets also provision `.venv` automatically the first time, so you
@@ -335,8 +337,9 @@ make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace>
 
 You do not need to name the archive. `build-helx-chart` writes its path to
 `dist/charts/.helx-chart.path`, and `helm-deploy-from-local` reads it from
-there, so the two always agree on which build is being installed. If that pointer is missing, or names an
-archive that has been deleted, the deploy stops and tells you to package again.
+there, so the two always agree on which build is being installed. If that
+pointer is missing, or names an archive that has been deleted, the deploy
+stops and tells you to package again.
 
 `RELEASE` defaults to `helx`. `NAMESPACE` defaults to whatever your context
 selects; if you don't have a selected namespace, the deploy stops rather than

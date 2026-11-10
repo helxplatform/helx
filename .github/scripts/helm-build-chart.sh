@@ -189,9 +189,9 @@ package_chart() {
   local package_dir package pointer
 
   # CHART_PACKAGE_DIR puts the archive somewhere the caller can predict, so a
-  # later step -- make helm-deploy -- can deploy exactly what this build
-  # produced. CI leaves it unset: it reads the path from $GITHUB_OUTPUT and has
-  # no second invocation to hand it to.
+  # later step -- make helm-deploy-from-local -- can deploy exactly what this
+  # build produced. CI leaves it unset: it reads the path from $GITHUB_OUTPUT
+  # and has no second invocation to hand it to.
   if [[ -n "${CHART_PACKAGE_DIR:-}" ]]; then
     package_dir="$CHART_PACKAGE_DIR"
     mkdir -p "$package_dir"

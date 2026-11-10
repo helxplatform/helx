@@ -6,6 +6,7 @@
 {{- $imagePullPolicy := default .Values.openldap.image.pullPolicy .Values.configuration.image.pullPolicy -}}
 {{- $baseDN := include "helx-ldap.baseDN" . -}}
 {{- $adminDN := include "helx-ldap.adminDN" . -}}
+{{- $appstore := .Values.configuration.appstoreAccount -}}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -54,6 +55,38 @@ spec:
               value: {{ .Values.configuration.anonymousAccess.enabled | quote }}
             - name: LDAP_PASSWORD_FILE
               value: /run/secrets/ldap/config-password
+            - name: LDAP_APPSTORE_ENABLED
+              value: {{ $appstore.enabled | quote }}
+            {{- if $appstore.enabled }}
+            - name: LDAP_ADMIN_PASSWORD_FILE
+              value: /run/secrets/ldap/admin-password
+            - name: LDAP_APPSTORE_PASSWORD_FILE
+              value: /run/secrets/ldap/appstore-password
+            - name: LDAP_APPSTORE_DN
+              value: {{ printf "cn=%s,%s" $appstore.name $baseDN | quote }}
+            - name: LDAP_EXTERNAL_OU
+              value: {{ $appstore.externalOU | quote }}
+            - name: LDAP_EXTERNAL_DN
+              value: {{ printf "ou=%s,ou=users,%s" $appstore.externalOU $baseDN | quote }}
+            - name: LDAP_GROUP_CN
+              value: {{ $appstore.group | quote }}
+            - name: LDAP_GROUP_DN
+              value: {{ printf "cn=%s,ou=groups,%s" $appstore.group $baseDN | quote }}
+            - name: LDAP_GROUP_GID_NUMBER
+              value: {{ $appstore.groupGidNumber | int | quote }}
+            - name: LDAP_UID_NUMBER_PATTERN
+              value: {{ $appstore.uidNumberPattern | quote }}
+            - name: LDAP_GID_NUMBER_PATTERN
+              value: {{ $appstore.gidNumberPattern | quote }}
+            - name: LDAP_HOME_PATTERN
+              value: {{ $appstore.homeDirectoryPattern | quote }}
+            - name: LDAP_SUPPLEMENTAL_GROUPS_PATTERN
+              value: {{ $appstore.supplementalGroupsPattern | quote }}
+            - name: LDAP_UNIQUE_MODULE_PATH
+              value: {{ .Values.configuration.uniqueModulePath | quote }}
+            - name: LDAP_CONSTRAINT_MODULE_PATH
+              value: {{ .Values.configuration.constraintModulePath | quote }}
+            {{- end }}
           {{- if .Values.configuration.job.securityContext.enabled }}
           securityContext:
             {{- omit .Values.configuration.job.securityContext "enabled" | toYaml | nindent 12 }}
@@ -84,6 +117,12 @@ spec:
             items:
               - key: LDAP_CONFIG_ADMIN_PASSWORD
                 path: config-password
+              {{- if $appstore.enabled }}
+              - key: LDAP_ADMIN_PASSWORD
+                path: admin-password
+              - key: LDAP_APPSTORE_PASSWORD
+                path: appstore-password
+              {{- end }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -170,8 +209,23 @@ data:
       echo "memberof module is already loaded"
     fi
 
-    overlay_dn="olcOverlay=memberof,${database_dn}"
-    if ! ldap_search -b "$overlay_dn" -s base objectClass olcOverlay >/dev/null 2>&1; then
+    # find_overlay_dn <overlay>: the DN of the database's overlay of that type,
+    # or nothing. slapd names overlays with an index (olcOverlay={0}memberof)
+    # and can't match them by substring, so list them and compare names. A
+    # lookup of olcOverlay=<overlay>,<database> never matches, so the overlay
+    # used to be added again on every run.
+    find_overlay_dn() {
+      ldap_search -b "$database_dn" -s one '(objectClass=olcOverlayConfig)' olcOverlay \
+        | awk -v want="$1" '
+            /^dn: / { dn = substr($0, 5) }
+            /^olcOverlay: / {
+              name = substr($0, 13)
+              sub(/^\{[0-9]+\}/, "", name)
+              if (name == want) { print dn; exit }
+            }'
+    }
+
+    if [ -z "$(find_overlay_dn memberof)" ]; then
       echo "Installing memberof overlay..."
       sed "s#olcDatabase={2}mdb,cn=config#${database_dn}#" \
         /ldif/memberof-overlay.ldif | ldap_modify
@@ -214,11 +268,22 @@ data:
     else
       acl_name="authenticated-access"
     fi
-    acl_ldif="$(sed \
+    if [ "${LDAP_APPSTORE_ENABLED:-false}" = "true" ]; then
+      # The same set plus the appstore account's rules. The DNs are complete,
+      # so these are substituted before the generic base DN below.
+      acl_name="${acl_name}-appstore"
+      acl_ldif="$(sed \
+        -e "s#cn=appstore,dc=example,dc=org#${LDAP_APPSTORE_DN}#g" \
+        -e "s#ou=external,ou=users,dc=example,dc=org#${LDAP_EXTERNAL_DN}#g" \
+        -e "s#cn=helx-users,ou=groups,dc=example,dc=org#${LDAP_GROUP_DN}#g" \
+        "/ldif/${acl_name}.ldif")"
+    else
+      acl_ldif="$(cat "/ldif/${acl_name}.ldif")"
+    fi
+    acl_ldif="$(printf '%s\n' "$acl_ldif" | sed \
       -e "s#olcDatabase={2}mdb,cn=config#${database_dn}#g" \
       -e "s#cn=admin,dc=example,dc=org#${LDAP_ADMIN_DN}#g" \
-      -e "s#dc=example,dc=org#${LDAP_BASE_DN}#g" \
-      "/ldif/${acl_name}.ldif")"
+      -e "s#dc=example,dc=org#${LDAP_BASE_DN}#g")"
     live_acl_entry="$(ldap_search -b "$database_dn" -s base olcAccess 2>&1)" || {
       echo "LDAP olcAccess query failed:" >&2
       printf '%s\n' "$live_acl_entry" >&2
@@ -303,6 +368,83 @@ data:
       ' /ldif/helx-user-object-class.ldif | ldap_modify
     else
       echo "helxUser object class is already installed"
+    fi
+
+    # The appstore account (configuration.appstoreAccount). After the helxUser
+    # schema, because the constraint overlay names supplementalGroups.
+    if [ "${LDAP_APPSTORE_ENABLED:-false}" = "true" ]; then
+      for module in "$LDAP_UNIQUE_MODULE_PATH" "$LDAP_CONSTRAINT_MODULE_PATH"; do
+        if ldap_search -b cn=module{0},cn=config -s base olcModuleLoad | grep -Fq "$module"; then
+          echo "${module} is already loaded"
+        else
+          echo "Loading ${module}..."
+          printf 'dn: cn=module{0},cn=config\nchangetype: modify\nadd: olcModuleLoad\nolcModuleLoad: %s\n' \
+            "$module" | ldap_modify
+        fi
+      done
+
+      # apply_overlay <overlay> <objectClass> <attribute> <value>...: add the
+      # overlay with these values, or replace its values when they differ.
+      apply_overlay() {
+        overlay="$1"; object_class="$2"; attribute="$3"; shift 3
+        values="$(for value in "$@"; do printf '%s: %s\n' "$attribute" "$value"; done)"
+        dn="$(find_overlay_dn "$overlay")"
+        if [ -n "$dn" ]; then
+          live="$(ldap_search -b "$dn" -s base "$attribute")"
+          missing=0
+          for value in "$@"; do
+            printf '%s\n' "$live" | grep -Fq "$value" || missing=1
+          done
+          if [ "$missing" -eq 0 ]; then
+            echo "${overlay} overlay is already configured"
+            return
+          fi
+          echo "Updating the ${overlay} overlay..."
+          printf 'dn: %s\nchangetype: modify\nreplace: %s\n%s\n' "$dn" "$attribute" "$values" | ldap_modify
+        else
+          echo "Installing the ${overlay} overlay..."
+          printf 'dn: olcOverlay=%s,%s\nchangetype: add\nobjectClass: olcOverlayConfig\nobjectClass: %s\nolcOverlay: %s\n%s\n' \
+            "$overlay" "$database_dn" "$object_class" "$overlay" "$values" | ldap_modify
+        fi
+      }
+
+      users_dn="ou=users,${LDAP_BASE_DN}"
+      apply_overlay unique olcUniqueConfig olcUniqueURI \
+        "ldap:///${users_dn}?uid?sub" \
+        "ldap:///${users_dn}?uidNumber?sub"
+      restrict="restrict=\"ldap:///${LDAP_EXTERNAL_DN}??one\""
+      apply_overlay constraint olcConstraintConfig olcConstraintAttribute \
+        "uidNumber regex \"${LDAP_UID_NUMBER_PATTERN}\" ${restrict}" \
+        "gidNumber regex \"${LDAP_GID_NUMBER_PATTERN}\" ${restrict}" \
+        "homeDirectory regex \"${LDAP_HOME_PATTERN}\" ${restrict}" \
+        "supplementalGroups regex \"${LDAP_SUPPLEMENTAL_GROUPS_PATTERN}\" ${restrict}" \
+        "runAsUser regex \"^\$\" ${restrict}" \
+        "runAsGroup regex \"^\$\" ${restrict}" \
+        "fsGroup regex \"^\$\" ${restrict}" \
+        "userPassword regex \"^\$\" ${restrict}"
+
+      # Directory entries, written as the directory admin.
+      ensure_entry() {  # ensure_entry <dn> <attribute lines>
+        if ldapsearch -LLL -H "$LDAP_URI" -D "$LDAP_ADMIN_DN" -y "$LDAP_ADMIN_PASSWORD_FILE" \
+          -b "$1" -s base dn >/dev/null 2>&1; then
+          echo "$1 exists"
+        else
+          echo "Creating $1..."
+          printf 'dn: %s\n%s\n' "$1" "$2" \
+            | ldapadd -H "$LDAP_URI" -D "$LDAP_ADMIN_DN" -y "$LDAP_ADMIN_PASSWORD_FILE"
+        fi
+      }
+      ensure_entry "ou=groups,${LDAP_BASE_DN}" "$(printf 'objectClass: organizationalUnit\nou: groups')"
+      ensure_entry "$LDAP_EXTERNAL_DN" "$(printf 'objectClass: organizationalUnit\nou: %s' "$LDAP_EXTERNAL_OU")"
+      ensure_entry "$LDAP_GROUP_DN" "$(printf 'objectClass: top\nobjectClass: posixGroup\ncn: %s\ngidNumber: %s' \
+        "$LDAP_GROUP_CN" "$LDAP_GROUP_GID_NUMBER")"
+      # Created locked; ldappasswd then sets the real password, hashed by slapd.
+      appstore_cn="${LDAP_APPSTORE_DN%%,*}"
+      ensure_entry "$LDAP_APPSTORE_DN" "$(printf 'objectClass: organizationalRole\nobjectClass: simpleSecurityObject\ncn: %s\nuserPassword: {CRYPT}*' \
+        "${appstore_cn#cn=}")"
+      ldappasswd -x -H "$LDAP_URI" -D "$LDAP_ADMIN_DN" -y "$LDAP_ADMIN_PASSWORD_FILE" \
+        -T "$LDAP_APPSTORE_PASSWORD_FILE" "$LDAP_APPSTORE_DN"
+      echo "Set the password of ${LDAP_APPSTORE_DN}"
     fi
 
     echo "LDAP configuration completed successfully"

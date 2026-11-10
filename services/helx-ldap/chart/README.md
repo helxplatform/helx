@@ -17,8 +17,18 @@ HeLx LDAP deployment and configuration
 |-----|------|---------|-------------|
 | configuration.adminDN | string | `""` |  |
 | configuration.anonymousAccess.enabled | bool | `true` |  |
+| configuration.appstoreAccount.enabled | bool | `false` |  |
+| configuration.appstoreAccount.externalOU | string | `"external"` | The branch appstore adds accounts to: ou=<externalOU>,ou=users,<baseDN>. |
+| configuration.appstoreAccount.gidNumberPattern | string | `"^1025$"` |  |
+| configuration.appstoreAccount.group | string | `"helx-users"` | The posixGroup appstore may add members to (cn=<group>,ou=groups,<baseDN>); created by the Job when missing. |
+| configuration.appstoreAccount.groupGidNumber | int | `1025` |  |
+| configuration.appstoreAccount.homeDirectoryPattern | string | `"^/home/[a-z0-9][a-z0-9._-]*$"` |  |
+| configuration.appstoreAccount.name | string | `"appstore"` | The account is cn=<name>,<baseDN>. |
+| configuration.appstoreAccount.supplementalGroupsPattern | string | `"^0$"` |  |
+| configuration.appstoreAccount.uidNumberPattern | string | `"^20[0-9]{5}$"` | Patterns (regular expressions) values in the branch must match. |
 | configuration.baseDN | string | `""` |  |
 | configuration.configDN | string | `"cn=admin,cn=config"` |  |
+| configuration.constraintModulePath | string | `"/opt/bitnami/openldap/lib/openldap/constraint.so"` |  |
 | configuration.enabled | bool | `true` |  |
 | configuration.image.pullPolicy | string | `""` |  |
 | configuration.image.repository | string | `""` |  |
@@ -38,6 +48,7 @@ HeLx LDAP deployment and configuration
 | configuration.job.ttlSecondsAfterFinished | int | `300` |  |
 | configuration.memberofModulePath | string | `"/opt/bitnami/openldap/lib/openldap/memberof.so"` |  |
 | configuration.serviceName | string | `""` |  |
+| configuration.uniqueModulePath | string | `"/opt/bitnami/openldap/lib/openldap/unique.so"` |  |
 | openldap.env.LDAP_ALLOW_ANON_BINDING | string | `"yes"` |  |
 | openldap.fullnameOverride | string | `"openldap"` |  |
 | openldap.global.existingSecret | string | `"openldap-credentials"` | Secret name consumed by the upstream OpenLDAP chart. This is the fixed target name for each credentials ownership mode. In existingSecret mode it must match secret.existingSecret; in externalSecret mode it must match secret.externalSecret.targetName when that value is set. |

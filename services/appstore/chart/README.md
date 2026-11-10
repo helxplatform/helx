@@ -72,7 +72,8 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | ldap.bindPasswordSecret.name | string | `""` | Secret holding bindDN's password, e.g. helx-ldap's "openldap-credentials". Empty sets no password. |
 | ldap.enabled | bool | `false` |  |
 | ldap.groupDN | string | `"cn=users,ou=groups,dc=example,dc=org"` |  |
-| ldap.provision.emailDomains | list | `[]` | Email domains whose users get an LDAP account (in groupDN, a posixGroup) at first login when they have none, e.g. [duke.edu]. The uid is their email's local part, numbered if taken (jdoe2). Needs django.USERNAME_FROM_LDAP and a bindDN that can write. Empty turns it off. |
+| ldap.provision.base | string | `""` | Where new entries are created; empty uses searchBase. Set it to helx-ldap's appstore-account branch (e.g. "ou=external,ou=users,dc=example,dc=org") when bindDN is that account, which may only add entries there. |
+| ldap.provision.emailDomains | list | `[]` | Email domains whose users get an LDAP account (in groupDN, a posixGroup) at first login when they have none, e.g. [duke.edu]. The uid is <local part>.<institution>, numbered if taken (jdoe.duke, jdoe.duke2). Needs django.USERNAME_FROM_LDAP and a bindDN that can write. Empty turns it off. |
 | ldap.provision.gidNumber | int | `1025` | gidNumber of provisioned users and of groupDN when it's created. |
 | ldap.provision.uidMax | int | `2099999` | Last uidNumber given to provisioned users. |
 | ldap.provision.uidMin | int | `2000000` | First uidNumber given to provisioned users. |

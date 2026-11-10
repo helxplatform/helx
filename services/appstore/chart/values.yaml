@@ -168,10 +168,14 @@ ldap:
     key: LDAP_ADMIN_PASSWORD
   provision:
     # -- Email domains whose users get an LDAP account (in groupDN, a posixGroup)
-    # at first login when they have none, e.g. [duke.edu]. The uid is their email's
-    # local part, numbered if taken (jdoe2). Needs django.USERNAME_FROM_LDAP and a
-    # bindDN that can write. Empty turns it off.
+    # at first login when they have none, e.g. [duke.edu]. The uid is
+    # <local part>.<institution>, numbered if taken (jdoe.duke, jdoe.duke2). Needs
+    # django.USERNAME_FROM_LDAP and a bindDN that can write. Empty turns it off.
     emailDomains: []
+    # -- Where new entries are created; empty uses searchBase. Set it to helx-ldap's
+    # appstore-account branch (e.g. "ou=external,ou=users,dc=example,dc=org") when
+    # bindDN is that account, which may only add entries there.
+    base: ""
     # -- First uidNumber given to provisioned users.
     uidMin: 2000000
     # -- Last uidNumber given to provisioned users.

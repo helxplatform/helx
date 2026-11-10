@@ -14,11 +14,15 @@ appstore:
   ldap:
     # ldap.enabled, uri and searchBase come from the defaults (ldap://openldap, ou=users).
     groupDN: cn=helx-users,ou=groups,dc=example,dc=org   # the allow-list: only its members get in
-    bindDN: cn=admin,dc=example,dc=org                   # account creation writes to LDAP
+    # helx-ldap's add-only appstore account (helx-ldap.configuration.appstoreAccount),
+    # not the directory admin: it can only add accounts in ou=external.
+    bindDN: cn=appstore,dc=example,dc=org
     bindPasswordSecret:
-      name: openldap-credentials                         # helx-ldap's Secret (key LDAP_ADMIN_PASSWORD)
+      name: openldap-credentials                         # helx-ldap's Secret
+      key: LDAP_APPSTORE_PASSWORD
     provision:
       emailDomains: [duke.edu]                           # LDAP account created at first login
+      base: ou=external,ou=users,dc=example,dc=org       # the only branch the account may add to
   tycho:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
   userStorage:
@@ -45,6 +49,13 @@ appstore-prepuller:
   appRegistry:
     branch: helx-mism-sandbox-azure              # D4
     brand: helx                                  # must equal the appstore brand (D7 option B)
+
+helx-ldap:
+  configuration:
+    # The add-only appstore account appstore binds as (see appstore.ldap above).
+    # Needs LDAP_APPSTORE_PASSWORD in helx-ldap's secret values.
+    appstoreAccount:
+      enabled: true
 
 ldap-sync:
   searchBootstrap:

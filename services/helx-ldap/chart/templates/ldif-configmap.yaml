@@ -14,6 +14,10 @@ data:
     {{- .Files.Get "files/ldif/anon/access.ldif" | nindent 4 }}
   authenticated-access.ldif: |-
     {{- .Files.Get "files/ldif/authenticated/access.ldif" | nindent 4 }}
+  anonymous-access-appstore.ldif: |-
+    {{- .Files.Get "files/ldif/anon/access-appstore.ldif" | nindent 4 }}
+  authenticated-access-appstore.ldif: |-
+    {{- .Files.Get "files/ldif/authenticated/access-appstore.ldif" | nindent 4 }}
   helx-user-attributes.ldif: |-
     {{- .Files.Get "files/ldif/helxUser/attrs/helxUserAttributes.ldif" | nindent 4 }}
   helx-user-object-class.ldif: |-

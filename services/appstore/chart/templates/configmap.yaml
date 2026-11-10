@@ -51,6 +51,7 @@ data:
   LDAP_PROVISION_UID_MIN: {{ .Values.ldap.provision.uidMin | int | quote }}
   LDAP_PROVISION_UID_MAX: {{ .Values.ldap.provision.uidMax | int | quote }}
   LDAP_PROVISION_GID_NUMBER: {{ .Values.ldap.provision.gidNumber | int | quote }}
+  LDAP_PROVISION_BASE: {{ .Values.ldap.provision.base | quote }}
   {{- end }}
   SAML_FETCH_URL: "{{ .Values.saml.AUTHORITY_URL }}"
   SAML_FETCH_FILE: "{{ .Values.saml.cache.FETCH_FILE }}"

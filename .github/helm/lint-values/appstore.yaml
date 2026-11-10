@@ -10,3 +10,10 @@ secret:
 # CI-only value keeps offline lint deterministic.
 django:
   APPSTORE_DJANGO_PASSWORD: lint-only-admin-password
+# pgadmin-secrets.yaml renders its own helx-common-managed Secret the same
+# way the chart's main secret.yaml does. Same existingSecret override, for
+# the same reason.
+pgadmin:
+  secret:
+    mode: existingSecret
+    existingSecret: pgadmin-lint-secrets

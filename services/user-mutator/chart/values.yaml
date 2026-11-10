@@ -41,10 +41,10 @@ podSecurityContext: {}
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
 securityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   # capabilities:
   #   drop:
   #   - ALL
-  # readOnlyRootFilesystem: true
   # runAsNonRoot: true
   # runAsUser: 1000
 

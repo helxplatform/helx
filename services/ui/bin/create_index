@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-if [ -z "$1" ]
+if [ -z "$1" ] || [ -z "$2" ]
   then
-    echo "Usage: create_index /path/to/build"
+    echo "Usage: create_index /path/to/build /path/to/output/index.html"
     exit 1
 fi
 
@@ -16,4 +16,4 @@ cat "$1/index_template.html" | sed \
   -e "s/%META_DESCRIPTION%/$description/" \
   -e "s/%BRAND%/$brand_name/" \
   -e "s/%APPSTORE_ASSET_BRANCH%/$appstore_asset_branch/" \
-  > $1/index.html
+  > "$2"

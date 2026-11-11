@@ -24,11 +24,8 @@ flowchart TD
     Common --> Images[Validate changed images]
     Services --> CandidateImages[develop only: publish develop-sha images]
     CandidateImages --> Candidate[develop only: publish the version-develop umbrella]
-    CandidateImages --> CandidateACR[develop only, if ACR_LOGIN_SERVER: copy images to ACR]
     Candidate --> Numbered[develop only: publish the version-develop.run umbrella]
-    CandidateACR --> Numbered
     Umbrella --> ProductionImages[Publish or reuse semantic image tags]
-    ProductionImages --> ProductionACR[if ACR_LOGIN_SERVER: copy images to ACR]
     ProductionImages --> Decision{Umbrella version increased?}
     Decision -->|No| Done[Publication complete]
     Decision -->|Yes| Release[Create manifest, tag, and GitHub Release]
@@ -477,25 +474,8 @@ SemVer compares numeric identifiers as numbers, so `develop.10` sorts above
 `develop.9`, and the build number must only grow. Argo CD follows the newest
 with the range `>=0.0.0-0`, which also matches releases, so right after a
 release it runs that release until the next `develop` push raises the version.
-`publish-numbered-candidate` waits for `mirror-images-acr` (below), so a cluster
-that pulls from ACR never sees a numbered candidate before its images.
-
-### Copies in ACR
-
-The Azure AI Sandbox cluster cannot reliably pull from Harbor. When the
-repository variable `ACR_LOGIN_SERVER` is set, `mirror-images-acr` in
-`develop.yml` (each `develop-<sha>` image) and in `publish.yml` (each released
-`v<appVersion>` image) copies every image the run published from Harbor to
-`<ACR_LOGIN_SERVER>/helxplatform/<repository>`. It uses
-[`actions/mirror-image`](actions/mirror-image/action.yml), which copies the
-manifest and layers rather than rebuilding, so each copy has Harbor's digest.
-With the variable unset, the job is skipped. Only images go to ACR; charts are
-published to GHCR only.
-
-The chart keeps naming Harbor repositories.
-`deploy/helm/values/azure/defaults/values.yaml` repoints each built image's
-`repository` at ACR, and the tag still comes from the chart, so a new image in
-[`ci/images.yaml`](ci/images.yaml) needs a line there too.
+Like the mutable candidate, it is published only after its images are in
+Harbor.
 
 ## Container images
 
@@ -584,12 +564,6 @@ Define these repository-level GitHub Actions secrets for Harbor:
 CONTAINERHUB_USERNAME
 CONTAINERHUB_PASSWORD
 ```
-
-To copy images to ACR as well, also define the variable `ACR_LOGIN_SERVER`
-(the registry's login server, without a path) and the secrets `ACR_USERNAME`
-and `ACR_PASSWORD` (an ACR token limited to `helxplatform/*`).
-[`docs/argocd-setup-in-new-cluster.md`](../docs/argocd-setup-in-new-cluster.md)
-section 7 creates the token.
 
 GitHub Actions must be allowed to grant:
 

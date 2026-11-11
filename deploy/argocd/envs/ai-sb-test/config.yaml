@@ -13,7 +13,5 @@ chart:
   repoURL: ghcr.io/helxplatform/helm-charts
   # The newest version, prereleases included: develop.yml's numbered
   # <version>-develop.<run number> candidates, or a release once one is newer.
-  # Images come from ACR either way, through the repositories set in
-  # deploy/helm/values/azure/defaults/values.yaml.
   version: '>=0.0.0-0'
 autoSync: false

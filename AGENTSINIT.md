@@ -103,8 +103,8 @@ each one, and which files count as its source.
 - Root [`README.md`](README.md): the developer workflow, from setup to version
   bumps and deploying a branch.
 - [`docs/argocd-setup-in-new-cluster.md`](docs/argocd-setup-in-new-cluster.md):
-  moving a cluster's environments to Argo CD, including Vault, External
-  Secrets, and the ACR copies.
+  moving a cluster's environments to Argo CD, including Vault and External
+  Secrets.
 - [`.github/CI.md`](.github/CI.md): how the workflows, `ci.py`, and
   `helm-build-chart.sh` work.
 - [`docs/DeploymentMigration.md`](docs/DeploymentMigration.md): upgrading an
@@ -216,8 +216,7 @@ must set. `deploy/local-dev/local-values-files.env` (gitignored; copy the
 An environment can instead be deployed by Argo CD, from `deploy/argocd/`: one
 Application per `deploy/argocd/envs/<env>/`, rendering the same values layers
 plus that folder's `values.yaml`, with secrets read from Vault through External
-Secrets rather than from a local secrets file. The `azure` platform pulls
-images from ACR, where CI copies them, instead of Harbor.
+Secrets rather than from a local secrets file.
 
 ## Traps
 

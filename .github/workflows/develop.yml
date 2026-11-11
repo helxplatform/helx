@@ -241,53 +241,15 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The Azure AI Sandbox cluster cannot pull from Harbor. When the
-  # ACR_LOGIN_SERVER repository variable is set, every candidate image is also
-  # copied to <ACR_LOGIN_SERVER>/helxplatform/; the Azure values files point
-  # each image's repository there. Leave the variable unset to skip it.
-  mirror-images-acr:
-    name: Copy ${{ matrix.image.name }}:${{ matrix.image.tag }} to ACR
-    if: vars.ACR_LOGIN_SERVER != ''
-    needs:
-      - plan-images
-      - publish-images
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        image: ${{ fromJSON(needs.plan-images.outputs.matrix) }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Copy candidate image
-        uses: ./.github/actions/mirror-image
-        with:
-          repository: ${{ matrix.image.repository }}
-          tag: ${{ matrix.image.tag }}
-          target-registry: ${{ vars.ACR_LOGIN_SERVER }}
-          harbor-username: ${{ secrets.CONTAINERHUB_USERNAME }}
-          harbor-password: ${{ secrets.CONTAINERHUB_PASSWORD }}
-          target-username: ${{ secrets.ACR_USERNAME }}
-          target-password: ${{ secrets.ACR_PASSWORD }}
-
   # The same candidate again, as <version>-develop.<run number>, published once
   # and never overwritten. Argo CD caches a chart by version and never notices
   # the mutable <version>-develop being overwritten, so this is the one it
-  # follows, with the range >=0.0.0-0. It waits for the ACR copies, when there
-  # are any, so a cluster that pulls from ACR never sees it before its images.
+  # follows, with the range >=0.0.0-0. Its images are already in Harbor, since
+  # publish-candidate waits for publish-images.
   publish-numbered-candidate:
     name: Publish numbered candidate umbrella
-    if: >-
-      always()
-      && needs.publish-candidate.result == 'success'
-      && contains(fromJSON('["success", "skipped"]'), needs.mirror-images-acr.result)
     needs:
       - publish-candidate
-      - mirror-images-acr
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -335,7 +297,6 @@ jobs:
       - plan-images
       - publish-images
       - publish-candidate
-      - mirror-images-acr
       - publish-numbered-candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -354,7 +315,6 @@ jobs:
           IMAGE_PLAN: ${{ needs.plan-images.result }}
           IMAGES: ${{ needs.publish-images.result }}
           CANDIDATE: ${{ needs.publish-candidate.result }}
-          ACR_IMAGES: ${{ needs.mirror-images-acr.result }}
           NUMBERED: ${{ needs.publish-numbered-candidate.result }}
         run: |
           set -euo pipefail
@@ -366,7 +326,6 @@ jobs:
             "Plan candidate images|$IMAGE_PLAN"
             "Publish candidate images|$IMAGES"
             "Publish candidate umbrella|$CANDIDATE"
-            "Copy candidate images to ACR|$ACR_IMAGES"
             "Publish numbered candidate|$NUMBERED"
           )
           failed=0

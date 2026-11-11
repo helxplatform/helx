@@ -2,10 +2,9 @@
 
 This is the procedure for moving a cluster's HeLx deployments from the
 `make helm-deploy-*` targets to Argo CD, including taking over Helm releases
-that are already running. The commands use the Azure AI Sandbox cluster (kube context
-`ai-sandbox`) and its `ai-sb-test` namespace as the example; substitute your
-own cluster and namespace. Where the Azure cluster needs something other
-clusters don't (pulling images from ACR), the section says so.
+that are already running. The commands use the Azure AI Sandbox cluster (kube
+context `ai-sandbox`) and its `ai-sb-test` namespace as the example;
+substitute your own cluster and namespace.
 
 > **Status and hand-off (2026-10-29).** This block, and the *(done)* /
 > *(not done yet)* markers on the section headings, track the first run of
@@ -29,14 +28,13 @@ clusters don't (pulling images from ACR), the section says so.
 >   chart-managed Secrets in `ai-sb-test` were last written on 2026-10-14, so
 >   the Helm upgrades since then (revision 7, 2026-10-27) haven't changed them.
 > - **Section 6:** done in the repository.
-> - **Section 7:** the CI changes are on the branch `argocd-setup`, not yet
->   merged, so they don't run yet. ACR (`aisandboxrencitgt`, Standard SKU,
->   public network access, no firewall) passes step 1's check and has no
->   tokens yet. Steps 2–4 (token, password, GitHub variable and secrets) are
->   not done. Every built image's `helxplatform/` repository already exists in
->   ACR, but only with hand-pushed `azure-deploy-*` tags, which is what
->   `ai-sb-test` runs now; no `develop-<sha>` or `v<appVersion>` tags yet
->   (step 5).
+> - **Section 7:** the numbered candidates are on the branch `argocd-setup`,
+>   not yet merged, so CI doesn't publish them yet. Copying images to ACR was
+>   dropped: the cluster's Harbor pulls were failing only because of a Harbor
+>   pull Secret with bad credentials, and since it was deleted the cluster
+>   pulls from Harbor. `ai-sb-test` still runs hand-pushed `azure-deploy-*`
+>   images from ACR, through `aisandboxrencitgt-creds`, until Argo CD's first
+>   sync switches it to Harbor's `develop-<sha>` images.
 > - **Section 8:** not done; there's no GHCR repository Secret in Argo CD.
 > - **Section 9:** waiting on the merge. `argocd-setup` is to be merged to
 >   `develop` after the next release is cut. Argo CD reads `develop`, so
@@ -96,18 +94,16 @@ clusters don't (pulling images from ACR), the section says so.
 
 Where everything lives, outside `deploy/argocd/`:
 
-- `deploy/helm/values/<cluster>/` holds the first two values files. The Azure
-  cluster's `defaults/values.yaml` also points every image at ACR (section 7).
+- `deploy/helm/values/<cluster>/` holds the first two values files.
 - `deploy/helm/vault-secrets-map.yaml` maps each Secret to its Vault entry and
   its Helm values. `.github/scripts/vault_secrets.py` and its tests, behind
   `make helm-secrets-to-vault`, `vault-secrets-to-helm`,
   `vault-secrets-from-cluster` and `vault-secrets-upload`, use it (section 5).
   `make help-local-dev` describes the targets.
-- `.github/workflows/develop.yml` and `publish.yml` publish the numbered
-  candidates and copy images to ACR, using `.github/actions/mirror-image`
+- `.github/workflows/develop.yml` publishes the numbered candidates
   (section 7).
-- `AGENTS.md`, under "Argo CD" and "Candidate channels", has the rules for
-  changing any of this.
+- `AGENTS.md`, under "CI" and "Argo CD", has the rules for changing any of
+  this.
 
 ```
 deploy/argocd/
@@ -171,9 +167,25 @@ What to look for in the output:
 - **Whether `gatekeeper-system` exists.** If it does, Gatekeeper policies may
   reject some objects. Check its enforced constraints (section 3), and its
   audit results if a sync fails with an admission error.
-- **Where the images come from.** If they come from ACR rather than Harbor
-  (`containers.renci.org`), the cluster can't reliably pull from Harbor, and
-  section 7's ACR steps apply. Charts are different: Argo CD pulls them from
+- **Whether the cluster can pull from Harbor.** CI pushes every image to
+  Harbor (`containers.renci.org/helxplatform`), and the chart names it, so
+  that is where the pods' images come from once Argo CD deploys them. If
+  pulls from Harbor fail or time out, check the image pull Secrets before
+  suspecting the network. A pull Secret for `containers.renci.org` with bad
+  credentials, listed in `global.imagePullSecrets` or on the namespace's
+  ServiceAccount, makes Harbor pulls fail in a way that looks like a
+  connectivity problem. This lists each pull Secret and the registries it
+  covers, without the credentials:
+
+  ```sh
+  kubectl --context "$CONTEXT" -n ai-sb-test get secrets \
+    --field-selector type=kubernetes.io/dockerconfigjson -o json \
+    | jq -r '.items[] | .metadata.name + "\t" + (.data[".dockerconfigjson"] | @base64d | fromjson | .auths | keys | join(" "))'
+  ```
+
+  Images from another registry (images the namespace ran before, or images
+  apps launch from the app catalog) keep needing their own pull Secret in
+  `global.imagePullSecrets`. Charts are different: Argo CD pulls them from
   GHCR on every cluster.
 
 ## 2. Finish chart migrations before handing over *(done)*
@@ -736,9 +748,10 @@ change:
 Compared with the Helm render, the only differences are Secrets becoming
 ExternalSecrets and the webhook's `caBundle`, which matches the live one.
 No Deployment or StatefulSet template changes, so the takeover itself restarts
-nothing. Pods do roll when the first ACR candidate changes the image tags.
+nothing. Pods do roll when the first candidate changes the image tags, and the
+repositories too wherever the running images came from another registry.
 
-## 7. Publish a chart Argo CD can follow, and images the cluster can pull *(CI on the branch, not merged; ACR token and GitHub settings not done yet)*
+## 7. Publish a chart Argo CD can follow *(on the branch, not merged)*
 
 ### The chart: numbered candidates on GHCR
 
@@ -763,111 +776,23 @@ raising the umbrella version (`5.2.0-develop.1`) sorts above every
 The range also matches releases. Right after a release such as `5.1.1` is
 cut, that release is the newest version until the first `develop` push with a
 higher umbrella version, so the test environment runs it. That is
-intentional, and it is why released images are copied to ACR too (below).
-CI publishes and copies released images only as `v<appVersion>`, so every
+intentional. CI publishes released images only as `v<appVersion>`, so every
 chart's default image tag must be `v<appVersion>` as well, or a release names
 an image that isn't there.
 
-### The images: copies in ACR
+Both candidates are published only after their images are in Harbor, so Argo
+CD never sees a chart whose images are missing. Nothing needs setting up for
+this beyond merging to `develop`: the first push there publishes the first
+numbered candidate.
 
-This cluster cannot reliably pull from Harbor, so every image this repository
-builds is copied to ACR, and the cluster pulls the copy:
+### The images
 
-- `mirror-images-acr` in `develop.yml` copies each `develop-<sha>` image, and
-  the job of the same name in `publish.yml` copies each released
-  `v<appVersion>` image, from Harbor to
-  `<ACR_LOGIN_SERVER>/helxplatform/<image>`. Both use
-  `.github/actions/mirror-image`, which copies rather than rebuilds, so each
-  copy has the same digest as Harbor's. Both run only when the GitHub
-  repository variable `ACR_LOGIN_SERVER` is set.
-- `publish-numbered-candidate` waits for `mirror-images-acr`, so Argo CD never
-  sees a numbered candidate before its images are in ACR.
-- The chart still names Harbor repositories.
-  `deploy/helm/values/azure/defaults/values.yaml` repoints the `repository` of
-  every image this repository builds at
-  `aisandboxrencitgt.azurecr.io/helxplatform/...`. The tag still comes from the
-  chart: `develop-<sha>` for a candidate, `v<appVersion>` for a release. When
-  an image is added to `.github/ci/images.yaml`, add its repository there too.
-  The comment at the top of that file has the command that prints every path.
-
-Images this repository doesn't build are set separately in the same file:
-Bitnami PostgreSQL, os-shell, openresty, and unc-group-x point at ACR. ldap-sync's `docker.io/postgres` and pod-reaper's
-`helxplatform/pod-reaper` come from Docker Hub, which this cluster can reach.
-
-To set it up (someone with ACR and GitHub admin rights), with `az` logged in
-to the registry's subscription:
-
-1. Check that GitHub-hosted runners can reach the registry, and that the
-   token doesn't exist yet. These commands only read:
-
-   ```sh
-   ACR=aisandboxrencitgt
-   az acr show -n "$ACR" --query \
-     '{sku: sku.name, publicNetworkAccess: publicNetworkAccess, defaultAction: networkRuleSet.defaultAction}'
-   az acr token list -r "$ACR" --query '[].name'
-   ```
-
-   `publicNetworkAccess` must be `Enabled`, and `defaultAction` `Allow` or
-   `null`. A registry that denies by default or is private-only can't take
-   pushes from GitHub's runners; it needs a self-hosted runner inside its
-   network instead. Tokens work on every SKU.
-
-2. Create a token CI can push with, limited to `helxplatform/`. A wildcard
-   must be a single `/*` at the end of the path, and it also covers
-   repositories that don't exist yet, so a new image needs no change here.
-   `--no-passwords` keeps `az` from printing a password; the next step makes
-   one:
-
-   ```sh
-   az acr scope-map create -r "$ACR" -n helx-ci-push \
-     --description 'HeLx CI: copy images from Harbor' \
-     --repository 'helxplatform/*' content/read content/write
-   az acr token create -r "$ACR" -n helx-ci --scope-map helx-ci-push --no-passwords
-   ```
-
-   Check it: `status` must be `enabled`, and the scope map's actions must be
-   `content/read` and `content/write` on `helxplatform/*` only:
-
-   ```sh
-   az acr token show -r "$ACR" -n helx-ci --query '{status: status, scopeMap: scopeMapId}'
-   az acr scope-map show -r "$ACR" -n helx-ci-push --query actions
-   ```
-
-3. Generate the token's password straight into the clipboard, so it never
-   appears in the terminal (`pbcopy` is macOS; on Linux pipe to
-   `xclip -selection clipboard`):
-
-   ```sh
-   az acr token credential generate -r "$ACR" -n helx-ci --password1 \
-     --expiration-in-days 365 --query 'passwords[0].value' -o tsv | pbcopy
-   ```
-
-   Without `--expiration-in-days` the password never expires. With it, the
-   mirror jobs start failing once it lapses; replace it before then (below).
-
-4. In the GitHub repository settings (Settings → Secrets and variables →
-   Actions), add the secret `ACR_PASSWORD` by pasting the clipboard, then the
-   secret `ACR_USERNAME` (the token name, `helx-ci`), then the variable
-   `ACR_LOGIN_SERVER=aisandboxrencitgt.azurecr.io`. Add the variable last:
-   it is what turns the mirror jobs on, so a push in between would run them
-   without credentials. Clear the clipboard afterwards.
-
-5. Get every image into ACR before Argo CD is bootstrapped: push to `develop`
-   (or run "Develop channel" from the Actions tab) for the candidate images,
-   and let the next push to `main` copy the released ones. Until then, a
-   numbered candidate published before the variable was set names images
-   that are not in ACR. Check that the copies arrived; each built image should
-   show a `develop-<sha>` tag (and, after a release, `v<appVersion>`):
-
-   ```sh
-   az acr repository show-tags -n "$ACR" --repository helxplatform/appstore \
-     --orderby time_desc --top 3
-   ```
-
-To replace the password, generate the other one (`--password2` in step 3),
-update `ACR_PASSWORD` with it, wait for a `develop` run to pass, then delete
-the old one with `az acr token credential delete -r "$ACR" -n helx-ci
---password1`. The two passwords take turns.
+Every image this repository builds comes from Harbor, as the charts name it:
+`develop-<sha>` for a candidate, written into the umbrella when it is
+packaged, and `v<appVersion>` for a release. Images it doesn't build are set
+per platform in `deploy/helm/values/<cluster>/defaults/values.yaml`; check
+with section 6's render that every one comes from a registry the cluster can
+pull from (section 1).
 
 ## 8. Give Argo CD access to the repositories *(not done yet)*
 
@@ -875,26 +800,41 @@ the old one with `az acr token credential delete -r "$ACR" -n helx-ci
   needs no credentials.
 - **GHCR** (`ghcr.io/helxplatform/helm-charts`) serves charts without
   credentials but refuses to list tags anonymously, and Argo CD lists tags to
-  resolve the `>=0.0.0-0` range. Register it with a GitHub token that
-  has only `read:packages`, ideally from a bot account rather than a
-  person's. The `url` has no `oci://` prefix and must equal `chart.repoURL`
-  in the env's `config.yaml`:
+  resolve the `>=0.0.0-0` range. Register it with a personal access token
+  (classic; GHCR doesn't accept fine-grained tokens) that has only
+  `read:packages`, ideally from a bot account rather than a person's. The
+  `url` has no `oci://` prefix and must equal `chart.repoURL` in the env's
+  `config.yaml`. Read the token without echoing it or leaving it in your
+  shell history (`read` below is zsh; in bash use
+  `read -rsp 'GitHub token: ' GHCR_TOKEN`):
 
   ```sh
+  read -rs 'GHCR_TOKEN?GitHub token: '; echo
   kubectl --context ai-sandbox -n argocd create secret generic repo-ghcr-helm-charts \
     --from-literal=type=helm \
     --from-literal=name=ghcr-helm-charts \
     --from-literal=url=ghcr.io/helxplatform/helm-charts \
     --from-literal=enableOCI=true \
     --from-literal=username=<github user> \
-    --from-literal=password='<token>'
+    --from-literal=password="$GHCR_TOKEN"
+  unset GHCR_TOKEN
   kubectl --context ai-sandbox -n argocd label secret repo-ghcr-helm-charts \
     argocd.argoproj.io/secret-type=repository
   ```
 
-- **ACR** needs nothing from Argo CD, which never pulls images. The cluster's
-  nodes already pull from ACR (the namespace's `aisandboxrencitgt-creds` pull
-  secret is in `global.imagePullSecrets`).
+  Check it without printing the token: the label must be there, and the keys
+  must be `enableOCI`, `name`, `password`, `type`, `url`, and `username`:
+
+  ```sh
+  kubectl --context ai-sandbox -n argocd get secret repo-ghcr-helm-charts -o json \
+    | jq '{labels: .metadata.labels, keys: (.data | keys)}'
+  ```
+
+  The token is only tested once an Application resolves the range
+  (section 11).
+
+- **Harbor** needs nothing from Argo CD, which never pulls images; the
+  cluster's nodes pull them (section 1).
 
 ## 9. Bootstrap Argo CD from `deploy/argocd/` *(not done yet)*
 
@@ -902,7 +842,8 @@ Before this step, check that:
 
 - `kubectl get clustersecretstore vault` shows `READY` `True` (section 4)
 - every Vault entry exists (section 5)
-- the images are in ACR (section 7)
+- a numbered candidate exists on GHCR, so a push to `develop` has run since
+  the merge (section 7)
 - the GHCR repository Secret exists (section 8)
 
 The bootstrap reads `develop`, so `deploy/argocd/` and the env's values must
@@ -938,7 +879,8 @@ record (`sh.helm.release.v1.helx.*` Secrets) is not touched.
 
 1. In the Argo CD UI, open `helx-ai-sb-test` and press **App Diff**. Expect:
    - image tags changing from whatever the release was last deployed with
-     to `develop-<sha>`
+     to `develop-<sha>`, and the repository changing to Harbor for any image
+     that came from another registry
    - ExternalSecrets being added
    - the chart-managed Secrets missing from Git. They show as present in the
      cluster but not in Git; they are **not** deleted, because Argo CD never
@@ -983,7 +925,7 @@ record (`sh.helm.release.v1.helx.*` Secrets) is not touched.
   `5.1.1-develop.214`), not the range. If it shows an error about the range,
   Argo CD can't list GHCR's tags; check the repository Secret from section 8.
 - `kubectl -n ai-sb-test get pods` shows every pod running the `develop-<sha>`
-  images from ACR.
+  images from Harbor.
 - `kubectl -n ai-sb-test get externalsecrets` shows every one `SecretSynced`.
 - The Application stays Synced after a few minutes. An object that keeps
   drifting means something still renders differently each time (section 6),
@@ -1009,6 +951,6 @@ record (`sh.helm.release.v1.helx.*` Secrets) is not touched.
 
 On a new cluster, Argo CD itself and section 8 come first, then sections 3
 and 4 (External Secrets, and a new Vault token in that cluster's
-`vault-token` Secret), then `root.yaml` (section 9). A cluster that pulls from Harbor needs no ACR steps and no
-repository overrides in its values; one that can't pull from Harbor needs its
-own copy of section 7's ACR setup, since the CI jobs copy to a single registry.
+`vault-token` Secret), then `root.yaml` (section 9). Every cluster pulls the
+images from Harbor, so check that the new one can (section 1) before the
+first sync.

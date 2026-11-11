@@ -70,18 +70,11 @@ they apply either way.
 - On `main`, pass the base commit to `check-versions` as `--release-ref`, never
   `origin/main`. After a push, `origin/main` is the commit being checked, so
   every version would match itself and the check would always pass.
-- Images go to Harbor only, with one exception: when the repository variable
-  `ACR_LOGIN_SERVER` is set, `mirror-images-acr` in `develop.yml` and
-  `publish.yml` copies every image they published to ACR, for the Azure AI
-  Sandbox cluster. The chart keeps naming Harbor, and
-  `deploy/helm/values/azure/defaults/values.yaml` points each built image at
-  ACR, so a new image in `.github/ci/images.yaml` needs a line there too.
+- CI pushes images to Harbor only, and every cluster pulls them from there.
 - Anything Argo CD follows must be a numbered candidate
   (`<version>-develop.<build>`), never the mutable `<version>-develop`: Argo CD
   caches a chart by its version and never notices an overwritten tag. The
-  build number must only grow (CI uses `github.run_number`), and
-  `publish-numbered-candidate` must keep waiting for `mirror-images-acr`, so a
-  cluster pulling from ACR never sees a chart before its images.
+  build number must only grow (CI uses `github.run_number`).
 
 ## Argo CD
 

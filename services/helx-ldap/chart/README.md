@@ -17,7 +17,6 @@ HeLx LDAP deployment and configuration
 |-----|------|---------|-------------|
 | configuration.adminDN | string | `""` |  |
 | configuration.anonymousAccess.enabled | bool | `true` |  |
-| configuration.appstoreAccount.enabled | bool | `false` |  |
 | configuration.appstoreAccount.externalOU | string | `"external"` | The branch appstore adds accounts to: ou=<externalOU>,ou=users,<baseDN>. |
 | configuration.appstoreAccount.gidNumberPattern | string | `"^1025$"` |  |
 | configuration.appstoreAccount.group | string | `"helx-users"` | The posixGroup appstore may add members to (cn=<group>,ou=groups,<baseDN>); created by the Job when missing. |
@@ -72,13 +71,13 @@ HeLx LDAP deployment and configuration
 | openldap.resources.requests.cpu | string | `"500m"` |  |
 | openldap.resources.requests.memory | string | `"500M"` |  |
 | openldap.test.enabled | bool | `false` |  |
-| secret.existingSecret | string | `""` | Name of a caller-managed HeLx LDAP credentials Secret containing LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Set this only when `secret.mode` is `existingSecret`. |
+| secret.existingSecret | string | `""` | Name of a caller-managed HeLx LDAP credentials Secret containing LDAP_ADMIN_PASSWORD, LDAP_CONFIG_ADMIN_PASSWORD and LDAP_APPSTORE_PASSWORD. Set this only when `secret.mode` is `existingSecret`. |
 | secret.externalSecret | object | `{"enabled":false,"refreshInterval":"1h","remoteRef":"","secretStoreRef":{"kind":"SecretStore","name":"vault"},"targetName":""}` | Configure an ExternalSecret to populate the HeLx LDAP credentials Secret. Set `secret.mode` to `externalSecret` when using this configuration. |
 | secret.externalSecret.targetName | string | `""` | Optional ESO target Secret name. Defaults to openldap.global.existingSecret. |
 | secret.migration.enabled | bool | `false` | Enable the one-time credentials Secret migration during a Helm upgrade. It requires `secret.mode: existingSecret`, and the target remains caller-managed through secret.existingSecret. |
 | secret.migration.legacySecret | string | `""` | Name of the credentials Secret from the previous deployment. Verify it in the namespace before upgrading; this is not deleted automatically. |
 | secret.mode | string | `"values"` | Which owner writes the credentials Secret: `values` for a chart-managed Secret built from `secret.values`, `existingSecret` for a caller-managed Secret, or `externalSecret` for External Secrets. |
-| secret.values | object | `{}` | Key/value pairs used to create the chart-managed HeLx LDAP credentials Secret. Set these only when `secret.mode` is `values`. Required keys:   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator Argo CD users should provide stable encrypted values or select ESO mode. |
+| secret.values | object | `{}` | Key/value pairs used to create the chart-managed HeLx LDAP credentials Secret. Set these only when `secret.mode` is `values`. Required keys:   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator   LDAP_APPSTORE_PASSWORD: password for the appstore account     (configuration.appstoreAccount), which appstore binds as Argo CD users should provide stable encrypted values or select ESO mode. |
 
 ## Existing release migration
 

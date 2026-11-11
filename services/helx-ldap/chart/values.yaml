@@ -7,8 +7,8 @@ secret:
   mode: values
 
   # -- Name of a caller-managed HeLx LDAP credentials Secret containing
-  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Set this only when
-  # `secret.mode` is `existingSecret`.
+  # LDAP_ADMIN_PASSWORD, LDAP_CONFIG_ADMIN_PASSWORD and LDAP_APPSTORE_PASSWORD.
+  # Set this only when `secret.mode` is `existingSecret`.
   existingSecret: ""
 
   # -- Key/value pairs used to create the chart-managed HeLx LDAP credentials
@@ -16,6 +16,8 @@ secret:
   # Required keys:
   #   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator
   #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
+  #   LDAP_APPSTORE_PASSWORD: password for the appstore account
+  #     (configuration.appstoreAccount), which appstore binds as
   # Argo CD users should provide stable encrypted values or select ESO mode.
   values: {}
 
@@ -248,12 +250,12 @@ configuration:
   #   - change or delete only entries it created (creatorsName);
   #   - add, never remove, memberUid values on the group.
   # A unique overlay also keeps uid and uidNumber unique across ou=users, for
-  # every writer, ldap-sync included. When enabled, the Job creates the
-  # account, its branch and the group, keeps the account's password current
-  # from the credentials Secret key LDAP_APPSTORE_PASSWORD, and applies the
-  # ACL set that includes these rules.
+  # every writer, ldap-sync included. The Job creates the account, its branch
+  # and the group, keeps the account's password current from the credentials
+  # Secret key LDAP_APPSTORE_PASSWORD (required), and applies the ACLs that
+  # include these rules. There is no switch to turn it off: appstore would
+  # then need the directory admin's password.
   appstoreAccount:
-    enabled: false
     # -- The account is cn=<name>,<baseDN>.
     name: appstore
     # -- The branch appstore adds accounts to: ou=<externalOU>,ou=users,<baseDN>.

@@ -419,7 +419,17 @@ The following are necessary for the automatic migration path:
    `LDAP_ADMIN_PASSWORD` and `LDAP_CONFIG_ADMIN_PASSWORD`, whether it is already
    named `openldap-credentials` or must be copied from a differently named
    legacy Secret.
-6. **The deployer must have permission to run the migration hook.** The hook
+6. **The credentials need a new key, `LDAP_APPSTORE_PASSWORD`.** It is the
+   password of the account appstore binds as
+   (`helx-ldap.configuration.appstoreAccount`), which older deployments don't
+   have; the configuration Job creates the account and sets this password.
+   Generate a new random value and add it before upgrading: under
+   `helx-ldap.secret.values` with `secret.mode: values`, or as a key of the
+   caller-managed Secret otherwise. When migrating from a differently named
+   Secret, add it to the legacy Secret, since the migration copies every key.
+   Without it, rendering fails in `values` mode, and the configuration Job
+   can't start in the other modes.
+7. **The deployer must have permission to run the migration hook.** The hook
    needs namespace-scoped access to inspect PVCs and pods, and to scale and
    delete the selected old StatefulSet controller.
 

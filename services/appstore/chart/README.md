@@ -67,12 +67,11 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | irods.enabled | bool | `false` | enable branded iRODS support; provide its environment variables through the selected appstore Secret. |
 | irodsUnbranded.IROD_USER_VALUES | object | `{}` |  |
 | irodsUnbranded.enabled | bool | `false` |  |
-| ldap.bindDN | string | `""` | DN appstore binds as. Empty binds anonymously, which is enough for the group check; provisioning needs one that can write, e.g. helx-ldap's admin "cn=admin,dc=example,dc=org". |
-| ldap.bindPasswordSecret.key | string | `"LDAP_ADMIN_PASSWORD"` | Key of the password in that Secret. |
-| ldap.bindPasswordSecret.name | string | `""` | Secret holding bindDN's password, e.g. helx-ldap's "openldap-credentials". Empty sets no password. |
+| ldap.bindDN | string | `""` | DN appstore binds as. Empty binds anonymously, which is enough for the group check; provisioning needs helx-ldap's appstore account, "cn=appstore,dc=example,dc=org". |
+| ldap.bindPasswordSecret.name | string | `""` | Secret holding bindDN's password under the key LDAP_APPSTORE_PASSWORD, e.g. helx-ldap's "openldap-credentials". Empty sets no password. |
 | ldap.enabled | bool | `false` |  |
 | ldap.groupDN | string | `"cn=users,ou=groups,dc=example,dc=org"` |  |
-| ldap.provision.base | string | `""` | Where new entries are created; empty uses searchBase. Set it to helx-ldap's appstore-account branch (e.g. "ou=external,ou=users,dc=example,dc=org") when bindDN is that account, which may only add entries there. |
+| ldap.provision.base | string | `"ou=external,ou=users,dc=example,dc=org"` | Where new entries are created: helx-ldap's appstore-account branch, the only place that account may add entries. Empty uses searchBase. |
 | ldap.provision.emailDomains | list | `[]` | Email domains whose users get an LDAP account (in groupDN, a posixGroup) at first login when they have none, e.g. [duke.edu]. The uid is <local part>.<institution>, numbered if taken (jdoe.duke, jdoe.duke2). Needs django.USERNAME_FROM_LDAP and a bindDN that can write. Empty turns it off. |
 | ldap.provision.gidNumber | int | `1025` | gidNumber of provisioned users and of groupDN when it's created. |
 | ldap.provision.uidMax | int | `2099999` | Last uidNumber given to provisioned users. |

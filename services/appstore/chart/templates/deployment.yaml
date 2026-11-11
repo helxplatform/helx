@@ -228,7 +228,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ . }}
-              key: {{ $.Values.ldap.bindPasswordSecret.key }}
+              key: LDAP_APPSTORE_PASSWORD
         {{- end }}
         {{- end }}
 

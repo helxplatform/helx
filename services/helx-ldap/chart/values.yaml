@@ -7,8 +7,8 @@ secret:
   mode: values
 
   # -- Name of a caller-managed HeLx LDAP credentials Secret containing
-  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Set this only when
-  # `secret.mode` is `existingSecret`.
+  # LDAP_ADMIN_PASSWORD, LDAP_CONFIG_ADMIN_PASSWORD and LDAP_APPSTORE_PASSWORD.
+  # Set this only when `secret.mode` is `existingSecret`.
   existingSecret: ""
 
   # -- Key/value pairs used to create the chart-managed HeLx LDAP credentials
@@ -16,6 +16,8 @@ secret:
   # Required keys:
   #   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator
   #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
+  #   LDAP_APPSTORE_PASSWORD: password for the appstore account
+  #     (configuration.appstoreAccount), which appstore binds as
   # Argo CD users should provide stable encrypted values or select ESO mode.
   values: {}
 
@@ -237,6 +239,40 @@ configuration:
   # anonymous binds outright.
   anonymousAccess:
     enabled: true
+
+  # A dedicated LDAP account appstore binds as instead of the directory admin,
+  # to create accounts at first login (appstore ldap.provision). It can only:
+  #   - read users and groups;
+  #   - add entries in its own branch, ou=<externalOU>,ou=users, with values
+  #     limited by the constraint overlay (uidNumber, gidNumber, home and
+  #     supplementalGroups patterns below; no runAsUser, runAsGroup, fsGroup
+  #     or password);
+  #   - change or delete only entries it created (creatorsName);
+  #   - add, never remove, memberUid values on the group.
+  # A unique overlay also keeps uid and uidNumber unique across ou=users, for
+  # every writer, ldap-sync included. The Job creates the account, its branch
+  # and the group, keeps the account's password current from the credentials
+  # Secret key LDAP_APPSTORE_PASSWORD (required), and applies the ACLs that
+  # include these rules. There is no switch to turn it off: appstore would
+  # then need the directory admin's password.
+  appstoreAccount:
+    # -- The account is cn=<name>,<baseDN>.
+    name: appstore
+    # -- The branch appstore adds accounts to: ou=<externalOU>,ou=users,<baseDN>.
+    externalOU: external
+    # -- The posixGroup appstore may add members to (cn=<group>,ou=groups,<baseDN>);
+    # created by the Job when missing.
+    group: helx-users
+    groupGidNumber: 1025
+    # -- Patterns (regular expressions) values in the branch must match.
+    uidNumberPattern: "^20[0-9]{5}$"
+    gidNumberPattern: "^1025$"
+    homeDirectoryPattern: "^/home/[a-z0-9][a-z0-9._-]*$"
+    supplementalGroupsPattern: "^0$"
+
+  # Module paths for the overlays the appstore account uses.
+  uniqueModulePath: /opt/bitnami/openldap/lib/openldap/unique.so
+  constraintModulePath: /opt/bitnami/openldap/lib/openldap/constraint.so
 
   # The Job connects to openldap.fullnameOverride by default. Set this only
   # when the service name is intentionally different from the chart name.

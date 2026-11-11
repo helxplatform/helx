@@ -10,10 +10,12 @@ VALUES_FILE="$CHART_DIR/examples/ldap-test-values.yaml"
 
 : "${LDAP_ADMIN_PASSWORD:?Set LDAP_ADMIN_PASSWORD before running this script}"
 : "${LDAP_CONFIG_ADMIN_PASSWORD:?Set LDAP_CONFIG_ADMIN_PASSWORD before running this script}"
+: "${LDAP_APPSTORE_PASSWORD:?Set LDAP_APPSTORE_PASSWORD before running this script}"
 
 kubectl -n "$NAMESPACE" create secret generic openldap-credentials \
   --from-literal=LDAP_ADMIN_PASSWORD="${LDAP_ADMIN_PASSWORD:?Set LDAP_ADMIN_PASSWORD}" \
   --from-literal=LDAP_CONFIG_ADMIN_PASSWORD="${LDAP_CONFIG_ADMIN_PASSWORD:?Set LDAP_CONFIG_ADMIN_PASSWORD}" \
+  --from-literal=LDAP_APPSTORE_PASSWORD="${LDAP_APPSTORE_PASSWORD:?Set LDAP_APPSTORE_PASSWORD}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 helm dependency build --skip-refresh "$WRAPPER_DIR"

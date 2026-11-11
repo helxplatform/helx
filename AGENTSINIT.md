@@ -277,8 +277,12 @@ Each of these has cost someone time.
 - **Use `make sync-locks`, not `helm dependency update`.** Locks are generated
   from `Chart.yaml` alone. `helm dependency update` reaches out to the
   registries (GHCR needs a login) and downloads archives to get the same lock.
-- **Local tools can differ from CI.** CI pins Helm 3.18.6, so with Helm 4 a
-  clean local lint is good evidence but not proof. user-mutator needs Go 1.26,
+- **Local tools can differ from CI.** CI pins Helm 4.2.1, the version Argo CD
+  renders with, so with any other Helm a clean local lint is good evidence but
+  not proof. When Argo CD is upgraded, move the pin in
+  `.github/actions/publish-charts/action.yml` and `.github/workflows/publish.yml`
+  to the Helm it bundles (`helm4_version` in Argo CD's `hack/tool-versions.sh`
+  for that release). user-mutator needs Go 1.26,
   and an older Go tries to download a newer toolchain.
 - **No workflow checks upstream drift.** `check-subtree-sync` and
   `check-vendored-sync` exist only for local use.

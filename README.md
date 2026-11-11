@@ -11,8 +11,8 @@ view.
 
 ### Prerequisites
 
-You need `git`, `helm` 3.x, and Python 3 on your PATH. CI pins Helm 3.18.6 and
-Python 3.12; anything close works locally. Docker is only needed to build images.
+You need `git`, `helm` 4.x, and Python 3 on your PATH. CI pins Helm 4.2.1, the
+version Argo CD renders with, and Python 3.12; anything close works locally. Docker is only needed to build images.
 
 Python tooling lives in a project virtualenv, which `make setup` ensures is
 provisioned automatically, along with git remotes/service subtrees and git hooks.

@@ -32,18 +32,25 @@ class SecretValuesRenderTests(unittest.TestCase):
         self.chart = Path(self.temporary.name) / "probe"
         (self.chart / "templates").mkdir(parents=True)
         (self.chart / "Chart.yaml").write_text("apiVersion: v2\nname: probe\nversion: 0.1.0\n")
-        (self.chart / "templates/secret.yaml").write_text(
-            '{{ include "helx-common.secret.resources.v1" (dict\n'
-            '  "root" . "defaultName" "probe" "mode" "values" "values" .Values.values) }}\n'
-        )
         shutil.copytree(HELX_COMMON, self.chart / "charts/helx-common")
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def render_string_data(self, values: dict[str, str]) -> dict[str, str]:
+    def render_string_data(self, cases: list[dict[str, str]]) -> list[dict[str, str]]:
+        """Render each case as the values of its own Secret, in one helm run.
+
+        Each Secret comes from its own template file, so Helm trims each one as
+        a separate manifest, exactly as it would trim a chart's only Secret.
+        """
+        for index in range(len(cases)):
+            (self.chart / f"templates/secret-{index}.yaml").write_text(
+                '{{ include "helx-common.secret.resources.v1" (dict\n'
+                f'  "root" . "defaultName" "probe-{index}" "mode" "values"\n'
+                f'  "values" (index .Values.cases {index})) }}}}\n'
+            )
         values_file = self.chart.parent / "values.json"
-        values_file.write_text(json.dumps({"values": values}))
+        values_file.write_text(json.dumps({"cases": cases}))
         result = subprocess.run(
             ["helm", "template", "probe", str(self.chart), "--values", str(values_file)],
             capture_output=True,
@@ -51,15 +58,20 @@ class SecretValuesRenderTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        (secret,) = [doc for doc in yaml.safe_load_all(result.stdout) if doc]
-        self.assertEqual(secret["kind"], "Secret")
-        return secret["stringData"]
+        secrets = {doc["metadata"]["name"]: doc for doc in yaml.safe_load_all(result.stdout) if doc}
+        self.assertEqual(len(secrets), len(cases))
+        rendered = []
+        for index in range(len(cases)):
+            secret = secrets[f"probe-{index}"]
+            self.assertEqual(secret["kind"], "Secret")
+            rendered.append(secret["stringData"])
+        return rendered
 
     def test_values_mode_keeps_every_value_byte_for_byte(self) -> None:
-        for label, value in TRICKY_VALUES.items():
+        cases = [{"a-first": value, "z-last": value} for value in TRICKY_VALUES.values()]
+        for label, values, rendered in zip(TRICKY_VALUES, cases, self.render_string_data(cases)):
             with self.subTest(label):
-                values = {"a-first": value, "z-last": value}
-                self.assertEqual(self.render_string_data(values), values)
+                self.assertEqual(rendered, values)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Callable, Hashable, Iterator
+import functools
 import importlib.util
 import io
 import json
@@ -14,10 +16,14 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple, TypeVar
 from unittest.mock import patch
 
 import yaml
+
+K = TypeVar("K", bound=Hashable)
+T = TypeVar("T")
+
 
 @contextlib.contextmanager
 def captured_stderr() -> Iterator[io.StringIO]:
@@ -37,6 +43,30 @@ assert SPEC and SPEC.loader
 ci = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = ci
 SPEC.loader.exec_module(ci)
+
+REPO_ROOT = SCRIPT.resolve().parents[2]
+MAKEFILE = REPO_ROOT / "Makefile"
+
+
+def read_makefile() -> str:
+    """Return the repository's Makefile, skipping the caller outside the repository."""
+    if not MAKEFILE.is_file():  # pragma: no cover - only when run outside the repo
+        raise unittest.SkipTest("Makefile not present")
+    return MAKEFILE.read_text(encoding="utf-8")
+
+
+def run_concurrently(calls: dict[K, Callable[[], T]]) -> dict[K, T]:
+    """Run independent calls that wait on child processes, all at once.
+
+    Starting a process costs tens of milliseconds on macOS, and the scripts
+    these tests drive start several each, so running the cases one after
+    another dominated the suite. Each call only waits on its own children, so
+    threads overlap them; results come back under the same keys as the calls.
+    """
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        futures = {key: pool.submit(call) for key, call in calls.items()}
+        return {key: future.result() for key, future in futures.items()}
+
 
 _GIT_ENVIRONMENT = patch.dict(os.environ)
 
@@ -687,15 +717,12 @@ class DependencyVersionInvariantTests(TempTreeTest):
         self.build("1.2.3", "1.2.3")
         ci.validate_dependency_versions(self.root)
 
-    def test_tree_ahead_of_the_pin_is_rejected(self) -> None:
-        self.build("1.2.3", "1.2.4")
-        with self.assertRaisesRegex(ci.CIError, r"pins 'api' '1.2.3'.*is '1.2.4'"):
-            ci.validate_dependency_versions(self.root)
-
-    def test_tree_behind_the_pin_is_rejected(self) -> None:
-        self.build("1.2.4", "1.2.3")
-        with self.assertRaisesRegex(ci.CIError, r"pins 'api' '1.2.4'.*is '1.2.3'"):
-            ci.validate_dependency_versions(self.root)
+    def test_tree_ahead_of_or_behind_the_pin_is_rejected(self) -> None:
+        for pin, tree in (("1.2.3", "1.2.4"), ("1.2.4", "1.2.3")):
+            with self.subTest(pin=pin, tree=tree):
+                self.build(pin, tree)
+                with self.assertRaisesRegex(ci.CIError, rf"pins 'api' '{pin}'.*is '{tree}'"):
+                    ci.validate_dependency_versions(self.root)
 
     def test_file_dependencies_are_left_to_validate_chart(self) -> None:
         self.build("1.2.3", "1.2.4", repository="file://../../../services/api/chart")
@@ -954,44 +981,37 @@ class DockerIgnoreTests(TempTreeTest):
 class UntrackedChangeTests(GitFixtureTest):
     """A local run must be able to see what CI will see once files are committed."""
 
-    fixture_attributes = ("base",)
+    fixture_attributes = ("base", "bumped")
 
     def build_fixture(self) -> None:
+        """api at 1.0.0 in the root commit, then bumped to 1.0.1 on develop."""
         self.write_chart("services/api/chart", name="api", version="1.0.0")
         self.commit("base")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
+        self.write_chart("services/api/chart", name="api", version="1.0.1")
+        self.commit("Bump api chart version")
+        self.bumped = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("branch", "develop")
 
-    def test_untracked_file_is_invisible_by_default(self) -> None:
+    def test_uncommitted_files_are_invisible_by_default(self) -> None:
         # The exact shape of the bug: a newly created .helmignore is packaged, so
         # it changes the chart, but base..HEAD cannot see it until it is committed.
         self.write("services/api/chart/.helmignore", ".gitignore\n")
-        self.assertEqual(ci.changed_paths(self.root, self.base), [])
-        self.assertEqual(
-            ci.changed_paths(self.root, self.base, include_untracked=True),
-            ["services/api/chart/.helmignore"],
-        )
-
-    def test_uncommitted_modification_is_invisible_by_default(self) -> None:
         chart = self.root / "services/api/chart/Chart.yaml"
         chart.write_text(chart.read_text() + "description: edited\n", encoding="utf-8")
-        self.assertEqual(ci.changed_paths(self.root, self.base), [])
-        self.assertEqual(
-            ci.changed_paths(self.root, self.base, include_untracked=True),
-            ["services/api/chart/Chart.yaml"],
-        )
-
-    def test_gitignored_files_stay_out_of_both_modes(self) -> None:
+        # Gitignored files stay out of both modes.
         self.write(".gitignore", "ignored/\n")
         self.write("ignored/junk.txt", "junk")
-        for include_untracked in (False, True):
-            with self.subTest(include_untracked=include_untracked):
-                self.assertNotIn(
-                    "ignored/junk.txt",
-                    ci.changed_paths(self.root, self.base, include_untracked=include_untracked),
-                )
+
+        self.assertEqual(ci.changed_paths(self.root, self.bumped), [])
+        self.assertEqual(
+            ci.changed_paths(self.root, self.bumped, include_untracked=True),
+            [".gitignore", "services/api/chart/.helmignore", "services/api/chart/Chart.yaml"],
+        )
 
     def test_version_gate_explains_an_unidentified_version_convergence(self) -> None:
-        self.git("branch", "develop", self.base)
+        # The root commit set 1.0.0, so no base commit introduced it.
+        self.git("checkout", "-q", "-B", "develop", self.base)
         self.write("services/api/chart/.helmignore", ".gitignore\n")
         empty = {"registry": ci.REGISTRY, "images": []}
         with patch.object(ci, "load_images_config", return_value=empty):
@@ -1010,12 +1030,6 @@ class UntrackedChangeTests(GitFixtureTest):
         )
 
     def test_version_gate_names_the_base_commit_that_introduced_the_version(self) -> None:
-        chart = self.root / "services/api/chart/Chart.yaml"
-        chart.write_text(chart.read_text().replace("version: 1.0.0", "version: 1.0.1"), encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "Bump api chart version")
-        self.base = self.git("rev-parse", "HEAD").stdout.strip()
-        self.git("branch", "develop", self.base)
         self.write("services/api/chart/templates/deployment.yaml", "apiVersion: v1\nkind: ConfigMap\n")
 
         empty = {"registry": ci.REGISTRY, "images": []}
@@ -1030,17 +1044,12 @@ class UntrackedChangeTests(GitFixtureTest):
             "Version checks failed:\n"
             "- The services/api/chart chart version must increase above '1.0.1'; "
             "current value is '1.0.1'. The develop branch introduced '1.0.1' in "
-            f"{self.base[:12]} ('Bump api chart version'); your branch also changes files "
+            f"{self.bumped[:12]} ('Bump api chart version'); your branch also changes files "
             "in the packaged chart, so choose a newer version.",
         )
 
     def test_version_gate_does_not_call_a_regression_convergence(self) -> None:
         chart = self.root / "services/api/chart/Chart.yaml"
-        chart.write_text(chart.read_text().replace("version: 1.0.0", "version: 1.0.1"), encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "Bump api chart version")
-        self.base = self.git("rev-parse", "HEAD").stdout.strip()
-        self.git("branch", "develop", self.base)
         chart.write_text(chart.read_text().replace("version: 1.0.1", "version: 1.0.0"), encoding="utf-8")
 
         empty = {"registry": ci.REGISTRY, "images": []}
@@ -1135,6 +1144,8 @@ class LocalServiceBuildTests(TempTreeTest):
             services=["worker"], tag="dev-1",
         )
         # api keeps its released tag by being absent from the overlay entirely.
+        # Without a registry the repository is left alone too: overriding it
+        # unasked would rewrite values the chart already ships.
         self.assertEqual(
             overlay,
             {"worker": {"image": {"tag": "dev-1"}, "sidecar": {"image": {"tag": "dev-1"}}}},
@@ -1202,72 +1213,38 @@ class LocalServiceBuildTests(TempTreeTest):
             },
         )
 
-    def test_without_a_registry_the_repository_is_left_alone(self) -> None:
-        # Overriding it unasked would rewrite values the chart already ships.
-        overlay = ci.candidate_values(
-            self.root, "local", "abc1234", config_path=self.config,
-            services=["worker"], tag="dev-1",
-        )
-        self.assertEqual(
-            overlay,
-            {"worker": {"image": {"tag": "dev-1"}, "sidecar": {"image": {"tag": "dev-1"}}}},
-        )
+    def plan_worker(self, registry: str | None) -> tuple[list[dict[str, Any]], str]:
+        """Plan the worker images against registry; return the plan and its warnings."""
+        with captured_stderr() as stderr:
+            plan = ci.image_plan(self.root, ["worker"], config_path=self.config, registry=registry)
+        return plan, stderr.getvalue()
 
     def test_a_registry_without_the_project_path_warns_but_still_builds(self) -> None:
         # Forgetting /helxplatform yields references nothing was pushed to, but
         # hosting at the registry root is legal, so this warns rather than fails.
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            plan = ci.image_plan(
-                self.root, ["worker"], config_path=self.config,
-                registry="myregistry.example.org",
-            )
+        plan, message = self.plan_worker("myregistry.example.org")
         self.assertEqual(plan[0]["reference"], "myregistry.example.org/worker")
-        message = stderr.getvalue()
         self.assertIn("::warning::", message)
         self.assertIn(ci.REGISTRY_PROJECT, message)
         self.assertIn("myregistry.example.org/<image>", message)
-
-    def test_a_localhost_registry_is_exempt_from_the_warning(self) -> None:
-        # A scratch registry beside a kind cluster serves from its root, so the
-        # missing project path is intended and nagging about it trains it away.
-        for registry in ("localhost:5000", "localhost", "localhost:5000/scratch"):
-            with self.subTest(registry=registry):
-                stderr = io.StringIO()
-                with contextlib.redirect_stderr(stderr):
-                    ci.image_plan(
-                        self.root, ["worker"], config_path=self.config,
-                        registry=registry,
-                    )
-                self.assertEqual(stderr.getvalue(), "")
-
-    def test_a_hostname_merely_containing_localhost_still_warns(self) -> None:
         # Only the literal localhost host is exempt; a remote registry that
         # happens to spell it is still a real missing project path.
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            ci.image_plan(
-                self.root, ["worker"], config_path=self.config,
-                registry="localhost.example.org",
-            )
-        self.assertIn("::warning::", stderr.getvalue())
+        self.assertIn("::warning::", self.plan_worker("localhost.example.org")[1])
 
-    def test_a_registry_with_the_project_path_is_silent(self) -> None:
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            ci.image_plan(
-                self.root, ["worker"], config_path=self.config,
-                registry=f"myregistry.example.org/{ci.REGISTRY_PROJECT}",
-            )
-        self.assertEqual(stderr.getvalue(), "")
-
-    def test_the_default_registry_never_warns(self) -> None:
-        # It ends in the project path by construction; a warning here would fire
-        # on every ordinary build.
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
-            ci.image_plan(self.root, ["worker"], config_path=self.config)
-        self.assertEqual(stderr.getvalue(), "")
+    def test_registries_that_need_no_project_path_are_silent(self) -> None:
+        for registry in (
+            # The default ends in the project path by construction; a warning
+            # here would fire on every ordinary build.
+            None,
+            f"myregistry.example.org/{ci.REGISTRY_PROJECT}",
+            # A scratch registry beside a kind cluster serves from its root, so
+            # the missing project path is intended and nagging trains it away.
+            "localhost:5000",
+            "localhost",
+            "localhost:5000/scratch",
+        ):
+            with self.subTest(registry=registry):
+                self.assertEqual(self.plan_worker(registry)[1], "")
 
     def test_an_invalid_registry_is_rejected_before_anything_is_built(self) -> None:
         with self.assertRaisesRegex(ci.CIError, "registry path segment"):
@@ -1353,10 +1330,7 @@ class ImagePlanContractTests(TempTreeTest):
         self.assertIn("::warning::", self.stderr)
 
     def test_makefile_read_order_matches_the_cli(self) -> None:
-        makefile = SCRIPT.resolve().parents[2] / "Makefile"
-        if not makefile.is_file():  # pragma: no cover - only when run outside the repo
-            self.skipTest("Makefile not present")
-        found = re.findall(r"read -r ([a-z_ ]+?)\s*;", makefile.read_text(encoding="utf-8"))
+        found = re.findall(r"read -r ([a-z_ ]+?)\s*;", read_makefile())
         self.assertTrue(found, "no 'read -r' consumer found in the Makefile")
         for names in found:
             self.assertEqual(tuple(names.split()), self.COLUMNS)
@@ -1364,10 +1338,7 @@ class ImagePlanContractTests(TempTreeTest):
     def test_every_makefile_image_plan_with_services_honours_the_registry(self) -> None:
         # build, load, and push must agree on the reference, or one of them
         # silently operates on images the others never touched.
-        makefile = SCRIPT.resolve().parents[2] / "Makefile"
-        if not makefile.is_file():  # pragma: no cover - only when run outside the repo
-            self.skipTest("Makefile not present")
-        text = makefile.read_text(encoding="utf-8")
+        text = read_makefile()
         self.assertIn('--registry "$(IMAGE_REGISTRY)"', text)
         calls = re.findall(r"\$\(CI_SCRIPT\) image-plan([^;\\\n]*)", text)
         self.assertTrue(calls, "no image-plan call found in the Makefile")
@@ -1391,11 +1362,9 @@ class ServicesAllTests(unittest.TestCase):
     and fail the inventory check, so each consumer is pinned here.
     """
 
-    def setUp(self) -> None:
-        self.makefile = SCRIPT.resolve().parents[2] / "Makefile"
-        if not self.makefile.is_file():  # pragma: no cover - only outside the repo
-            self.skipTest("Makefile not present")
-        self.text = self.makefile.read_text(encoding="utf-8")
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = read_makefile()
 
     def test_all_is_expanded_from_the_image_plan_component_column(self) -> None:
         # Column 1 is 'component', which is the name --services matches on.
@@ -1436,7 +1405,7 @@ class ServicesAllTests(unittest.TestCase):
     def test_no_component_is_named_all(self) -> None:
         # A service literally called 'all' would be unreachable: the Makefile
         # expands the name away before ci.py ever sees it.
-        components = set(ci.component_images(SCRIPT.resolve().parents[2]))
+        components = set(ci.component_images(REPO_ROOT))
         self.assertTrue(components)
         self.assertNotIn("all", components)
 
@@ -1488,12 +1457,45 @@ class HelpLayoutTests(unittest.TestCase):
         ("##@ local-dev Tearing down a release", ("uninstall-release",)),
     )
 
-    def test_sections_are_single_ordered_blocks(self) -> None:
-        makefile = SCRIPT.resolve().parents[2] / "Makefile"
-        if not makefile.is_file():  # pragma: no cover - only outside the repo
-            self.skipTest("Makefile not present")
-        text = makefile.read_text(encoding="utf-8")
+    # Every topic the awk formatter wraps. help-all-vars is fixed text, so it
+    # only needs to fit the narrowest width.
+    WRAPPED_TOPICS = (
+        "help",
+        "help-subtrees",
+        "help-ci",
+        "help-build",
+        "help-local-dev",
+        "help-locks",
+    )
 
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.text = read_makefile()
+        # Pin the width: run from a terminal, make help otherwise wraps to that
+        # terminal's width instead. Each make reparses the whole Makefile, so
+        # one run per width prints every topic.
+        environment = {k: v for k, v in os.environ.items() if k not in ("COLUMNS", "HELP_WIDTH")}
+
+        def render(help_width: int, *targets: str) -> str:
+            return subprocess.run(
+                ["make", "--no-print-directory", *targets],
+                cwd=REPO_ROOT,
+                env={**environment, "HELP_WIDTH": str(help_width)},
+                stdin=subprocess.DEVNULL,
+                check=True,
+                text=True,
+                capture_output=True,
+            ).stdout
+
+        cls.rendered = run_concurrently(
+            {
+                80: functools.partial(render, 80, *cls.WRAPPED_TOPICS, "help-all-vars"),
+                120: functools.partial(render, 120, *cls.WRAPPED_TOPICS),
+            }
+        )
+
+    def test_sections_are_single_ordered_blocks(self) -> None:
+        text = self.text
         starts = []
         for marker, targets in self.SECTIONS:
             self.assertEqual(text.count(marker), 1, f"reopened help section: {marker}")
@@ -1518,88 +1520,74 @@ class HelpLayoutTests(unittest.TestCase):
                 )
 
     def test_makefile_comments_fit_100_columns(self) -> None:
-        makefile = SCRIPT.resolve().parents[2] / "Makefile"
-        if not makefile.is_file():  # pragma: no cover - only outside the repo
-            self.skipTest("Makefile not present")
-
         overlong_comments = [
             line
-            for line in makefile.read_text(encoding="utf-8").splitlines()
+            for line in self.text.splitlines()
             if line.startswith("#") and len(line) > 100
         ]
         self.assertEqual(overlong_comments, [])
 
     def test_help_output_wraps_to_help_width(self) -> None:
-        makefile = SCRIPT.resolve().parents[2] / "Makefile"
-        if not makefile.is_file():  # pragma: no cover - only outside the repo
-            self.skipTest("Makefile not present")
-
-        environment = {k: v for k, v in os.environ.items() if k not in ("COLUMNS", "HELP_WIDTH")}
-        widest: dict[int, int] = {}
-        for help_width in (80, 120):
-            for target in (
-                "help",
-                "help-subtrees",
-                "help-ci",
-                "help-build",
-                "help-local-dev",
-                "help-locks",
-                "help-all-vars",
-            ):
-                with self.subTest(target=target, help_width=help_width):
-                    result = subprocess.run(
-                        ["make", "--no-print-directory", target],
-                        cwd=makefile.parent,
-                        env={**environment, "HELP_WIDTH": str(help_width)},
-                        stdin=subprocess.DEVNULL,
-                        check=True,
-                        text=True,
-                        capture_output=True,
-                    )
-                    lengths = [len(line) for line in result.stdout.splitlines()]
-                    self.assertEqual([n for n in lengths if n > help_width], [])
-                    widest[help_width] = max(widest.get(help_width, 0), *lengths)
+        for help_width, output in self.rendered.items():
+            with self.subTest(help_width=help_width):
+                overlong = [line for line in output.splitlines() if len(line) > help_width]
+                self.assertEqual(overlong, [])
         # A wider HELP_WIDTH is actually used, not just tolerated.
-        self.assertGreater(widest[120], 80)
+        self.assertGreater(max(len(line) for line in self.rendered[120].splitlines()), 80)
 
     def test_help_wraps_each_target_description_as_one_paragraph(self) -> None:
-        root = SCRIPT.resolve().parents[2]
-        # Pin the width the expected text is wrapped to: run from a terminal,
-        # make help otherwise wraps to that terminal's width instead.
-        environment = {k: v for k, v in os.environ.items() if k not in ("COLUMNS", "HELP_WIDTH")}
-        result = subprocess.run(
-            ["make", "--no-print-directory", "help-ci"],
-            cwd=root,
-            env={**environment, "HELP_WIDTH": "80"},
-            check=True,
-            text=True,
-            capture_output=True,
-        )
-
         self.assertIn(
             "  make ci-pip-install          Create the virtualenv and install the CI\n"
             "                               requirements into it. [VENV, BOOTSTRAP_PYTHON]",
-            result.stdout,
+            self.rendered[80],
         )
         self.assertIn(
             "  make ci-check-versions       Require version bumps for anything whose artifact\n"
             "                               changed. [BASE, CHECK_VERSIONS_FLAGS, PYTHON,\n"
             "                               VENV]",
-            result.stdout,
+            self.rendered[80],
         )
 
 
-class HelmPreflightTests(TempTreeTest):
+class PreflightOutcome(NamedTuple):
+    result: subprocess.CompletedProcess[str]
+    publish_needed: str | None
+
+
+class HelmPreflightTests(unittest.TestCase):
     """helm-preflight.sh, run for real against a fake `helm` on PATH.
 
     The script tells "not published" apart from every other failure by the
     wording of `helm show chart`'s error, so the outputs below are what real
     Helm versions print against GHCR. Anything it doesn't recognise must block
     publication rather than risk overwriting a released version.
+
+    Each run starts bash, the fake helm, and ci.py twice, so setUpClass runs
+    every case at once and the tests only read the outcomes.
     """
 
     REGISTRY = "oci://ghcr.io/helxplatform/helm-charts"
     REFERENCE = "ghcr.io/helxplatform/helm-charts/demo:1.2.3"
+
+    NOT_PUBLISHED = {
+        "Helm 4": f'Error: failed to perform "FetchReference" on source: {REFERENCE}: not found',
+        "registry error code": (
+            'Error: GET "https://ghcr.io/v2/helxplatform/helm-charts/demo/manifests/1.2.3": '
+            "response status code 404: manifest unknown: manifest unknown"
+        ),
+    }
+    UNRECOGNISED = {
+        "another reference not found": (
+            'Error: failed to perform "FetchReference" on source: '
+            "ghcr.io/helxplatform/helm-charts/demo:1.2.4: not found"
+        ),
+        "unauthorized": (
+            'Error: failed to perform "FetchReference" on source: GET "https://ghcr.io/token'
+            '?scope=repository%3Ahelxplatform%2Fhelm-charts%2Fdemo%3Apull": '
+            "response status code 401: unauthorized: authentication required"
+        ),
+        "network": 'Error: Get "https://ghcr.io/v2/": dial tcp: i/o timeout',
+    }
 
     FAKE_HELM = """#!/bin/sh
 case "$1" in
@@ -1616,20 +1604,43 @@ case "$1" in
 esac
 """
 
-    def setUp(self) -> None:
-        super().setUp()
-        self.chart_dir = self.write_chart("chart", name="demo", version="1.2.3").parent
-        bin_dir = self.root / "bin"
+    @classmethod
+    def setUpClass(cls) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(temporary.cleanup)
+        cls.root = Path(temporary.name)
+        cls.chart_dir = cls.root / "chart"
+        cls.chart_dir.mkdir()
+        (cls.chart_dir / "Chart.yaml").write_text(
+            "apiVersion: v2\nname: demo\nversion: 1.2.3\n", encoding="utf-8"
+        )
+        bin_dir = cls.root / "bin"
         bin_dir.mkdir()
         helm = bin_dir / "helm"
-        helm.write_text(self.FAKE_HELM, encoding="utf-8")
+        helm.write_text(cls.FAKE_HELM, encoding="utf-8")
         helm.chmod(0o755)
-        self.path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
-        self.outputs = self.root / "github-output"
+        cls.path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
 
-    def package(self, directory: str, values: str) -> Path:
+        published = cls.package("published", "replicas: 1\n")
+        found = {"show_output": "", "show_status": 0, "published": published}
+        cases: dict[str, dict[str, Any]] = {
+            name: {"show_output": output}
+            for name, output in {**cls.NOT_PUBLISHED, **cls.UNRECOGNISED}.items()
+        }
+        cases["identical"] = {**found, "local": cls.package("identical", "replicas: 1\n")}
+        cases["different"] = {**found, "local": cls.package("different", "replicas: 2\n")}
+        cases["no local package"] = {"show_output": "", "show_status": 0}
+        cls.outcomes = run_concurrently(
+            {
+                name: functools.partial(cls.preflight, f"outputs-{index}", **case)
+                for index, (name, case) in enumerate(cases.items())
+            }
+        )
+
+    @classmethod
+    def package(cls, directory: str, values: str) -> Path:
         """A chart archive laid out as `helm package` writes it."""
-        destination = self.root / directory
+        destination = cls.root / directory
         destination.mkdir()
         archive = destination / "demo-1.2.3.tgz"
         with tarfile.open(archive, "w:gz") as handle:
@@ -1643,101 +1654,74 @@ esac
                 handle.addfile(info, io.BytesIO(data))
         return archive
 
+    @classmethod
     def preflight(
-        self,
+        cls,
+        outputs_name: str,
         show_output: str,
         *,
         show_status: int = 1,
         published: Path | None = None,
         local: Path | None = None,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> PreflightOutcome:
+        outputs = cls.root / outputs_name
         environment = {
             **os.environ,
-            "PATH": self.path,
+            "PATH": cls.path,
             "PYTHON": sys.executable,
-            "GITHUB_OUTPUT": str(self.outputs),
-            "RUNNER_TEMP": str(self.root),
+            "GITHUB_OUTPUT": str(outputs),
+            "RUNNER_TEMP": str(cls.root),
             "FAKE_HELM_SHOW_OUTPUT": show_output,
             "FAKE_HELM_SHOW_STATUS": str(show_status),
             "FAKE_HELM_PULL_PACKAGE": str(published or ""),
         }
-        arguments = [self.REGISTRY, str(self.chart_dir), *([str(local)] if local else [])]
-        return subprocess.run(
+        arguments = [cls.REGISTRY, str(cls.chart_dir), *([str(local)] if local else [])]
+        result = subprocess.run(
             ["bash", ".github/scripts/helm-preflight.sh", *arguments],
-            cwd=SCRIPT.resolve().parents[2],
+            cwd=REPO_ROOT,
             env=environment,
             stdin=subprocess.DEVNULL,
             text=True,
             capture_output=True,
             check=False,
         )
-
-    def publish_needed(self) -> str | None:
-        if not self.outputs.is_file():
-            return None
-        lines = self.outputs.read_text(encoding="utf-8").splitlines()
-        values = [line.split("=", 1)[1] for line in lines if line.startswith("publish-needed=")]
-        return values[-1] if values else None
+        publish_needed = None
+        if outputs.is_file():
+            lines = outputs.read_text(encoding="utf-8").splitlines()
+            values = [line.split("=", 1)[1] for line in lines if line.startswith("publish-needed=")]
+            publish_needed = values[-1] if values else None
+        return PreflightOutcome(result, publish_needed)
 
     def test_a_missing_version_is_published(self) -> None:
-        for helm, output in (
-            (
-                "Helm 4",
-                f'Error: failed to perform "FetchReference" on source: {self.REFERENCE}: not found',
-            ),
-            (
-                "registry error code",
-                'Error: GET "https://ghcr.io/v2/helxplatform/helm-charts/demo/manifests/1.2.3": '
-                "response status code 404: manifest unknown: manifest unknown",
-            ),
-        ):
+        for helm in self.NOT_PUBLISHED:
             with self.subTest(helm=helm):
-                self.outputs.unlink(missing_ok=True)
-                result = self.preflight(output)
+                result, publish_needed = self.outcomes[helm]
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("demo:1.2.3 is not published", result.stdout)
-                self.assertEqual(self.publish_needed(), "true")
+                self.assertEqual(publish_needed, "true")
 
     def test_any_other_failure_blocks_publication(self) -> None:
-        for case, output in (
-            (
-                "another reference not found",
-                'Error: failed to perform "FetchReference" on source: '
-                "ghcr.io/helxplatform/helm-charts/demo:1.2.4: not found",
-            ),
-            (
-                "unauthorized",
-                'Error: failed to perform "FetchReference" on source: GET "https://ghcr.io/token'
-                '?scope=repository%3Ahelxplatform%2Fhelm-charts%2Fdemo%3Apull": '
-                "response status code 401: unauthorized: authentication required",
-            ),
-            ("network", 'Error: Get "https://ghcr.io/v2/": dial tcp: i/o timeout'),
-        ):
+        for case in self.UNRECOGNISED:
             with self.subTest(case=case):
-                self.outputs.unlink(missing_ok=True)
-                result = self.preflight(output)
+                result, publish_needed = self.outcomes[case]
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Could not determine whether demo:1.2.3 exists", result.stdout)
-                self.assertIsNone(self.publish_needed())
+                self.assertIsNone(publish_needed)
 
     def test_an_identical_published_version_is_skipped(self) -> None:
-        published = self.package("published", "replicas: 1\n")
-        local = self.package("local", "replicas: 1\n")
-        result = self.preflight("", show_status=0, published=published, local=local)
+        result, publish_needed = self.outcomes["identical"]
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("already exists with identical content", result.stdout)
-        self.assertEqual(self.publish_needed(), "false")
+        self.assertEqual(publish_needed, "false")
 
     def test_a_different_published_version_blocks_publication(self) -> None:
-        published = self.package("published", "replicas: 1\n")
-        local = self.package("local", "replicas: 2\n")
-        result = self.preflight("", show_status=0, published=published, local=local)
+        result, publish_needed = self.outcomes["different"]
         self.assertEqual(result.returncode, 1)
         self.assertIn("already exists with different content", result.stdout)
-        self.assertIsNone(self.publish_needed())
+        self.assertIsNone(publish_needed)
 
     def test_a_published_version_without_a_local_package_is_refused(self) -> None:
-        result = self.preflight("", show_status=0)
+        result, _ = self.outcomes["no local package"]
         self.assertEqual(result.returncode, 1)
         self.assertIn("Refusing to publish immutable chart version", result.stdout)
 
@@ -1813,14 +1797,11 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         self.set_umbrella("4.7.0")
         self.commit("release 4.7.0")
         self.release("4.7.0")
-        for tag in ("not-a-release", "v-bogus"):
+        # v6.4.4 is the highest tag, but it names a commit whose umbrella says
+        # 4.7.0, so it is not a release.
+        for tag in ("not-a-release", "v-bogus", "v6.4.4"):
             self.git("tag", tag)
         self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.7.0")
-
-    def test_a_tag_naming_another_umbrella_version_is_not_a_release(self) -> None:
-        self.release("4.6.2")
-        self.git("tag", "v6.4.4")  # Same commit, whose umbrella says 4.6.2.
-        self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.6.2")
 
     def test_a_subtree_upstream_tag_is_not_a_release(self) -> None:
         # A merge-mode subtree puts the upstream's commits, and so its tags,
@@ -1842,14 +1823,6 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         self.assertEqual(ci.last_released_version(self.root, "HEAD"), "4.6.2")
         self.assertEqual(ci.last_released_version(self.root, "side"), "9.0.0")
 
-    def test_a_stray_tag_does_not_raise_the_floor(self) -> None:
-        self.release("4.6.2")
-        self.git("tag", "v6.4.4")
-        self.set_umbrella("4.7.0")
-        self.commit("open 4.7.0")
-        self.touch_umbrella()
-        self.check()
-
     def test_an_unavailable_release_ref_is_an_error_not_an_absent_floor(self) -> None:
         self.release("4.6.2")
         self.touch_umbrella()
@@ -1866,12 +1839,18 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         self.touch_umbrella()
         with self.assertRaisesRegex(ci.CIError, "must sit above the last published release"):
             self.check()
+        # Into main the base is the release, so the umbrella must increase over it.
+        with self.assertRaisesRegex(
+            ci.CIError, "chart version must increase above '4.6.2'; current value is '4.6.2'"
+        ):
+            self.check(release_ref=self.base)
 
     def test_sitting_above_the_release_needs_no_further_bump(self) -> None:
         self.release("4.6.2")
+        # A stray tag on the release commit must not raise the floor to 6.4.4.
+        self.git("tag", "v6.4.4")
         self.set_umbrella("4.7.0")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "open 4.7.0")
+        self.commit("open 4.7.0")
         # A later change leaves the version alone and still passes.
         self.touch_umbrella()
         self.check()
@@ -1889,14 +1868,6 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         with self.assertRaisesRegex(ci.CIError, "identical to v4.6.3's"):
             self.check()
 
-    def test_into_main_the_umbrella_must_increase_over_its_base(self) -> None:
-        self.release("4.6.2")
-        self.touch_umbrella()
-        with self.assertRaisesRegex(
-            ci.CIError, "chart version must increase above '4.6.2'; current value is '4.6.2'"
-        ):
-            self.check(release_ref=self.base)
-
     def test_regression_against_the_base_is_rejected(self) -> None:
         self.set_umbrella("4.0.0")
         self.commit("release 4.0.0")
@@ -1909,6 +1880,8 @@ class UmbrellaAboveReleaseTests(GitFixtureTest):
         with self.assertRaisesRegex(ci.CIError, "must not decrease below"):
             self.check()
 
+
+class CheckVersionsArgumentTests(unittest.TestCase):
     def test_the_retired_flags_still_parse(self) -> None:
         # Older invocations keep working; the release rule is the only mode.
         for flag in ("--above-release", "--umbrella-above-release"):
@@ -1980,16 +1953,22 @@ class ServiceAboveReleaseTests(GitFixtureTest):
                 release_ref=release_ref,
             )
 
+    # check_versions judges the chart and each image in its own try and reports
+    # every failure, so a chart case and its appVersion twin share one run.
+
     def test_staying_at_the_base_version_passes_when_above_main(self) -> None:
         # main has 6.0.4, develop already opened 6.0.5: a second pull request
-        # editing api leaves it at 6.0.5 and does not burn 6.0.6.
+        # editing api's chart and image leaves both at 6.0.5 and does not burn
+        # 6.0.6.
         self.touch_chart()
+        self.touch_image()
         self.check()
 
     def test_matching_main_is_rejected(self) -> None:
         # develop has just been synced with main, so the first change must bump.
         self.sync_with_main()
         self.touch_chart()
+        self.touch_image()
         with self.assertRaises(ci.CIError) as raised:
             self.check()
         self.assertEqual(
@@ -1998,19 +1977,25 @@ class ServiceAboveReleaseTests(GitFixtureTest):
             "- services/api/chart chart version must increase above '6.0.4'; current "
             "value is '6.0.4'. It must sit above the version released has published "
             "unless its packaged files are identical to released's, so this pull "
-            "request needs to choose the next version",
+            "request needs to choose the next version\n"
+            "- api appVersion must increase above '6.0.4'; current value is '6.0.4'. "
+            "It must sit above the appVersion released has published unless its "
+            "sources are identical to released's, so this pull request needs to "
+            "choose the next version",
         )
 
     def test_going_below_the_base_is_rejected(self) -> None:
         # Still above main, but a merge conflict resolved the wrong way.
-        self.set_api(version="6.0.6")
+        self.set_api(version="6.0.6", app_version="6.0.6")
         self.commit("open api 6.0.6")
         self.base = self.git("rev-parse", "HEAD").stdout.strip()
-        self.set_api(version="6.0.5")
-        with self.assertRaisesRegex(
-            ci.CIError, "services/api/chart chart version must not decrease below '6.0.6'"
-        ):
+        self.set_api(version="6.0.5", app_version="6.0.5")
+        self.touch_image()
+        with self.assertRaises(ci.CIError) as raised:
             self.check()
+        message = str(raised.exception)
+        self.assertIn("services/api/chart chart version must not decrease below '6.0.6'", message)
+        self.assertIn("api appVersion must not decrease below '6.0.6'", message)
 
     def test_a_chart_missing_on_main_is_unconstrained(self) -> None:
         # Version and appVersion equal the base, and nothing is released to sit
@@ -2020,10 +2005,6 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.touch_image()
         self.check(release_ref=self.unreleased)
 
-    def test_app_version_staying_at_the_base_passes_when_above_main(self) -> None:
-        self.touch_image()
-        self.check()
-
     def test_app_version_into_main_requires_a_bump(self) -> None:
         # Into main the base is the release, so staying at 6.0.5 is not enough.
         self.touch_image()
@@ -2031,25 +2012,6 @@ class ServiceAboveReleaseTests(GitFixtureTest):
             ci.CIError, r"api appVersion must increase above '6.0.5'; current value is '6.0.5'$"
         ):
             self.check(release_ref=self.base)
-
-    def test_app_version_matching_main_is_rejected(self) -> None:
-        self.sync_with_main()
-        self.touch_image()
-        with self.assertRaisesRegex(
-            ci.CIError,
-            "api appVersion must increase above '6.0.4'; current value is '6.0.4'. "
-            "It must sit above the appVersion released has published",
-        ):
-            self.check()
-
-    def test_app_version_going_below_the_base_is_rejected(self) -> None:
-        self.set_api(app_version="6.0.6")
-        self.commit("api app 6.0.6")
-        self.base = self.git("rev-parse", "HEAD").stdout.strip()
-        self.set_api(app_version="6.0.5")
-        self.touch_image()
-        with self.assertRaisesRegex(ci.CIError, "api appVersion must not decrease below '6.0.6'"):
-            self.check()
 
     def hotfix_main(self) -> None:
         """main ships hotfix 6.0.5 over develop's 6.0.4, then develop merges it back.
@@ -2063,28 +2025,24 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.touch_image()
         self.commit("hotfix api 6.0.5")
 
-    def test_merging_a_hotfix_back_may_match_main(self) -> None:
+    def test_merging_a_hotfix_back_may_match_main_only_with_identical_content(self) -> None:
         self.hotfix_main()
         self.check()
-
-    def test_matching_main_with_different_chart_content_is_rejected(self) -> None:
-        self.hotfix_main()
+        # develop's own changes on top make the chart and the image differ from
+        # what main released as 6.0.5.
         self.write("services/api/chart/templates/develop-only.yaml", "kind: ConfigMap\n")
-        with self.assertRaisesRegex(
-            ci.CIError,
+        self.write("services/api/main.go", "package main // develop only\n")
+        with self.assertRaises(ci.CIError) as raised:
+            self.check()
+        message = str(raised.exception)
+        self.assertRegex(
+            message,
             "services/api/chart chart version must increase above '6.0.5'.*unless its "
             "packaged files are identical",
-        ):
-            self.check()
-
-    def test_app_version_matching_main_with_different_sources_is_rejected(self) -> None:
-        self.hotfix_main()
-        self.write("services/api/main.go", "package main // develop only\n")
-        with self.assertRaisesRegex(
-            ci.CIError,
-            "api appVersion must increase above '6.0.5'.*unless its sources are identical",
-        ):
-            self.check()
+        )
+        self.assertRegex(
+            message, "api appVersion must increase above '6.0.5'.*unless its sources are identical"
+        )
 
     def test_an_unavailable_release_ref_is_an_error_not_an_absent_floor(self) -> None:
         # Only resolved once something needs a floor, so unrelated changes pass.
@@ -2323,7 +2281,7 @@ class WorkflowShellSyntaxTests(unittest.TestCase):
     """
 
     def workflow_files(self) -> list[Path]:
-        root = SCRIPT.resolve().parents[2] / ".github"
+        root = REPO_ROOT / ".github"
         return sorted(root.glob("workflows/*.yml")) + sorted(root.glob("actions/**/action.yml"))
 
     def run_blocks(self, path: Path) -> list[tuple[str, str]]:
@@ -2341,24 +2299,22 @@ class WorkflowShellSyntaxTests(unittest.TestCase):
     def test_every_run_block_is_valid_bash(self) -> None:
         files = self.workflow_files()
         self.assertTrue(files, "no workflow or action files found")
-        checked = 0
-        for path in files:
-            for name, script in self.run_blocks(path):
-                with self.subTest(workflow=path.name, step=name):
-                    with tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False) as handle:
-                        handle.write(script)
-                        temporary = handle.name
-                    try:
-                        result = subprocess.run(
-                            ["bash", "-n", temporary], capture_output=True, text=True
-                        )
-                    finally:
-                        Path(temporary).unlink()
-                    self.assertEqual(
-                        result.returncode, 0, f"{path.name} step {name!r}: {result.stderr.strip()}"
-                    )
-                    checked += 1
-        self.assertGreater(checked, 10, "suspiciously few run blocks discovered")
+        blocks = [(path.name, name, script) for path in files for name, script in self.run_blocks(path)]
+        self.assertGreater(len(blocks), 10, "suspiciously few run blocks discovered")
+        results = run_concurrently(
+            {
+                index: functools.partial(
+                    subprocess.run, ["bash", "-n"], input=script, capture_output=True, text=True
+                )
+                for index, (_, _, script) in enumerate(blocks)
+            }
+        )
+        for index, (workflow, name, _) in enumerate(blocks):
+            with self.subTest(workflow=workflow, step=name):
+                result = results[index]
+                self.assertEqual(
+                    result.returncode, 0, f"{workflow} step {name!r}: {result.stderr.strip()}"
+                )
 
 
 class VersionCheckWiringTests(unittest.TestCase):
@@ -2369,7 +2325,7 @@ class VersionCheckWiringTests(unittest.TestCase):
     """
 
     def check_versions_step(self, workflow: str) -> str:
-        path = SCRIPT.resolve().parents[1] / "workflows" / workflow
+        path = REPO_ROOT / ".github/workflows" / workflow
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
         runs = [
             step["run"]

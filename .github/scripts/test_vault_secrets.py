@@ -89,25 +89,19 @@ class MapTests(TempDirTest):
         with self.assertRaisesRegex(vs.SecretsError, "has no place"):
             self.specs[1].values_path("unexpected")
 
-    def test_map_rejects_both_or_neither_of_values_and_keys(self) -> None:
-        for body in (
-            "secrets:\n  - {name: a, service: s}\n",
-            "secrets:\n  - {name: a, service: s, values: x.y, keys: {k: x.z}}\n",
-        ):
-            (self.tmp / "bad.yaml").write_text(body)
-            with self.assertRaisesRegex(vs.SecretsError, "exactly one"):
-                vs.load_map(self.tmp / "bad.yaml")
-
-    def test_map_rejects_duplicates_unknown_fields_and_nested_services(self) -> None:
+    def test_map_rejects_invalid_entries(self) -> None:
         cases = {
+            "secrets:\n  - {name: a, service: s}\n": "exactly one",
+            "secrets:\n  - {name: a, service: s, values: x.y, keys: {k: x.z}}\n": "exactly one",
             "secrets:\n  - {name: a, service: s, values: x}\n  - {name: a, service: s, values: y}\n": "twice",
             "secrets:\n  - {name: a, service: s, values: x, extra: 1}\n": "unknown fields",
             "secrets:\n  - {name: a, service: s/t, values: x}\n": "single folder",
         }
         for body, message in cases.items():
-            (self.tmp / "bad.yaml").write_text(body)
-            with self.assertRaisesRegex(vs.SecretsError, message):
-                vs.load_map(self.tmp / "bad.yaml")
+            with self.subTest(message=message, body=body):
+                (self.tmp / "bad.yaml").write_text(body)
+                with self.assertRaisesRegex(vs.SecretsError, message):
+                    vs.load_map(self.tmp / "bad.yaml")
 
 
 class ValuesFileChoiceTests(TempDirTest):
@@ -194,7 +188,7 @@ class TerminalPromptTests(unittest.TestCase):
                         break
                     shown += chunk
             self.assertIn(b"Proceed? [y/N]", shown, "the prompt never reached the terminal")
-            time.sleep(0.3)  # a person reads the prompt before typing
+            time.sleep(0.1)  # a person reads the prompt before typing
             os.write(master, answer)
             status = None
             while status is None and time.monotonic() < deadline:
@@ -353,43 +347,36 @@ class FileTests(TempDirTest):
 
 
 class CommandTests(TempDirTest):
-    def test_from_cluster_writes_found_secrets_and_skips_missing(self) -> None:
-        live = {
-            "helx-app-secrets": {"data": {"SECRET_KEY": b64("k")}},
-            "helx-tls": {"data": {"tls.crt": b64("CRT\n")}},
-        }
-        calls: list[tuple[str, str, str]] = []
-
-        def fake_kubectl(name: str, namespace: str, context: str):
-            calls.append((name, namespace, context))
-            return live.get(name)
-
-        reported: list[str] = []
-        args = vs.parse_args(["--map", str(self.tmp / "map.yaml"), "from-cluster", "--namespace", "ns", "--out", str(self.tmp / "o")])
-        with patch.object(vs, "kubectl_secret", fake_kubectl):
-            vs.command_from_cluster(args, self.specs, reported.append)
-        self.assertEqual([c[1] for c in calls], ["ns", "ns", "ns"])
-        self.assertEqual(json.loads((self.tmp / "o/hook/helx-tls.json").read_text()), {"tls.crt": "CRT\n"})
-        self.assertFalse((self.tmp / "o/app/helx-db.json").exists())
-
     def run_from_cluster(self, *extra: str, live=None, confirm=None) -> list[str]:
+        """Run from-cluster in namespace ns; the namespaces it read are kept in self.read_from."""
         live = {"helx-app-secrets": {"data": {"SECRET_KEY": b64("new")}}} if live is None else live
         reported: list[str] = []
+        self.read_from: list[str] = []
         args = vs.parse_args(["--map", str(self.tmp / "map.yaml"), "from-cluster",
                               "--namespace", "ns", "--out", str(self.tmp / "o"), *extra])
+
+        def fake_kubectl(name: str, namespace: str, context: str):
+            self.read_from.append(namespace)
+            return live.get(name)
 
         def refuse(_: str) -> bool:
             raise AssertionError("asked when it should not have")
 
-        with patch.object(vs, "kubectl_secret", lambda name, *_: live.get(name)), \
+        with patch.object(vs, "kubectl_secret", fake_kubectl), \
                 patch.object(vs, "confirm_on_tty", confirm or refuse):
             vs.command_from_cluster(args, self.specs, reported.append)
         return reported
 
-    def test_from_cluster_does_not_ask_when_no_file_exists(self) -> None:
-        self.run_from_cluster()
-        file = self.tmp / "o/app/helx-app-secrets.json"
-        self.assertEqual(json.loads(file.read_text()), {"SECRET_KEY": "new"})
+    def test_from_cluster_writes_found_secrets_and_skips_missing_without_asking(self) -> None:
+        # No file exists yet, so there is nothing to ask about.
+        self.run_from_cluster(live={
+            "helx-app-secrets": {"data": {"SECRET_KEY": b64("k")}},
+            "helx-tls": {"data": {"tls.crt": b64("CRT\n")}},
+        })
+        self.assertEqual(self.read_from, ["ns", "ns", "ns"])
+        self.assertEqual(json.loads((self.tmp / "o/app/helx-app-secrets.json").read_text()), {"SECRET_KEY": "k"})
+        self.assertEqual(json.loads((self.tmp / "o/hook/helx-tls.json").read_text()), {"tls.crt": "CRT\n"})
+        self.assertFalse((self.tmp / "o/app/helx-db.json").exists())
 
     def test_from_cluster_asks_before_overwriting_and_no_changes_nothing(self) -> None:
         file = self.tmp / "o/app/helx-app-secrets.json"
@@ -399,7 +386,7 @@ class CommandTests(TempDirTest):
         other.write_text("{}")
         asked: list[str] = []
         with self.assertRaisesRegex(vs.SecretsError, "Cancelled; no files were changed"):
-            reported = self.run_from_cluster(confirm=lambda prompt: asked.append(prompt) or False)
+            self.run_from_cluster(confirm=lambda prompt: asked.append(prompt) or False)
         self.assertEqual(len(asked), 1)
         self.assertEqual(file.read_text(), '{"SECRET_KEY": "old"}')
 
@@ -557,11 +544,12 @@ class CommandTests(TempDirTest):
             vs.command_to_helm(args, self.specs, reported.append)
         return out_file, asked, reported
 
-    def test_to_helm_does_not_ask_when_the_file_is_new(self) -> None:
+    def test_to_helm_writes_a_new_owner_only_file_without_asking(self) -> None:
         out_file, asked, reported = self.run_to_helm()
         self.assertEqual(asked, [])
         self.assertFalse(any("LOCAL_VALUES_FILE" in line for line in reported))
-        self.assertTrue(out_file.exists())
+        self.assertEqual(yaml.safe_load(out_file.read_text()), {"app": {"secret": {"values": {"K": "v"}}}})
+        self.assertEqual(stat.S_IMODE(out_file.stat().st_mode), 0o600)
 
     def test_to_helm_asks_before_overwriting_and_no_keeps_the_file(self) -> None:
         out_file = self.tmp / "o" / "secrets.yaml"
@@ -582,16 +570,6 @@ class CommandTests(TempDirTest):
         _, asked, reported = self.run_to_helm("--assume-yes")
         self.assertEqual(asked, [])
         self.assertIn("ASSUME_YES is set; overwriting without asking.", reported)
-
-    def test_to_helm_writes_an_owner_only_yaml(self) -> None:
-        vs.write_secret_files({"helx-app-secrets": {"K": "v"}}, self.specs, release="helx",
-                              out=self.tmp / "o", mount="helx", vault_path="", report=lambda _: None)
-        out_file = self.tmp / "o" / "secrets.yaml"
-        args = vs.parse_args(["--map", str(self.tmp / "map.yaml"), "to-helm",
-                              "--in", str(self.tmp / "o"), "--out-file", str(out_file)])
-        vs.command_to_helm(args, self.specs, lambda _: None)
-        self.assertEqual(yaml.safe_load(out_file.read_text()), {"app": {"secret": {"values": {"K": "v"}}}})
-        self.assertEqual(stat.S_IMODE(out_file.stat().st_mode), 0o600)
 
 
 class UserPathTests(unittest.TestCase):

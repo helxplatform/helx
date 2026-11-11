@@ -1589,6 +1589,159 @@ class HelpLayoutTests(unittest.TestCase):
         )
 
 
+class HelmPreflightTests(TempTreeTest):
+    """helm-preflight.sh, run for real against a fake `helm` on PATH.
+
+    The script tells "not published" apart from every other failure by the
+    wording of `helm show chart`'s error, so the outputs below are what real
+    Helm versions print against GHCR. Anything it doesn't recognise must block
+    publication rather than risk overwriting a released version.
+    """
+
+    REGISTRY = "oci://ghcr.io/helxplatform/helm-charts"
+    REFERENCE = "ghcr.io/helxplatform/helm-charts/demo:1.2.3"
+
+    FAKE_HELM = """#!/bin/sh
+case "$1" in
+  show)
+    printf '%s\\n' "$FAKE_HELM_SHOW_OUTPUT" >&2
+    exit "$FAKE_HELM_SHOW_STATUS"
+    ;;
+  pull)
+    while [ "$#" -gt 0 ]; do
+      if [ "$1" = --destination ]; then cp "$FAKE_HELM_PULL_PACKAGE" "$2/"; fi
+      shift
+    done
+    ;;
+esac
+"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.chart_dir = self.write_chart("chart", name="demo", version="1.2.3").parent
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        helm = bin_dir / "helm"
+        helm.write_text(self.FAKE_HELM, encoding="utf-8")
+        helm.chmod(0o755)
+        self.path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+        self.outputs = self.root / "github-output"
+
+    def package(self, directory: str, values: str) -> Path:
+        """A chart archive laid out as `helm package` writes it."""
+        destination = self.root / directory
+        destination.mkdir()
+        archive = destination / "demo-1.2.3.tgz"
+        with tarfile.open(archive, "w:gz") as handle:
+            for name, content in (
+                ("demo/Chart.yaml", "apiVersion: v2\nname: demo\nversion: 1.2.3\n"),
+                ("demo/values.yaml", values),
+            ):
+                data = content.encode("utf-8")
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                handle.addfile(info, io.BytesIO(data))
+        return archive
+
+    def preflight(
+        self,
+        show_output: str,
+        *,
+        show_status: int = 1,
+        published: Path | None = None,
+        local: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        environment = {
+            **os.environ,
+            "PATH": self.path,
+            "PYTHON": sys.executable,
+            "GITHUB_OUTPUT": str(self.outputs),
+            "RUNNER_TEMP": str(self.root),
+            "FAKE_HELM_SHOW_OUTPUT": show_output,
+            "FAKE_HELM_SHOW_STATUS": str(show_status),
+            "FAKE_HELM_PULL_PACKAGE": str(published or ""),
+        }
+        arguments = [self.REGISTRY, str(self.chart_dir), *([str(local)] if local else [])]
+        return subprocess.run(
+            ["bash", ".github/scripts/helm-preflight.sh", *arguments],
+            cwd=SCRIPT.resolve().parents[2],
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def publish_needed(self) -> str | None:
+        if not self.outputs.is_file():
+            return None
+        lines = self.outputs.read_text(encoding="utf-8").splitlines()
+        values = [line.split("=", 1)[1] for line in lines if line.startswith("publish-needed=")]
+        return values[-1] if values else None
+
+    def test_a_missing_version_is_published(self) -> None:
+        for helm, output in (
+            (
+                "Helm 4",
+                f'Error: failed to perform "FetchReference" on source: {self.REFERENCE}: not found',
+            ),
+            (
+                "registry error code",
+                'Error: GET "https://ghcr.io/v2/helxplatform/helm-charts/demo/manifests/1.2.3": '
+                "response status code 404: manifest unknown: manifest unknown",
+            ),
+        ):
+            with self.subTest(helm=helm):
+                self.outputs.unlink(missing_ok=True)
+                result = self.preflight(output)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("demo:1.2.3 is not published", result.stdout)
+                self.assertEqual(self.publish_needed(), "true")
+
+    def test_any_other_failure_blocks_publication(self) -> None:
+        for case, output in (
+            (
+                "another reference not found",
+                'Error: failed to perform "FetchReference" on source: '
+                "ghcr.io/helxplatform/helm-charts/demo:1.2.4: not found",
+            ),
+            (
+                "unauthorized",
+                'Error: failed to perform "FetchReference" on source: GET "https://ghcr.io/token'
+                '?scope=repository%3Ahelxplatform%2Fhelm-charts%2Fdemo%3Apull": '
+                "response status code 401: unauthorized: authentication required",
+            ),
+            ("network", 'Error: Get "https://ghcr.io/v2/": dial tcp: i/o timeout'),
+        ):
+            with self.subTest(case=case):
+                self.outputs.unlink(missing_ok=True)
+                result = self.preflight(output)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Could not determine whether demo:1.2.3 exists", result.stdout)
+                self.assertIsNone(self.publish_needed())
+
+    def test_an_identical_published_version_is_skipped(self) -> None:
+        published = self.package("published", "replicas: 1\n")
+        local = self.package("local", "replicas: 1\n")
+        result = self.preflight("", show_status=0, published=published, local=local)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("already exists with identical content", result.stdout)
+        self.assertEqual(self.publish_needed(), "false")
+
+    def test_a_different_published_version_blocks_publication(self) -> None:
+        published = self.package("published", "replicas: 1\n")
+        local = self.package("local", "replicas: 2\n")
+        result = self.preflight("", show_status=0, published=published, local=local)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("already exists with different content", result.stdout)
+        self.assertIsNone(self.publish_needed())
+
+    def test_a_published_version_without_a_local_package_is_refused(self) -> None:
+        result = self.preflight("", show_status=0)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Refusing to publish immutable chart version", result.stdout)
+
+
 class RegistryUrlTests(unittest.TestCase):
     """A registry base URL is normalized into an image reference prefix."""
 

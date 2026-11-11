@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 import traceback
-import base64
 from time import sleep
 from kubernetes import client as k8s_client, config as k8s_config
 from tycho.compute import Compute
@@ -137,19 +136,6 @@ class KubernetesCompute(Compute):
             #        logger.info(f"Namespace {system.system_name} created.")
             #        api_response = self.api.create_namespace(body=ns_manifest)
 
-            try:
-                api_response = self.api.list_namespaced_secret(namespace=namespace)
-                for item in api_response.items:
-                    if item.metadata.name == f"{system.system_name}-env":
-                        for key, value in item.data.items():
-                            value = str(base64.b64decode(value), 'utf-8')
-                            for container in system.containers:
-                                container.env.append([key,TemplateUtils.render_string(value,container.env)])
-                        break
-            except ApiException as e:
-                logger.debug(f"App requires {system.system_name}-env configmap with envs: {e}")
-                ## TODO: Swallows exception.
-                
             try:
                 for container in system.containers:
                     if container.name == system.system_name:

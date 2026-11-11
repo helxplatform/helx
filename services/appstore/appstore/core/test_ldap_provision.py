@@ -121,6 +121,44 @@ class LoginUidTests(TestCase):
         self.assertEqual(self._entry("jdoe.duke")["uidNumber"], ["2000001"])
         self.assertEqual(self._entry("aaa")["uidNumber"], ["2000000"])
 
+    def test_provision_base_holds_new_entries(self):
+        # helx-ldap's appstore account may only add in its own branch; lookups
+        # still search all of LDAP_SEARCH_BASE.
+        external = f"ou=external,{USERS}"
+        self.conn.strategy.add_entry(external, {"objectClass": ["organizationalUnit"], "ou": "external"})
+        with patch.dict(os.environ, {"LDAP_PROVISION_BASE": external}):
+            self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+            self.conn.search(external, "(uid=jdoe.duke)", attributes=[])
+            self.assertEqual([e.entry_dn for e in self.conn.entries], [f"uid=jdoe.duke,{external}"])
+            # found again on the next login, through the search base
+            self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+
+    def test_uid_number_taken_by_unique_overlay_retries(self):
+        # With helx-ldap's unique overlay, a concurrent login that took the
+        # same uidNumber makes the add fail instead of leaving duplicates.
+        real_add, calls = self.conn.add, []
+
+        def add(dn, object_class, attrs):
+            if "uidNumber" not in attrs:  # e.g. creating the group
+                return real_add(dn, object_class, attrs)
+            calls.append(attrs["uidNumber"])
+            if len(calls) == 1:
+                self.conn.result = {"result": 19, "message":
+                                    "non-unique attributes found with (|(uidNumber=2000000))"}
+                return False
+            return real_add(dn, object_class, attrs)
+
+        with patch.object(self.conn, "add", side_effect=add), \
+                patch("core.ldap_provision._next_uid_number", side_effect=[2000000, 2000001]):
+            self.assertEqual(login_uid("jdoe@duke.edu", self.user), "jdoe.duke")
+        self.assertEqual(calls, ["2000000", "2000001"])
+        self.assertEqual(self._entry("jdoe.duke")["uidNumber"], ["2000001"])
+
+    def test_other_refusals_are_not_retried(self):
+        with patch.object(self.conn, "add", return_value=False):
+            self.conn.result = {"result": 19, "message": "add breaks constraint on uidNumber"}
+            self.assertIsNone(login_uid("jdoe@duke.edu", self.user))
+
     def test_no_connection_is_refused(self):
         with patch.object(AllowWhiteListedUserOnly, "_ldap_conn", return_value=None):
             self.assertIsNone(login_uid("jdoe@duke.edu", self.user))

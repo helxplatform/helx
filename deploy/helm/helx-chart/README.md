@@ -88,6 +88,7 @@ NAMESPACE=ai-sb-test
 helm registry login ghcr.io
 export LDAP_ADMIN_PASSWORD='choose-an-admin-password'
 export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
+export LDAP_APPSTORE_PASSWORD='choose-an-appstore-password'
 bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
 

@@ -29,8 +29,10 @@ USER_OBJECT_CLASSES = ["top", "inetOrgPerson", "posixAccount", "helxUser"]
 CLAIM_ATTEMPTS = 5
 # Numbered uids tried after the plain one (jdoe.duke2 ... jdoe.duke99).
 UID_SUFFIXES = 99
-# LDAP result code for adding a value an attribute already has.
+# LDAP result codes: adding a value an attribute already has, and a constraint
+# (e.g. the unique overlay) refusing a write.
 ATTRIBUTE_OR_VALUE_EXISTS = 20
+CONSTRAINT_VIOLATION = 19
 
 
 def login_uid(email, user):
@@ -99,7 +101,9 @@ def _provision(conn, base, group_dn, email, user):
         return None
 
     _ensure_group(conn, group_dn)
-    dn = f"uid={escape_rdn(uid)},{base}"
+    # New entries can go in their own branch below the search base, e.g. the
+    # ou=external,ou=users branch helx-ldap's appstore account may write to.
+    dn = f"uid={escape_rdn(uid)},{os.getenv('LDAP_PROVISION_BASE') or base}"
     name = user.get_full_name()
     attrs = {
         "uid": uid,
@@ -124,6 +128,8 @@ def _provision(conn, base, group_dn, email, user):
             return None
         attrs["uidNumber"] = str(number)
         if not conn.add(dn, USER_OBJECT_CLASSES, attrs):
+            if _uid_number_taken(conn.result):
+                continue  # a concurrent login took this number first
             # e.g. a concurrent login took this uid first. Not retried under
             # another uid: if it's the same user, that would give them two entries.
             logger.error("[LDAP username] adding %s failed: %s", dn, conn.result)
@@ -135,6 +141,15 @@ def _provision(conn, base, group_dn, email, user):
         conn.delete(dn)
     logger.error("[LDAP username] no free uidNumber for %s after %d tries", email, CLAIM_ATTEMPTS)
     return None
+
+
+def _uid_number_taken(result):
+    """Whether an add was refused because its uidNumber is already in use: the
+    unique overlay (helx-ldap's appstore account) answers constraintViolation
+    with "non-unique attributes found with (|(uidNumber=…))"."""
+    message = result.get("message") or ""
+    return (result.get("result") == CONSTRAINT_VIOLATION
+            and "non-unique" in message and "uidNumber" in message)
 
 
 def _free_uid(conn, base, email):

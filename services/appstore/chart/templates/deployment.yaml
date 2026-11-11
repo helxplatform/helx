@@ -216,7 +216,7 @@ spec:
             configMapKeyRef:
               key: LDAP_SEARCH_BASE
               name: {{ include "appstore.fullname" . }}-env
-        {{- range list "LDAP_BIND_DN" "LDAP_PROVISION_EMAIL_DOMAINS" "LDAP_PROVISION_UID_MIN" "LDAP_PROVISION_UID_MAX" "LDAP_PROVISION_GID_NUMBER" }}
+        {{- range list "LDAP_BIND_DN" "LDAP_PROVISION_EMAIL_DOMAINS" "LDAP_PROVISION_UID_MIN" "LDAP_PROVISION_UID_MAX" "LDAP_PROVISION_GID_NUMBER" "LDAP_PROVISION_BASE" }}
         - name: {{ . }}
           valueFrom:
             configMapKeyRef:
@@ -228,7 +228,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: {{ . }}
-              key: {{ $.Values.ldap.bindPasswordSecret.key }}
+              key: LDAP_APPSTORE_PASSWORD
         {{- end }}
         {{- end }}
 

@@ -34,10 +34,10 @@ podSecurityContext: {}
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
 securityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   # capabilities:
   #   drop:
   #   - ALL
-  # readOnlyRootFilesystem: true
   # runAsNonRoot: true
   # runAsUser: 1000
 
@@ -164,6 +164,10 @@ searchBootstrap:
       runAsUser: 100
       runAsNonRoot: true
       allowPrivilegeEscalation: false
+      # UNCDSR-182: readOnlyRootFilesystem: true is safe here -- the bootstrap
+      # script only makes curl requests against the ldap-sync API and holds
+      # state in shell variables, with no local file writes.
+      readOnlyRootFilesystem: true
       capabilities:
         drop:
           - ALL
@@ -177,7 +181,7 @@ config:
         - --baseGroup=helx-users
       image:
         repository: containers.renci.org/helxplatform/unc-group-x
-        tag: v2.4.1
+        tag: v2.4.2
       name: unc-group-x
       url: http://localhost:5001/hook
   hookRetry:
@@ -233,6 +237,10 @@ postgres:
   persistence:
     enabled: true
     size: 8Gi
+  # The dependency's own data/run/tmp mounts are already wired for a
+  # read-only root; its default (false) is just conservative, not required.
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
   auth:
     # Username for the database
     username: ldapsync

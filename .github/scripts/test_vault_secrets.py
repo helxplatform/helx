@@ -513,7 +513,7 @@ class CommandTests(TempDirTest):
         # The list's files come first, then VALUES, continuing the one "values" field.
         start = summary.index(f"  values    {self.tmp / 'env.yaml'}")
         self.assertEqual(summary[start + 1], f"            {self.tmp / 'v.yaml'}")
-        # A missing entry is warned about before the summary, as helm-deploy does.
+        # A missing entry is warned about before the summary, as the helm-deploy-* targets do.
         self.assertTrue(summary[0].startswith(f"WARNING: {self.tmp / 'list.env'} line 2 names missing.yaml"))
         self.assertEqual(summary[1], "         That file's values will not be rendered.")
         text, _ = self.run_to_vault(list_body="# nothing listed\n")

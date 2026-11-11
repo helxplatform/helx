@@ -1,4 +1,4 @@
-FROM python:3.10.20-alpine
+FROM python:3.12.16-alpine
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -36,6 +36,16 @@ RUN export SET_BUILD_ENV_FROM_FILE=false \
     && pip install "pyyaml==5.4.1" --no-build-isolation \
     && make install \
     && unset SET_BUILD_ENV_FROM_FILE
+
+# Fail the build, not the deploy, when a model change is missing its
+# committed migration file. SECRET_KEY/DJANGO_SETTINGS_MODULE are throwaway
+# values needed only to import settings; no database or cluster is required.
+# Importing settings unconditionally opens log/*.log (base.py's LOGGING dict
+# defines those handlers regardless of USE_LOG_FILE), which would otherwise
+# bake root-owned log files into the image that the non-root runtime user
+# can't write to -- remove them so log/ ships exactly as committed.
+RUN SECRET_KEY=build-check DEV_PHASE=stub DJANGO_SETTINGS_MODULE=appstore.settings.helx_settings make check-migrations \
+    && rm -f log/*.log
 
 USER $USER
 

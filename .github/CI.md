@@ -24,7 +24,11 @@ flowchart TD
     Common --> Images[Validate changed images]
     Services --> CandidateImages[develop only: publish develop-sha images]
     CandidateImages --> Candidate[develop only: publish the version-develop umbrella]
+    CandidateImages --> CandidateACR[develop only, if ACR_LOGIN_SERVER: copy images to ACR]
+    Candidate --> Numbered[develop only: publish the version-develop.run umbrella]
+    CandidateACR --> Numbered
     Umbrella --> ProductionImages[Publish or reuse semantic image tags]
+    ProductionImages --> ProductionACR[if ACR_LOGIN_SERVER: copy images to ACR]
     ProductionImages --> Decision{Umbrella version increased?}
     Decision -->|No| Done[Publication complete]
     Decision -->|Yes| Release[Create manifest, tag, and GitHub Release]
@@ -85,24 +89,38 @@ All charts are validated instead of maintaining a changed-chart dependency
 planner. The repository currently has few enough charts that the simpler,
 predictable behavior is preferable to optimizing individual lint jobs.
 
-Version checks run on **every** pull request, not only those targeting `main`,
-and again on direct pushes to `develop` and `main`. The `develop` candidate channel
+Version checks run on pull requests into `main` and into `develop`, and again on
+direct pushes to `develop` and `main`. The `develop` candidate channel
 vendors service charts straight out of the tree, so a chart edited without a
 version bump could otherwise ship under a version already published with
-different content. Manual validation runs have no base revision to compare against
-and are exempt.
+different content. A pull request into any other branch skips them: its changes
+are judged when that branch's own pull request into `develop` or `main` runs.
+Manual validation runs have no base revision to compare against and are exempt.
 
-What "bump" means depends on where the change is going. Charts and
-`v<appVersion>` images are published immutably only from `main`, so on a pull
-request into `main` every changed chart version and image `appVersion` must
-increase over the base. On a pull request into any other branch, and on direct
-pushes to `develop`, `--above-release` applies instead: rather than having to
-increase on every change, a version need only sit **above what is already
-released**, and may not regress against the base. "Released" means:
+"Bump" means the same thing everywhere: a changed chart version or image
+`appVersion` must sit **above what is already released**, and may not regress
+against the base. What has been released is read from `--release-ref`, and that
+depends on where the change is going:
 
-- for the umbrella, the highest `v*` tag;
-- for a service chart, the `version` in `origin/main`'s copy of its `Chart.yaml`;
-- for an image, the owning chart's `appVersion` on `origin/main`.
+- **Into `main`** (pull requests, and pushes once they land): the base itself.
+  Charts and `v<appVersion>` images are published immutably only from `main`, so
+  its base is what is released, and every changed version must increase over it.
+  A hotfix straight into `main` must raise every version it touches. After a
+  push, `origin/main` is the commit being checked, so reading the release from
+  it would compare every version with itself and always pass.
+- **Into `develop`** (pull requests, and direct pushes): `origin/main`. Rather
+  than having to increase on every change, a version need only sit above what
+  `main` has released.
+
+"Released" means:
+
+- for the umbrella, the highest `v*` tag that is in the release ref's history and
+  whose `deploy/helm/helx-chart/Chart.yaml` has that `version:`. Other `v*` tags
+  are ignored, such as a subtree upstream's own (helx-ui's `v6.4.4` is a helx-ui
+  commit with no umbrella chart) or one pushed from a branch that never reached
+  `main`;
+- for a service chart, the `version` in the release ref's copy of its `Chart.yaml`;
+- for an image, the owning chart's `appVersion` on the release ref.
 
 A chart that does not exist on `main` has never been released, so it has no
 floor. A version *equal* to the released one passes only when the packaged files
@@ -110,9 +128,8 @@ are identical to that release (the chart's own `.helmignore` decides what is
 packaged; for an image, its `sources`, `excludes`, and `.dockerignore`). That is
 what merging a hotfix from `main` back into `develop` produces: the same content
 under the same version is not a second artifact. For the umbrella, "that release"
-is the tree at the `v*` tag. The ref is `--release-ref` (CI passes `origin/<default branch>`); if it is
-missing the check fails rather than silently dropping the floor. No registry is
-queried. The umbrella's dependency pins are still enforced.
+is the tree at the `v*` tag. If the release ref is missing the check fails
+rather than silently dropping the floor. No registry is queried. The umbrella's dependency pins are still enforced.
 
 Without this, two pull requests into `develop` that each edit appstore would
 force 6.0.5 and then 6.0.6, and 6.0.5 would never ship. With it:
@@ -162,9 +179,9 @@ Because develop always sits above the last release, `<version>-develop` is an
 honest preview of `<version>` and correctly sorts below it. Before the first `v*`
 release there is nothing to sit above, so the umbrella is unconstrained.
 
-The required increase over the base reappears on the pull request into `main`,
-where publication would otherwise fail the immutability preflight. Never pass
-`--above-release` there.
+On `main` the base is the release, so the required increase over the base
+reappears there, where publication would otherwise fail the immutability
+preflight. Never let a check on `main` read the release from `origin/main`.
 
 ### What counts as a change
 
@@ -285,6 +302,12 @@ services/*/chart                service charts
 Adding a service chart under that layout automatically adds it to validation and
 publication.
 
+All three workflows handle charts through
+[`actions/publish-charts`](actions/publish-charts/action.yml). Each use of it
+builds, lints, and packages one chart with
+[`scripts/helm-build-chart.sh`](scripts/helm-build-chart.sh), and publishes it
+when asked.
+
 ### Dependency rules
 
 - A chart with dependencies must commit `Chart.lock`.
@@ -327,7 +350,7 @@ prevents a push; it does not disable dependency resolution.
 exists. They exist only where a chart's defaults cannot render offline,
 typically because a chart-managed Secret requires values: those files switch it
 to `existingSecret` mode, which needs no credentials. Left out, helx-common's
-missing-value check prints `[INFO] Fail: ...` on every lint, since helm lint
+missing-value check prints `[INFO] Fail: ...` on every lint, since `helm lint`
 logs a template `fail` instead of stopping.
 
 The umbrella has no file of its own to keep in step. `ci.py lint-values` builds
@@ -352,6 +375,13 @@ umbrella once with its own defaults and once for every environment under
 what a chart defaults to. Other platforms do not enforce the policy and are not
 rendered; `PRIVILEGE_ESCALATION_PLATFORMS` in `scripts/ci.py` lists the ones
 that are.
+
+Each chart kept the values key that already reached its containers, so the name
+differs. ambassador, ldap-sync, ui, and user-mutator call it `securityContext`;
+appstore, appstore-prepuller, appstore-sockets, pod-reaper, and resty call it
+`containerSecurityContext`; helx-ldap sets it in the values it passes to its
+openldap subchart. appstore-sockets also has a `securityContext` value that no
+template reads, so setting it has no effect.
 
 The renders layer the umbrella's lint values (see
 [Lint values](#lint-values)), then the platform defaults and environment
@@ -432,6 +462,40 @@ paired with immutable image references is what keeps `IfNotPresent` from serving
 a stale layer.
 
 Its stable branch-protection result is `Develop channel gate`.
+
+### Numbered candidates
+
+Argo CD caches a chart by its version string, so it never notices that
+`<version>-develop` was overwritten. `develop.yml` therefore publishes each
+candidate twice: `publish-candidate` pushes the mutable `<version>-develop`,
+then `publish-numbered-candidate` pushes the same content as
+`<version>-develop.<run number>`, once, never overwritten. The number comes from
+`CHART_CHANNEL_BUILD` (the publish action's `channel-build`,
+`ci.py candidate-version --build`), and CI passes `github.run_number`.
+
+SemVer compares numeric identifiers as numbers, so `develop.10` sorts above
+`develop.9`, and the build number must only grow. Argo CD follows the newest
+with the range `>=0.0.0-0`, which also matches releases, so right after a
+release it runs that release until the next `develop` push raises the version.
+`publish-numbered-candidate` waits for `mirror-images-acr` (below), so a cluster
+that pulls from ACR never sees a numbered candidate before its images.
+
+### Copies in ACR
+
+The Azure AI Sandbox cluster cannot reliably pull from Harbor. When the
+repository variable `ACR_LOGIN_SERVER` is set, `mirror-images-acr` in
+`develop.yml` (each `develop-<sha>` image) and in `publish.yml` (each released
+`v<appVersion>` image) copies every image the run published from Harbor to
+`<ACR_LOGIN_SERVER>/helxplatform/<repository>`. It uses
+[`actions/mirror-image`](actions/mirror-image/action.yml), which copies the
+manifest and layers rather than rebuilding, so each copy has Harbor's digest.
+With the variable unset, the job is skipped. Only images go to ACR; charts are
+published to GHCR only.
+
+The chart keeps naming Harbor repositories.
+`deploy/helm/values/azure/defaults/values.yaml` repoints each built image's
+`repository` at ACR, and the tag still comes from the chart, so a new image in
+[`ci/images.yaml`](ci/images.yaml) needs a line there too.
 
 ## Container images
 
@@ -520,6 +584,12 @@ Define these repository-level GitHub Actions secrets for Harbor:
 CONTAINERHUB_USERNAME
 CONTAINERHUB_PASSWORD
 ```
+
+To copy images to ACR as well, also define the variable `ACR_LOGIN_SERVER`
+(the registry's login server, without a path) and the secrets `ACR_USERNAME`
+and `ACR_PASSWORD` (an ACR token limited to `helxplatform/*`).
+[`docs/argocd-setup-in-new-cluster.md`](../docs/argocd-setup-in-new-cluster.md)
+section 7 creates the token.
 
 GitHub Actions must be allowed to grant:
 

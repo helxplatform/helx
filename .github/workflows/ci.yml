@@ -59,22 +59,28 @@ jobs:
       - name: Validate CI configuration
         run: python .github/scripts/ci.py validate-config
 
-      # Every pull request is gated, not just those targeting the default branch.
-      # A chart edited without a version bump would otherwise reach develop and be
-      # vendored into a candidate under a version that is already published with
-      # different content.
-      # Charts and v<appVersion> images are only published immutably from the
-      # default branch. On a pull request into any other branch they are judged
-      # against what is already released rather than the base: the last v* tag
-      # for the umbrella, and the default branch's Chart.yaml for each service
-      # chart and appVersion. So only the first pull request after a release has
-      # to choose the next version -- and whoever chooses it knows whether the
-      # change is a patch, a minor, or a major. The umbrella's dependency pins
-      # are still enforced and no version may regress against the base. Raising
-      # the umbrella starts publishing a new <version>-develop channel
-      # automatically, because the candidate tag is derived from its version.
+      # This step fails a pull request into main or develop when a chart or
+      # image whose packaged files changed does not carry a higher version than
+      # the last release. A pull request into any other branch skips it. Its
+      # changes are checked when that branch's own pull request into develop or
+      # main runs CI.
+      # On a pull request into main, the base is what is currently released, so
+      # every changed version must increase over it.
+      # On a pull request into develop, changes are judged against what was
+      # last released rather than the base, so that not every pull request into
+      # develop has to bump versions. What was last released is the highest v*
+      # tag on main whose umbrella Chart.yaml carries that version, and main's
+      # Chart.yaml for each service chart and appVersion. So only the first
+      # pull request after a release has to pick the next version; a later one
+      # can raise it further if its changes call for a bigger bump. The
+      # umbrella's dependency pins are still enforced, and no version may
+      # regress against the base. Raising the umbrella's version starts
+      # publishing a new <version>-develop channel automatically, because the
+      # candidate tag is derived from it.
       - name: Require chart and image version increases
-        if: github.event_name == 'pull_request'
+        if: >-
+          github.event_name == 'pull_request' &&
+          (github.base_ref == github.event.repository.default_branch || github.base_ref == 'develop')
         shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -83,8 +89,11 @@ jobs:
         run: |
           set -euo pipefail
           arguments=(check-versions --base "$BASE_SHA")
-          if [[ "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
-            arguments+=(--above-release --release-ref "origin/$DEFAULT_BRANCH")
+          if [[ "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
+            # The base is what is released.
+            arguments+=(--release-ref "$BASE_SHA")
+          else
+            arguments+=(--release-ref "origin/$DEFAULT_BRANCH")
             echo "Base is $BASE_REF, not $DEFAULT_BRANCH: versions are judged against the last release."
           fi
           python .github/scripts/ci.py "${arguments[@]}"

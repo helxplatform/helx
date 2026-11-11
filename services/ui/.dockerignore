@@ -8,3 +8,4 @@ Jenkinsfile
 .env*
 .git
 .gitignore
+README.md

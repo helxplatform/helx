@@ -1,6 +1,6 @@
 dependencies:
 - name: helx-common
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 0.2.1
-digest: sha256:d420db7282d597728ff1592860004328165e95bcb021e107e831b6dddeb390f5
-generated: '2026-10-23T16:42:17.854246+00:00'
+  version: 0.2.2
+digest: sha256:ed8cb4afe9d1e00fb7162fe1cf5b0e3f095fec1c794a5d63af9f89b6a41406f6
+generated: '2026-11-06T18:28:32.255033+00:00'

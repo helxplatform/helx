@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Move HeLx secrets between Helm values files and Vault-ready JSON files.
 
-Under `make helm-deploy`, a chart builds each Kubernetes Secret from Helm
-values, typically a hand-kept secrets.yaml. Under Argo CD, External Secrets
+Under the `make helm-deploy-*` targets, a chart builds each Kubernetes Secret
+from Helm values, typically a hand-kept secrets.yaml. Under Argo CD, External Secrets
 builds it from a Vault entry instead, copying the entry's keys as they are. The
 two hold the same information in different shapes; deploy/helm/vault-secrets-map.yaml
 records how one maps onto the other, and the commands here convert:
@@ -150,7 +150,7 @@ def load_map(path: Path) -> list[SecretSpec]:
 
 
 def expand_entry(entry: str, root: Path, home: Path) -> Path:
-    """Resolve one line of LOCAL_VALUES_FILE the way helm-deploy does."""
+    """Resolve one line of LOCAL_VALUES_FILE the way the helm-deploy-* targets do."""
     if entry == "~":
         return home
     if entry.startswith("~/"):
@@ -197,9 +197,10 @@ class ValuesFiles:
 def choose_values_files(list_file: Path, extra: Sequence[str], *, root: Path, home: Path) -> ValuesFiles:
     """Decide which values files to render with, without asking anything.
 
-    LOCAL_VALUES_FILE's entries come first and VALUES after them, as in
-    helm-deploy. A list file that is missing, or lists nothing, is ignored, so
-    VALUES alone is used; with nothing from either, there is nothing to do.
+    LOCAL_VALUES_FILE's entries come first and VALUES after them, as in the
+    helm-deploy-* targets. A list file that is missing, or lists nothing, is
+    ignored, so VALUES alone is used; with nothing from either, there is
+    nothing to do.
     """
     extra_paths = [expand_entry(entry, root, home) for entry in extra]
     missing_extra = [str(path) for path in extra_paths if not path.is_file()]
@@ -249,8 +250,9 @@ def to_vault_summary(
 ) -> list[str]:
     """What helm-secrets-to-vault is about to do, for its one confirmation.
 
-    Laid out like helm-deploy's: warnings first, then a header and one aligned
-    line per setting, with further values on continuation lines.
+    Laid out like the helm-deploy-* targets' summary: warnings first, then a
+    header and one aligned line per setting, with further values on
+    continuation lines.
     """
     lines: list[str] = []
     for warning in values.list_warnings:
@@ -263,7 +265,7 @@ def to_vault_summary(
             lines.append(f"  {label if index == 0 else '':<10}{entry}")
 
     def shown(path: Path) -> str:
-        """A file inside the repository, relative to its root, as helm-deploy shows them."""
+        """A file inside the repository, relative to its root, as helm-deploy-* shows them."""
         try:
             return str(path.relative_to(ROOT))
         except ValueError:
@@ -614,7 +616,7 @@ def command_to_helm(args: argparse.Namespace, specs: Sequence[SecretSpec], repor
     confirm_overwrite([out], assume_yes=args.assume_yes, confirm=confirm_on_tty, report=report)
     write_private(out, helm_values_yaml(helm_values(secrets, specs, args.release), args.input))
     report(f"Wrote {out} from {len(secrets)} Secrets.")
-    report(f"Use it with: make helm-deploy VALUES={out}")
+    report(f"Use it with: make helm-deploy-from-local VALUES={out}")
 
 
 def confirm_overwrite(

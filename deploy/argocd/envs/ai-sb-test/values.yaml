@@ -15,7 +15,7 @@
 # Secret it fills and sits under the service that owns it, for example
 # dev/azure/ai-sb-test/appstore/helx-postgresql. It holds exactly that
 # Secret's keys. The dev/azure/ai-sb-test/<service> entries next to them,
-# holding secrets.yaml, are Helm values files for `make helm-deploy`; External
+# holding secrets.yaml, are Helm values files for `make helm-deploy-*`; External
 # Secrets can't use those, because it copies an entry's keys as they are.
 
 appstore:

@@ -1144,15 +1144,16 @@ def packaged_change(root: Path, chart_dir: Path, paths: Iterable[str]) -> bool:
     return False
 
 
-def last_released_version(root: Path) -> str | None:
+def last_released_version(root: Path, release_ref: str) -> str | None:
     """Return the highest v* release tag's version, or None if nothing is released.
 
-    Publication creates these tags, so they are the record of what exists
-    immutably in the registry. Tags that are not v<semver> are ignored.
+    A tag only counts when release_ref's history contains it and the umbrella
+    Chart.yaml it points at carries the tag's version. Without both, a subtree
+    upstream's own tags (helx-ui's v6.4.4 is a helx-ui commit with no umbrella),
+    or a tag pushed from a branch that never reached release_ref, would raise
+    the floor for every pull request. Tags that are not v<semver> are ignored.
     """
-    result = git_run(root, "tag", "--list", "v*", check=False)
-    if result.returncode != 0:
-        return None
+    result = git_run(root, "tag", "--list", "--merged", release_ref, "v*")
     released: list[tuple[SemVer, str]] = []
     for line in result.stdout.splitlines():
         tag = line.strip()
@@ -1162,9 +1163,19 @@ def last_released_version(root: Path) -> str | None:
             released.append((SemVer.parse(tag[1:], "release tag"), tag[1:]))
         except CIError:
             continue
-    if not released:
-        return None
-    return max(released, key=lambda item: item[0])[1]
+    chart_path = (UMBRELLA_DIR / "Chart.yaml").as_posix()
+    for _, version in sorted(released, key=lambda item: item[0], reverse=True):
+        content = git_file(root, f"v{version}", chart_path)
+        if content is None:
+            continue
+        try:
+            label = f"v{version}:{chart_path}"
+            tagged = metadata_value(_yaml_mapping(content, label), "version", label)
+        except CIError:
+            continue
+        if tagged == version:
+            return version
+    return None
 
 
 def _require_above_release(
@@ -1184,9 +1195,9 @@ def _require_above_release(
 
     Equal to the release is allowed when matches_release says the artifact's
     files are identical to what was released, which is what merging a hotfix
-    from the default branch back into an integration branch produces: the same
-    content under the same version is not a second artifact. It is only asked
-    when the versions are equal, because it costs a diff.
+    from main back into develop produces: the same content under the same
+    version is not a second artifact. It is only asked when the versions are
+    equal, because it costs a diff.
     """
     if base_version is not None:
         _require_increase(current, base_version, label, allow_equal=True)
@@ -1207,11 +1218,11 @@ def _paths_changed_since(
 
 
 class _ReleasedCharts:
-    """Read Chart.yaml as published from the release ref, verifying it once.
+    """Read what the release ref has published, verifying the ref once.
 
-    The ref is only resolved when a service chart or image actually needs a
-    floor, and a missing ref is an error rather than an absent floor: silently
-    skipping the check would let a candidate reuse a released version.
+    The ref is only resolved when a chart or image actually needs a floor, and
+    a missing ref is an error rather than an absent floor: silently skipping
+    the check would let a candidate reuse a released version.
     """
 
     def __init__(self, root: Path, ref: str) -> None:
@@ -1219,18 +1230,27 @@ class _ReleasedCharts:
         self.ref = ref
         self.verified = False
 
-    def chart(self, chart_dir: Path) -> dict[str, Any] | None:
-        if not self.verified:
-            result = git_run(
-                self.root, "rev-parse", "--verify", f"{self.ref}^{{commit}}", check=False
+    def _verify(self) -> None:
+        if self.verified:
+            return
+        result = git_run(
+            self.root, "rev-parse", "--verify", f"{self.ref}^{{commit}}", check=False
+        )
+        if result.returncode != 0:
+            raise CIError(
+                f"Release ref {self.ref!r} is not available, so released versions "
+                "cannot be read; fetch it or pass --release-ref"
             )
-            if result.returncode != 0:
-                raise CIError(
-                    f"Release ref {self.ref!r} is not available, so released service "
-                    "chart versions cannot be read; fetch it or pass --release-ref"
-                )
-            self.verified = True
+        self.verified = True
+
+    def chart(self, chart_dir: Path) -> dict[str, Any] | None:
+        self._verify()
         return _base_chart(self.root, self.ref, chart_dir)
+
+    def umbrella_version(self) -> str | None:
+        """Return the umbrella's last release, from the v* tags on the ref."""
+        self._verify()
+        return last_released_version(self.root, self.ref)
 
     def field(self, chart_dir: Path, field: str) -> str | None:
         """Return a released field, or None when nothing was released under it.
@@ -1252,42 +1272,47 @@ def check_versions(
     base: str,
     config_path: Path | None = None,
     include_untracked: bool = False,
-    above_release: bool = False,
     release_ref: str = DEFAULT_RELEASE_REF,
 ) -> None:
-    """Ensure changed chart and image versions increase over the base revision.
+    """Ensure every changed chart and image sits above what is released.
 
-    above_release changes how versions are judged on branches that never publish
-    them immutably: instead of having to increase on every change, a version
-    must simply sit above what is already released, and may not regress against
-    the base. That lets several pull requests land on an integration branch
-    while only the first one after a release has to choose the next version --
-    and whoever chooses it knows whether their change is a patch, a minor, or a
-    major.
+    A chart or image whose artifact changed must carry a version above what is
+    already released, and may not regress against the base. On an integration
+    branch that lets several pull requests land while only the first one after
+    a release has to choose the next version, and whoever chooses it knows
+    whether their change is a patch, a minor, or a major.
 
-    "Released" means the last v* tag for the umbrella, and for a service chart
+    The checked-out tree (HEAD, plus uncommitted files with include_untracked)
+    is judged against two revisions. base, the commit the change is measured
+    from, decides which charts and images changed, and none of their versions
+    may fall below it. release_ref records what is released, and every changed
+    version must sit above it unless the artifact is identical to that release.
+
+    On main, pass base itself as release_ref: the commit before the change is
+    what main has released, so every change must increase over it. Never leave
+    release_ref at its default of origin/main after a push, because origin/main
+    is then the commit being checked: every version would be compared with
+    itself and the check would always pass, even for a service that changed
+    without a bump.
+
+    "Released" means the highest v* tag on release_ref whose umbrella Chart.yaml
+    carries that version (see last_released_version), and for a service chart
     its version (or, for its images, its appVersion) on release_ref. A chart
     absent from release_ref has never been released and is unconstrained, and
     so are the images of a chart released there without an appVersion. A
     version equal to the release passes only when the packaged chart (or image
     sources) are identical to that release, as after merging a hotfix back.
-
-    The candidate channel follows for free, because its tag is derived from the
-    umbrella version: raising it to 4.7.0 simply starts publishing 4.7.0-develop.
-    And because every service chart a pull request edits must sit above its
-    released version, a candidate normally does not vendor a chart under a
-    version already published with different content. The exception is a hotfix
-    on release_ref that publishes a version the branch already uses for other
-    content: an unedited chart is not re-checked until the hotfix is merged
-    back, which then requires the next version.
-
-    Publication from the default branch must never set this. Republishing one
-    version with different content is what the preflight refuses.
     """
     git_run(root, "rev-parse", "--verify", f"{base}^{{commit}}")
     paths = changed_paths(root, base, include_untracked)
     errors: list[str] = []
     released_charts = _ReleasedCharts(root, release_ref)
+    # Only picks the error wording; pass or fail is the same either way. Names
+    # are compared, not commits, because passing base as release_ref is how a
+    # caller on main says the base is the release. A pull request into develop
+    # whose base happens to be main's commit should still be told it must sit
+    # above what main has released.
+    release_is_base = release_ref == base
     release_diffs: dict[str, list[str]] = {}
     chart_dirs = discover_chart_dirs(root)
     # Every chart and image is checked inside its own try, so an unreadable
@@ -1307,36 +1332,33 @@ def check_versions(
             base_version = metadata_value(
                 previous, "version", f"{base}:{relative_dir}/Chart.yaml"
             )
-            if above_release:
-                if is_umbrella:
-                    released = last_released_version(root)
-                    release_tree = f"v{released}"
-                    hint = (
-                        ". It must sit above the last published release unless its packaged "
-                        f"files are identical to {release_tree}'s, so this pull request needs "
-                        "to choose the next version"
-                    )
-                else:
-                    released = released_charts.field(chart_dir, "version")
-                    release_tree = release_ref
-                    hint = (
-                        f". It must sit above the version {release_ref} has published unless "
-                        f"its packaged files are identical to {release_ref}'s, so this pull "
-                        "request needs to choose the next version"
-                    )
+            if is_umbrella:
+                released = released_charts.umbrella_version()
+                release_tree = f"v{released}"
+                hint = (
+                    ". It must sit above the last published release unless its packaged "
+                    f"files are identical to {release_tree}'s, so this pull request needs "
+                    "to choose the next version"
+                )
+            else:
+                released = released_charts.field(chart_dir, "version")
+                release_tree = release_ref
+                hint = (
+                    f". It must sit above the version {release_ref} has published unless "
+                    f"its packaged files are identical to {release_ref}'s, so this pull "
+                    "request needs to choose the next version"
+                )
+            try:
                 _require_above_release(
                     current_version, base_version, released,
-                    f"{relative_dir} chart version", hint,
+                    f"{relative_dir} chart version", "" if release_is_base else hint,
                     lambda: not packaged_change(
                         root, chart_dir,
                         _paths_changed_since(root, release_tree, include_untracked, release_diffs),
                     ),
                 )
-                continue
-            try:
-                _require_increase(current_version, base_version, f"{relative_dir} chart version")
             except CIError:
-                if current_version != base_version:
+                if not (release_is_base and current_version == base_version):
                     raise
                 errors.append(
                     version_convergence_message(
@@ -1374,26 +1396,23 @@ def check_versions(
             base_app = optional_metadata_value(
                 previous, "appVersion", f"{base}:{image['chart']}/Chart.yaml"
             )
-            if above_release:
-                released_app = released_charts.field(chart_dir, "appVersion")
-                _require_above_release(
-                    current_app,
-                    base_app,
-                    released_app,
-                    label,
-                    hint=(
-                        f". It must sit above the appVersion {release_ref} has published "
-                        f"unless its sources are identical to {release_ref}'s, so this pull "
-                        "request needs to choose the next version"
-                    ),
-                    matches_release=lambda: not image_source_changed(
-                        image,
-                        _paths_changed_since(root, release_ref, include_untracked, release_diffs),
-                        root,
-                    ),
-                )
-            elif base_app is not None:
-                _require_increase(current_app, base_app, label)
+            released_app = released_charts.field(chart_dir, "appVersion")
+            _require_above_release(
+                current_app,
+                base_app,
+                released_app,
+                label,
+                hint="" if release_is_base else (
+                    f". It must sit above the appVersion {release_ref} has published "
+                    f"unless its sources are identical to {release_ref}'s, so this pull "
+                    "request needs to choose the next version"
+                ),
+                matches_release=lambda: not image_source_changed(
+                    image,
+                    _paths_changed_since(root, release_ref, include_untracked, release_diffs),
+                    root,
+                ),
+            )
         except CIError as exc:
             errors.append(str(exc))
     if errors:
@@ -2058,16 +2077,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--umbrella-above-release",
         dest="above_release",
         action="store_true",
-        help="require versions to sit above what is released (the last v* tag for "
-        "the umbrella, --release-ref for service charts and appVersions) and not "
-        "regress against the base, rather than increase over the base, so each "
-        "need only be raised once per release cycle; never use on the default branch",
+        help="no longer needed, since versions are always judged against what is "
+        "released; still accepted so older invocations keep working",
     )
     versions.add_argument(
         "--release-ref",
         default=DEFAULT_RELEASE_REF,
-        help="revision whose Chart.yaml files record released service chart "
-        f"versions and appVersions for --above-release (default: {DEFAULT_RELEASE_REF})",
+        help="revision that records what is released: its Chart.yaml files for "
+        "service charts and appVersions, and the v* tags in its history for the "
+        "umbrella. On main pass the base itself "
+        f"(default: {DEFAULT_RELEASE_REF})",
     )
     versions.add_argument(
         "--include-untracked",
@@ -2165,7 +2184,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ROOT,
                 args.base,
                 include_untracked=args.include_untracked,
-                above_release=args.above_release,
                 release_ref=args.release_ref,
             )
             print("Version checks passed")

@@ -1,6 +1,6 @@
 # user-mutator Helm chart
 
-Chart `2.2.3` uses the `helx-common` `0.2.1` library for its webhook TLS and
+Chart `2.2.4` uses the `helx-common` `0.2.1` library for its webhook TLS and
 optional LDAP password Secret contracts.
 
 ## Secret modes
@@ -102,6 +102,18 @@ config:
               mountPath: /var/run/helx/postgres/TEST_OMOP
 ```
 
+### Secret volume sources
+
+A `secret://` source without a regex capture group is written into the pod as an optional secret volume without the
+webhook reading anything from the API server. That covers fixed names like the one above and templated names like
+`secret://pguser-{{ .username }}`, which the webhook fills in for each user. The kubelet mounts the secret, and
+a missing secret leaves an empty directory at the mount path rather than blocking the pod.
+
+A `secret://` source containing a regex capture group, such as `secret://{{ .username }}-(.*)`, has to list
+secrets to find the matching names. Set `rbac.secretDiscovery: true` to grant that. It is off by default because `list`
+on secrets lets the webhook's ServiceAccount read the contents of every secret in the namespace. Without it, the webhook
+logs an error naming the setting and skips that source; the rest of the profile still applies.
+
 ### Loading profiles from files
 
 `--set-file` reads a file into a value, so each profile can stay a standalone YAML file instead of an indented block
@@ -170,7 +182,7 @@ functions with no memoisation, so resolving the certificate in two files would g
 fresh install and the CA bundle would not match the serving certificate.
 
 `lookup` returns nothing during `helm template`, `helm lint`, and client-side dry runs, so rendering the chart offline
-twice produces two different certificates. That output is never applied to the cluster.
+twice produces two different certificates.
 
 To render the configuration against a certificate the chart does not manage, select a non-`generate` `secret.mode` and
 set `webhook.caBundle` to the base64 CA that signed it. Rendering fails if `webhook.enabled` is set with no CA bundle
@@ -182,8 +194,8 @@ Namespaces are selected by the `kubernetes.io/metadata.name` label, which Kubern
 automatically. **Nothing has to be labelled for mutation to take effect**, and the chart needs no permission to patch
 namespaces. `webhook.namespaces` defaults to the release namespace.
 
-`webhook.extraMatchExpressions` is ANDed with that clause and defaults to keep the webhook away from control-plane and
-AKS-managed namespaces. To restore the historical opt-in label as a per-namespace toggle, add it to
+`webhook.extraMatchExpressions` is ANDed with that clause and defaults to keep the webhook away from namespaces
+labelled `control-plane: "true"`. To restore the historical opt-in label as a per-namespace toggle, add it to
 `webhook.matchLabels`:
 
 ```yaml
@@ -191,6 +203,22 @@ webhook:
   matchLabels:
     enable-user-mutator-webhook-ai-sb-test: "true"
 ```
+
+### AKS Admissions Enforcer
+
+On AKS, the Admissions Enforcer rewrites the `namespaceSelector` of every webhook configuration it admits, adding its
+own exclusions for control-plane and AKS-managed namespaces, and takes ownership of that field. Helm 4 applies charts
+server-side, so the next upgrade fails with a conflict naming `admissionsenforcer`. Opt the configuration out with
+`webhook.annotations`; the `kubernetes.io/metadata.name` clause already keeps the webhook to the listed namespaces:
+
+```yaml
+webhook:
+  annotations:
+    admissions.enforcer/disabled: "true"
+```
+
+A configuration the enforcer already rewrote still has it as the owner, so the first upgrade that adds the annotation
+needs `--force-conflicts`, or the configuration deleted beforehand.
 
 ### Deployment selection and failure policy
 

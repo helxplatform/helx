@@ -1,8 +1,8 @@
 # Setting up Argo CD in a new cluster
 
-This is the procedure for moving a cluster's HeLx deployments from
-`make helm-deploy` to Argo CD, including taking over Helm releases that are
-already running. The commands use the Azure AI Sandbox cluster (kube context
+This is the procedure for moving a cluster's HeLx deployments from the
+`make helm-deploy-*` targets to Argo CD, including taking over Helm releases
+that are already running. The commands use the Azure AI Sandbox cluster (kube context
 `ai-sandbox`) and its `ai-sb-test` namespace as the example; substitute your
 own cluster and namespace. Where the Azure cluster needs something other
 clusters don't (pulling images from ACR), the section says so.
@@ -89,7 +89,7 @@ clusters don't (pulling images from ACR), the section says so.
 
   It also applies the plain manifests in `deploy/argocd/envs/<env>/manifests/`.
 - Secrets come from HashiCorp Vault through the External Secrets Operator (ESO).
-  The `secrets.yaml` used with `make helm-deploy` (for example
+  The `secrets.yaml` used with the `make helm-deploy-*` targets (for example
   `~/helm-values/.../helx/secrets.yaml`) is not used by Argo CD.
 - Argo CD reads `deploy/argocd/` and the values files from the `develop` branch,
   so nothing here takes effect until it is merged there.
@@ -161,7 +161,8 @@ What to look for in the output:
   release runs the current umbrella chart and can be taken over directly. A
   namespace with separate `ldap-sync`, `openldap`, `user-mutator`, or
   `appstore-prepuller` releases is on the older split layout. Migrate it to
-  the umbrella with `make helm-deploy` first, following
+  the umbrella with `make helm-deploy-from-local` or
+  `make helm-deploy-from-ghcr` first, following
   [DeploymentMigration.md](DeploymentMigration.md).
 - **The Helm release name** of the umbrella (`helx` in the examples). Argo CD
   must use the same name (section 10).
@@ -194,7 +195,8 @@ Helm's `lookup`, and some refuse to render unless the deploy is an upgrade.
 Argo CD renders charts with `helm template`, where `lookup` finds nothing and
 every deploy looks like a fresh install. So:
 
-- Run any pending migration with `make helm-deploy` first.
+- Run any pending migration with `make helm-deploy-from-local` or
+  `make helm-deploy-from-ghcr` first.
 - Make sure none of these values is set to `true` in the values files that
   Argo CD will use. Search for them before handing over:
 
@@ -563,7 +565,7 @@ Secret with the single key `secrets.yaml` instead of `SECRET_KEY` and the rest.
 
 ### Converting between `secrets.yaml` and Vault entries
 
-A `secrets.yaml` for `make helm-deploy` and the Vault entries above hold the
+A `secrets.yaml` for the `make helm-deploy-*` targets and the Vault entries above hold the
 same values in two shapes. Three Make targets convert between them, and a
 fourth uploads the result, using `deploy/helm/vault-secrets-map.yaml`,
 which records each Secret's service and where each of its keys lives in
@@ -583,9 +585,9 @@ the Helm values:
   default `VAULT_SECRETS_DIR`), and any files it would overwrite. It then asks
   once whether to proceed (`ASSUME_YES=1` skips the question).
 - **`make vault-secrets-to-helm`** turns those JSON files back into one
-  combined `secrets.yaml` (`dist/vault-secrets/secrets.yaml`) for
-  `make helm-deploy`. If that file already exists, it asks y/n before
-  overwriting it (`ASSUME_YES=1` skips the question).
+  combined `secrets.yaml` (`dist/vault-secrets/secrets.yaml`) for the
+  `make helm-deploy-*` targets. If that file already exists, it asks y/n
+  before overwriting it (`ASSUME_YES=1` skips the question).
 - **`make vault-secrets-from-cluster`** copies the live Secrets of a running
   release into the same JSON files. It only reads from the cluster. It is the
   only source for values the charts generated, which no `secrets.yaml` holds.
@@ -705,7 +707,7 @@ Without the third values file, these objects differ between renders:
 
 The remaining chart-managed Secrets (`helx-appstore-secrets`,
 `openldap-credentials`, `helx-ldap-sync-secrets`,
-`helx-user-mutator-ldap-password`) are stable under `make helm-deploy` only
+`helx-user-mutator-ldap-password`) are stable under the `make helm-deploy-*` targets only
 because they read their values from the secrets files. Under Argo CD they move
 to Vault too. With the
 third values file, the two renders are identical, and the chart renders no

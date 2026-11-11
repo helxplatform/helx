@@ -20,6 +20,7 @@ import (
 	"github.com/go-ldap/ldap/v3"
 	"github.com/mattbaird/jsonpatch"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/yaml"
 
@@ -27,6 +28,7 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -167,6 +169,7 @@ type AppConfig struct {
 	TLSKeyPath  string
 	LDAPConfig  *LDAPConfig
 	K8sClient   *kubernetes.Clientset // Add Kubernetes client handle
+	MetaClient  metadata.Interface
 }
 
 type ProfileResources struct {
@@ -307,6 +310,12 @@ func InitializeAppConfig(configPath, mapsDir, secretsDir string) (*AppConfig, er
 
 	// Set the Kubernetes client handle in the appConfig
 	appConfig.K8sClient = k8sClient
+
+	metaClient, err := metadata.NewForConfig(k8sConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Kubernetes metadata client: %v", err)
+	}
+	appConfig.MetaClient = metaClient
 
 	slog.Info("Kubernetes client successfully initialized")
 
@@ -622,7 +631,9 @@ func FindMatchingResources(namespace, kind, rawTpl string, ctx map[string]string
 		}
 
 	case "secret":
-		list, err := core.Secrets(namespace).List(context.Background(), metav1.ListOptions{})
+		// Metadata-only so secret contents never reach this process.
+		list, err := appConfig.MetaClient.Resource(corev1.SchemeGroupVersion.WithResource("secrets")).
+			Namespace(namespace).List(context.Background(), metav1.ListOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("listing Secrets in %q: %w", namespace, err)
 		}
@@ -670,6 +681,29 @@ func expandTemplate(raw string, ctx map[string]string) (string, error) {
 	return buf.String(), nil
 }
 
+// resolveSecretSource expands a source without a capture group, such as
+// pguser-{{.username}}, to a single secret name without any API call, so the
+// default chart role needs no access to secrets. Only sources with a capture
+// group list secrets, which requires the chart's rbac.secretDiscovery.
+// Existence of the named secret is not checked; the volume is marked optional.
+func resolveSecretSource(namespace, rawTpl string, ctx map[string]string) ([]Match, error) {
+	name, err := expandTemplate(rawTpl, ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.ContainsAny(name, "()") {
+		return []Match{{Name: name}}, nil
+	}
+
+	matches, err := FindMatchingResources(namespace, "secret", rawTpl, ctx)
+	if apierrors.IsForbidden(err) {
+		slog.Error("regex secret source requires list on secrets; enable rbac.secretDiscovery in the chart",
+			"source", rawTpl, "namespace", namespace, "err", err)
+		return nil, nil
+	}
+	return matches, err
+}
+
 func parseVolumeSources(namespace, baseName, rawSrc string, ctx map[string]string) ([]VolumeContext, error) {
 	parts := strings.SplitN(rawSrc, "://", 2)
 	scheme, pathTpl := "pvc", parts[0]
@@ -682,7 +716,13 @@ func parseVolumeSources(namespace, baseName, rawSrc string, ctx map[string]strin
 
 	switch scheme {
 	case "pvc", "secret", "configmap":
-		matches, err := FindMatchingResources(namespace, scheme, pathTpl, ctx)
+		var matches []Match
+		var err error
+		if scheme == "secret" {
+			matches, err = resolveSecretSource(namespace, pathTpl, ctx)
+		} else {
+			matches, err = FindMatchingResources(namespace, scheme, pathTpl, ctx)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("scanning %s: %w", scheme, err)
 		}
@@ -715,9 +755,11 @@ func parseVolumeSources(namespace, baseName, rawSrc string, ctx map[string]strin
 					},
 				}
 			} else if scheme == "secret" {
+				optional := true
 				vs = corev1.VolumeSource{
 					Secret: &corev1.SecretVolumeSource{
 						SecretName: m.Name,
+						Optional:   &optional,
 					},
 				}
 			} else if scheme == "configmap" {

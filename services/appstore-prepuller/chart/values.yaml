@@ -8,9 +8,18 @@ appRegistry:
 # container. allowPrivilegeEscalation: false is required by the AKS policy
 # that denies privilege escalation, and is harmless elsewhere; keep it when
 # overriding. UNCDSR-182: readOnlyRootFilesystem: true is safe here -- the
-# pause container only sleeps, and the controller (prepuller.py) only talks
-# to the Kubernetes API and the app registry, with no local file writes
-# (confirmed by inspection: no open()/tempfile/write()/mkdir calls). The
+# pause container only sleeps, and prepuller.py itself only talks to the
+# Kubernetes API and the app registry, with no local file writes (confirmed
+# by inspection: no open()/tempfile/write()/mkdir calls). It initially looked
+# like that made share-nothing read-only root safe outright, but prepuller.py
+# pulls in the appstore package (git+https://github.com/helxplatform/appstore.git
+# @pip-installable -- a separate repo from this monorepo's own
+# services/appstore), whose tycho context opens a requests_cache
+# CachedSession with a bare cache name, which resolves to a sqlite file in
+# the CWD (the Dockerfile's WORKDIR /app, baked with the application source
+# and now read-only). The CronJob's template works around that by
+# redirecting the controller's working directory to a writable emptyDir
+# rather than depending on that separate repo's own fix landing. The
 # pre-pull init containers get their allowPrivilegeEscalation/capabilities
 # from the controller itself (prepuller.py's build_init_containers), not from
 # this value; they run only "exit 0".

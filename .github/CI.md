@@ -346,7 +346,7 @@ prevents a push; it does not disable dependency resolution.
 exists. They exist only where a chart's defaults cannot render offline,
 typically because a chart-managed Secret requires values: those files switch it
 to `existingSecret` mode, which needs no credentials. Left out, helx-common's
-missing-value check prints `[INFO] Fail: ...` on every lint, since helm lint
+missing-value check prints `[INFO] Fail: ...` on every lint, since `helm lint`
 logs a template `fail` instead of stopping.
 
 The umbrella has no file of its own to keep in step. `ci.py lint-values` builds

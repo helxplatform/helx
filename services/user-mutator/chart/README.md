@@ -102,6 +102,21 @@ config:
               mountPath: /var/run/helx/postgres/TEST_OMOP
 ```
 
+### Mounting a single file
+
+A `volumeMounts` entry can set `subPath` to mount one file or subdirectory of its volume instead of the whole volume,
+for example one key of a ConfigMap over a path whose directory the image already populates:
+
+```yaml
+volumeMounts:
+  - name: azure-codex-config
+    mountPath: /etc/codex/config.toml
+    subPath: config.toml
+```
+
+`subPath` takes the same template variables as `mountPath`. Kubernetes does not update a `subPath` mount when its
+ConfigMap or Secret changes, so a pod sees new contents only after it restarts.
+
 ### Secret volume sources
 
 A `secret://` source without a regex capture group is written into the pod as an optional secret volume without the

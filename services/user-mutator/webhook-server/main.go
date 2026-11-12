@@ -59,6 +59,7 @@ type ConfigMapRef struct {
 type VolumeMount struct {
 	MountPath string `json:"mountPath"`
 	Name      string `json:"name"`
+	SubPath   string `json:"subPath,omitempty"`
 }
 
 // VolumeSource represents the source of a volume to mount.
@@ -946,6 +947,12 @@ func GetK8sVolumeMounts(cfg VolumeConfig, vmap VolumeContextMap) ([]corev1.Volum
 				rollback(start)
 				goto nextName
 			}
+			sp, err := renderMountPath(p.spec.SubPath, p.ctx.Vars)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("name %q idx %d: subPath template error: %v", name, i, err))
+				rollback(start)
+				goto nextName
+			}
 			if _, dup := seen[mp]; dup {
 				errs = append(errs, fmt.Sprintf("name %q idx %d: mount path %q duplicates another mount; skipping all mounts for this name", name, i, mp))
 				rollback(start)
@@ -955,6 +962,7 @@ func GetK8sVolumeMounts(cfg VolumeConfig, vmap VolumeContextMap) ([]corev1.Volum
 			result = append(result, corev1.VolumeMount{
 				Name:      p.ctx.Volume.Name, // concrete unique volume name
 				MountPath: mp,
+				SubPath:   sp,
 			})
 		}
 	nextName:

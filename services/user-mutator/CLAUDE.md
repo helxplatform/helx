@@ -173,6 +173,8 @@ volumeMounts:
     mountPath: /mnt/projects/{{index .cap 0}}  # uses first capture group
 ```
 
+A mount spec may also set `subPath`, rendered with the same variables, to mount one file or subdirectory of the volume.
+
 ### Configuration Structure
 
 **Runtime Configuration** (`/etc/user-mutator-config/config.json`):

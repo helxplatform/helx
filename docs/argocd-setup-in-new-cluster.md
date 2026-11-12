@@ -798,9 +798,11 @@ pull from (section 1).
 
 - **GitHub** (`https://github.com/helxplatform/helx.git`) is public, so it
   needs no credentials.
-- **GHCR** (`ghcr.io/helxplatform/helm-charts`) serves charts without
-  credentials but refuses to list tags anonymously, and Argo CD lists tags to
-  resolve the `>=0.0.0-0` range. Register it with a personal access token
+- **GHCR** (`ghcr.io/helxplatform/helm-charts`) holds the charts as private
+  packages, so Argo CD needs credentials both to pull a chart and to list its
+  tags, which it does to resolve the `>=0.0.0-0` range to the newest version.
+
+  Register it with a personal access token
   (classic; GHCR doesn't accept fine-grained tokens) that has only
   `read:packages`, ideally from a bot account rather than a person's. The
   `url` has no `oci://` prefix and must equal `chart.repoURL` in the env's
@@ -922,8 +924,9 @@ record (`sh.helm.release.v1.helx.*` Secrets) is not touched.
 ## 11. Verify *(not done yet)*
 
 - The Application shows the resolved chart version (for example
-  `5.1.1-develop.214`), not the range. If it shows an error about the range,
-  Argo CD can't list GHCR's tags; check the repository Secret from section 8.
+  `5.1.1-develop.214`), not the range. If it shows an error about the range or
+  about authentication, Argo CD can't read GHCR; check the repository Secret
+  from section 8.
 - `kubectl -n ai-sb-test get pods` shows every pod running the `develop-<sha>`
   images from Harbor.
 - `kubectl -n ai-sb-test get externalsecrets` shows every one `SecretSynced`.

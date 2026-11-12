@@ -157,6 +157,29 @@ ldap:
   uri: "ldap://openldap"
   groupDN: "cn=users,ou=groups,dc=example,dc=org"
   searchBase: "ou=users,dc=example,dc=org"
+  # -- DN appstore binds as. Empty binds anonymously, which is enough for the
+  # group check; provisioning needs helx-ldap's appstore account,
+  # "cn=appstore,dc=example,dc=org".
+  bindDN: ""
+  bindPasswordSecret:
+    # -- Secret holding bindDN's password under the key LDAP_APPSTORE_PASSWORD,
+    # e.g. helx-ldap's "openldap-credentials". Empty sets no password.
+    name: ""
+  provision:
+    # -- Email domains whose users get an LDAP account (in groupDN, a posixGroup)
+    # at first login when they have none, e.g. [duke.edu]. The uid is
+    # <local part>.<institution>, numbered if taken (jdoe.duke, jdoe.duke2). Needs
+    # django.USERNAME_FROM_LDAP and a bindDN that can write. Empty turns it off.
+    emailDomains: []
+    # -- Where new entries are created: helx-ldap's appstore-account branch, the
+    # only place that account may add entries. Empty uses searchBase.
+    base: "ou=external,ou=users,dc=example,dc=org"
+    # -- First uidNumber given to provisioned users.
+    uidMin: 2000000
+    # -- Last uidNumber given to provisioned users.
+    uidMax: 2099999
+    # -- gidNumber of provisioned users and of groupDN when it's created.
+    gidNumber: 1025
 
 updateStrategy:
   # -- 'RollingUpdate' or 'Recreate'. Must use Recreate if mounting PVCs due to multi-attach errors.
@@ -176,6 +199,7 @@ podSecurityContext: {}
 # privilege escalation, and is harmless elsewhere; keep it when overriding.
 containerSecurityContext:
   allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
 
 service:
   type: ClusterIP
@@ -260,6 +284,18 @@ django:
   ALLOW_DJANGO_LOGIN: ""
   # -- show SAML log in fields (true | false)
   ALLOW_SAML_LOGIN: ""
+  # -- Log a social login into the existing user with the same verified email
+  # (allauth SOCIALACCOUNT_EMAIL_AUTHENTICATION), so admins can pre-create users
+  # with a chosen username. ("true" | "false")
+  SOCIALACCOUNT_EMAIL_AUTHENTICATION: "false"
+  # -- Take a social login's username from LDAP: the uid of the entry whose mail
+  # is the login's verified email. Logins without one are refused, unless
+  # ldap.provision.emailDomains creates it. Needs ldap.enabled; SAML logins are
+  # unaffected. ("true" | "false")
+  USERNAME_FROM_LDAP: "false"
+  # -- Label for the OIDC login button. Empty uses OIDC_NAME, which stays the
+  # provider id in the login and callback URLs.
+  OIDC_DISPLAY_NAME: ""
 
   # -- Specify URL to use for the "Image Download" link on the top part of website.
   IMAGE_DOWNLOAD_URL: ""
@@ -523,6 +559,11 @@ postgresql:
   primary:
     labels: {"np-label": "appstore-db"}
     podLabels: {"np-label": "appstore-db"}
+    # The dependency already defaults to this; set explicitly so it survives
+    # a future chart bump, and so the deployed release (pinned to an older
+    # lock predating this default) picks it up on the next upgrade.
+    containerSecurityContext:
+      readOnlyRootFilesystem: true
   # -- postgresql logs
   audit:
     logHostname: true

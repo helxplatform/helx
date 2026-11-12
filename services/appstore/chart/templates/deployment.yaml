@@ -113,6 +113,21 @@ spec:
             configMapKeyRef:
               key: ALLOW_SAML_LOGIN
               name: {{ include "appstore.fullname" . }}-env
+        - name: SOCIALACCOUNT_EMAIL_AUTHENTICATION
+          valueFrom:
+            configMapKeyRef:
+              key: SOCIALACCOUNT_EMAIL_AUTHENTICATION
+              name: {{ include "appstore.fullname" . }}-env
+        - name: USERNAME_FROM_LDAP
+          valueFrom:
+            configMapKeyRef:
+              key: USERNAME_FROM_LDAP
+              name: {{ include "appstore.fullname" . }}-env
+        - name: OIDC_DISPLAY_NAME
+          valueFrom:
+            configMapKeyRef:
+              key: OIDC_DISPLAY_NAME
+              name: {{ include "appstore.fullname" . }}-env
         {{- if .Values.saml.AUTHORITY_URL }}
         - name: SAML2_AUTH_ASSERTION_URL
           valueFrom:
@@ -201,6 +216,20 @@ spec:
             configMapKeyRef:
               key: LDAP_SEARCH_BASE
               name: {{ include "appstore.fullname" . }}-env
+        {{- range list "LDAP_BIND_DN" "LDAP_PROVISION_EMAIL_DOMAINS" "LDAP_PROVISION_UID_MIN" "LDAP_PROVISION_UID_MAX" "LDAP_PROVISION_GID_NUMBER" "LDAP_PROVISION_BASE" }}
+        - name: {{ . }}
+          valueFrom:
+            configMapKeyRef:
+              key: {{ . }}
+              name: {{ include "appstore.fullname" $ }}-env
+        {{- end }}
+        {{- with .Values.ldap.bindPasswordSecret.name }}
+        - name: LDAP_BIND_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ . }}
+              key: LDAP_APPSTORE_PASSWORD
+        {{- end }}
         {{- end }}
 
         {{- range $key, $value := .Values.extraEnv }}
@@ -314,15 +343,26 @@ spec:
         ports:
         - containerPort: 8000
         volumeMounts:
+          - mountPath: /usr/src/inst-mgmt/appstore/static
+            name: appstore-static-volume
+          # UNCDSR-182: TychoContext's requests_cache (tycho/context.py)
+          # writes its SQLite response cache here -- it's created at Django
+          # import time (core/views.py), not just when launching an app, so
+          # this is needed for the appstore container to boot at all once the
+          # root filesystem is read-only.
+          - mountPath: /tmp
+            name: tmp
           {{- if not .Values.postgresql.enabled }}
           - mountPath: /var/lib/sqlite3
             name: appstore-sqlite-volume
           {{- end }}
-          {{- if .Values.logsStorageAppstore.createPVC }}
+          # UNCDSR-182: Django's LOGGING dict (settings/base.py) instantiates
+          # RotatingFileHandlers for this directory at import time regardless
+          # of USE_LOG_FILE, so it must be writable even when no logs PVC is
+          # configured.
           - name: appstore-logs-volume
             mountPath: /usr/src/inst-mgmt/log
             subPath: log
-          {{- end}}
           {{- if and .Values.saml.cache.claimName .Values.saml.cache.enabled }}
           - name: saml-claim
             mountPath: {{ .Values.saml.cache.APPSTORE_DIRECTORY }}
@@ -359,6 +399,10 @@ spec:
       {{- end }}
       restartPolicy: Always
       volumes:
+        - name: appstore-static-volume
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
       {{- if not .Values.postgresql.enabled }}
         - name: appstore-sqlite-volume
           persistentVolumeClaim:
@@ -368,14 +412,16 @@ spec:
             claimName: appstore-sqlite-pvc
             {{- end }}
       {{- end }}
-      {{- if .Values.logsStorageAppstore.createPVC }}
         - name: appstore-logs-volume
+      {{- if .Values.logsStorageAppstore.createPVC }}
           persistentVolumeClaim:
             {{- if .Values.logsStorageAppstore.claimName }}
             claimName: {{ .Values.logsStorageAppstore.claimName }}
             {{- else }}
             claimName: appstore-logs-pvc
             {{- end }}
+      {{- else }}
+          emptyDir: {}
       {{- end }}
       {{- if and .Values.saml.cache.enabled .Values.saml.cache.claimName }}
         - name: saml-claim

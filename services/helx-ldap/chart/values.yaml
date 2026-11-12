@@ -7,8 +7,8 @@ secret:
   mode: values
 
   # -- Name of a caller-managed HeLx LDAP credentials Secret containing
-  # LDAP_ADMIN_PASSWORD and LDAP_CONFIG_ADMIN_PASSWORD. Set this only when
-  # `secret.mode` is `existingSecret`.
+  # LDAP_ADMIN_PASSWORD, LDAP_CONFIG_ADMIN_PASSWORD and LDAP_APPSTORE_PASSWORD.
+  # Set this only when `secret.mode` is `existingSecret`.
   existingSecret: ""
 
   # -- Key/value pairs used to create the chart-managed HeLx LDAP credentials
@@ -16,6 +16,8 @@ secret:
   # Required keys:
   #   LDAP_ADMIN_PASSWORD: password for the HeLx LDAP directory administrator
   #   LDAP_CONFIG_ADMIN_PASSWORD: password for the cn=config administrator
+  #   LDAP_APPSTORE_PASSWORD: password for the appstore account
+  #     (configuration.appstoreAccount), which appstore binds as
   # Argo CD users should provide stable encrypted values or select ESO mode.
   values: {}
 
@@ -52,11 +54,77 @@ openldap:
   # containers change identity; they write only to emptyDir volumes, which
   # podSecurityContext.fsGroup 1001 keeps writable. On OpenShift, set enabled
   # to false so the SCC allocates IDs.
+  # UNCDSR-182: confirmed via a live crash (bind(6) failed errno=2 -- slapd
+  # couldn't create its pid/args files) and direct image inspection
+  # (jpgouin/openldap, a Bitnami-pattern build) that a single emptyDir
+  # mounted over the whole /opt/bitnami/openldap/var directory wipes out the
+  # var/run subdirectory baked into the image, which slapd needs to already
+  # exist (libopenldap.sh references var/run/slapd.{args,pid} directly).
+  # Mounting an emptyDir at that subdirectory directly, instead of its
+  # parent, avoids wiping anything else out while still making it writable.
+  #
+  # var/data needs no volume at all: it's a symlink (baked into the image) to
+  # /bitnami/openldap/data, already inside the `persistence` PVC this chart
+  # already mounts at /bitnami/openldap -- confirmed via a real test pod that
+  # Kubernetes resolves through a symlink when preparing a mount at its
+  # location, so writes through it already land on that existing, persisted
+  # PVC without any extra mount.
+  #
+  # UNCDSR-182 correction: /opt/bitnami/openldap/share is NOT read-only after
+  # all. On a genuinely fresh install (empty /bitnami/openldap, no live
+  # cluster to test against), libopenldap.sh generates
+  # /opt/bitnami/openldap/share/slapd.ldif on first start; that write was
+  # missed earlier because it was verified only against cdsr-stage, whose
+  # data volume already held an initialized directory, which skips this step
+  # entirely (reported against #66 by PhillipOwen, reproduced with
+  # jpgouin/openldap:2.6.9-fix --read-only). Seed an emptyDir from the
+  # image's own copy of share/ via an init container -- the same seed-then-
+  # mount-over pattern Tycho's emptyDirSeeded:// uses for this exact problem
+  # (see services/appstore/appstore/tycho/model.py) -- rather than granting
+  # the main container a writable root. The init container mounts the seed
+  # volume at a staging path, not at /opt/bitnami/openldap/share itself, so
+  # it can still see the image's real share/ as its copy source; only the
+  # main container's mount replaces share/ outright.
   containerSecurityContext:
     enabled: true
     allowPrivilegeEscalation: false
     runAsUser: 1001
     runAsNonRoot: true
+    readOnlyRootFilesystem: true
+  initContainers:
+    - name: seed-openldap-share
+      image: '{{ include "openldap.image" . }}'
+      imagePullPolicy: '{{ .Values.image.pullPolicy }}'
+      command:
+        - sh
+        - -c
+        # Not "cp -a": preserving the source directory's own timestamps needs
+        # CAP_FOWNER as a non-owning user, which capabilities.drop: [ALL]
+        # denies -- cp still copies every file, but exits 1 on that failed
+        # attribute-preservation step, which Kubernetes then reports as a
+        # crash. Plain -r copies the content without touching timestamps.
+        - cp -r /opt/bitnami/openldap/share/. /openldap-share-seed/
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsUser: 1001
+        runAsNonRoot: true
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      volumeMounts:
+        - name: openldap-share
+          mountPath: /openldap-share-seed
+  extraVolumes:
+    - name: openldap-var-run
+      emptyDir: {}
+    - name: openldap-share
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: openldap-var-run
+      mountPath: /opt/bitnami/openldap/var/run
+    - name: openldap-share
+      mountPath: /opt/bitnami/openldap/share
 
   # Keep the service name stable for HeLx consumers, including appstore's
   # default ldap://openldap URI.
@@ -172,6 +240,40 @@ configuration:
   anonymousAccess:
     enabled: true
 
+  # A dedicated LDAP account appstore binds as instead of the directory admin,
+  # to create accounts at first login (appstore ldap.provision). It can only:
+  #   - read users and groups;
+  #   - add entries in its own branch, ou=<externalOU>,ou=users, with values
+  #     limited by the constraint overlay (uidNumber, gidNumber, home and
+  #     supplementalGroups patterns below; no runAsUser, runAsGroup, fsGroup
+  #     or password);
+  #   - change or delete only entries it created (creatorsName);
+  #   - add, never remove, memberUid values on the group.
+  # A unique overlay also keeps uid and uidNumber unique across ou=users, for
+  # every writer, ldap-sync included. The Job creates the account, its branch
+  # and the group, keeps the account's password current from the credentials
+  # Secret key LDAP_APPSTORE_PASSWORD (required), and applies the ACLs that
+  # include these rules. There is no switch to turn it off: appstore would
+  # then need the directory admin's password.
+  appstoreAccount:
+    # -- The account is cn=<name>,<baseDN>.
+    name: appstore
+    # -- The branch appstore adds accounts to: ou=<externalOU>,ou=users,<baseDN>.
+    externalOU: external
+    # -- The posixGroup appstore may add members to (cn=<group>,ou=groups,<baseDN>);
+    # created by the Job when missing.
+    group: helx-users
+    groupGidNumber: 1025
+    # -- Patterns (regular expressions) values in the branch must match.
+    uidNumberPattern: "^20[0-9]{5}$"
+    gidNumberPattern: "^1025$"
+    homeDirectoryPattern: "^/home/[a-z0-9][a-z0-9._-]*$"
+    supplementalGroupsPattern: "^0$"
+
+  # Module paths for the overlays the appstore account uses.
+  uniqueModulePath: /opt/bitnami/openldap/lib/openldap/unique.so
+  constraintModulePath: /opt/bitnami/openldap/lib/openldap/constraint.so
+
   # The Job connects to openldap.fullnameOverride by default. Set this only
   # when the service name is intentionally different from the chart name.
   serviceName: ""
@@ -200,6 +302,11 @@ configuration:
       runAsGroup: 1001
       runAsNonRoot: true
       allowPrivilegeEscalation: false
+      # UNCDSR-182: readOnlyRootFilesystem: true is safe here -- configure.sh
+      # only runs ldapsearch/ldapmodify against the LDAP server and reads its
+      # LDIFs from the read-only configure-script/ldif volume mounts, with no
+      # local file writes.
+      readOnlyRootFilesystem: true
       capabilities:
         drop:
           - ALL

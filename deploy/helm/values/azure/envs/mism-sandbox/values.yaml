@@ -7,6 +7,20 @@ appstore:
   django:
     ALLOW_SAML_LOGIN: "false"                    # D3: Keycloak OIDC (realm mism), not SAML
     ALLOW_DJANGO_LOGIN: "true"                   # break-glass admin login
+    # Keycloak login (realm mism, which forwards to CILogon).
+    OIDC_DISPLAY_NAME: "MDSC Login"              # button label; the provider id stays keycloak. Never "CILogon"
+    USERNAME_FROM_LDAP: "true"                   # username = uid of the LDAP entry whose mail is the login email
+    SOCIALACCOUNT_EMAIL_AUTHENTICATION: "true"   # a login attaches to the Django user with the same verified email
+  ldap:
+    # ldap.enabled, uri and searchBase come from the defaults (ldap://openldap, ou=users).
+    groupDN: cn=helx-users,ou=groups,dc=example,dc=org   # the allow-list: only its members get in
+    # helx-ldap's add-only appstore account (helx-ldap.configuration.appstoreAccount),
+    # not the directory admin: it can only add accounts in ou=external.
+    bindDN: cn=appstore,dc=example,dc=org
+    bindPasswordSecret:
+      name: openldap-credentials                         # helx-ldap's Secret (key LDAP_APPSTORE_PASSWORD)
+    provision:
+      emailDomains: [duke.edu]                           # LDAP account created at first login
   tycho:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
   userStorage:

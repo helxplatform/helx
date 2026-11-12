@@ -6,14 +6,27 @@ olcAccess: {0}to attrs=userPassword,shadowLastChange
   by dn="cn=admin,dc=example,dc=org" write
   by anonymous auth
   by * none
-olcAccess: {1}to dn.subtree="ou=users,dc=example,dc=org"
+olcAccess: {1}to dn.base="ou=external,ou=users,dc=example,dc=org" attrs=children
+  by dn="cn=admin,dc=example,dc=org" write
+  by dn="cn=appstore,dc=example,dc=org" write
+  by * break
+olcAccess: {2}to dn.subtree="ou=users,dc=example,dc=org"
+  by dn="cn=admin,dc=example,dc=org" write
+  by dnattr=creatorsName write
   by anonymous read
-  by self read
+  by users read
   by * none
-olcAccess: {2}to dn.subtree="ou=groups,dc=example,dc=org"
+olcAccess: {3}to dn.base="cn=helx-users,ou=groups,dc=example,dc=org" attrs=memberUid
+  by dn="cn=admin,dc=example,dc=org" write
+  by dn="cn=appstore,dc=example,dc=org" =arscxd
   by anonymous read
-  by self read
+  by users read
   by * none
-olcAccess: {3}to *
+olcAccess: {4}to dn.subtree="ou=groups,dc=example,dc=org"
+  by dn="cn=admin,dc=example,dc=org" write
+  by anonymous read
+  by users read
+  by * none
+olcAccess: {5}to *
   by dn="cn=admin,dc=example,dc=org" write
   by * none

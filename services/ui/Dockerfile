@@ -1,7 +1,7 @@
 ###################
 # Build environment
 ###################
-FROM node:lts-bullseye-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 ARG REACT_APP_WORKSPACES_ENABLED=true
 ENV REACT_APP_WORKSPACES_ENABLED=$REACT_APP_WORKSPACES_ENABLED
@@ -26,7 +26,9 @@ COPY --from=builder /usr/src/app/build/ /usr/share/nginx/static/
 # RUN mv /usr/share/nginx/static/frontend/index.html /usr/share/nginx/html/
 
 RUN apk upgrade
-RUN apk add bash
+# ca-certificates-bundle 20261020 drops the compromised eMudhra roots
+# (CVE-2026-111943); the floor fails the build instead of shipping an older one.
+RUN apk add bash 'ca-certificates-bundle>=20261020-r0'
 
 WORKDIR /usr/src/app
 COPY bin /usr/src/app/bin

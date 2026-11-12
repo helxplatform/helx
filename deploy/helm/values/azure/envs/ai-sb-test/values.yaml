@@ -68,6 +68,7 @@ user-mutator:
                 source: configmap://biome-model-config
             volumeMounts:
               - name: azure-codex-config
-                mountPath: /etc/codex
+                mountPath: /etc/codex/config.toml
+                subPath: config.toml
               - name: biome-model-config
                 mountPath: /etc/bdf-pz

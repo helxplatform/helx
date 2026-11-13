@@ -47,6 +47,13 @@ appstore-prepuller:
   appRegistry:
     branch: helx-mism-sandbox-azure              # D4
     brand: helx                                  # must equal the appstore brand (D7 option B)
+  daemonset:
+    # The chart default tolerates every taint, including the cluster
+    # autoscaler's ToBeDeletedByClusterAutoscaler, so the puller kept pulling
+    # the whole catalog onto nodes being removed. A list here replaces the
+    # chart's list; the DaemonSet controller still adds its own tolerations.
+    # Required before enabling the cluster autoscaler on the app node pool.
+    tolerations: []
 
 ldap-sync:
   searchBootstrap:

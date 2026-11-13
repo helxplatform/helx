@@ -69,7 +69,7 @@ data:
             host: {{ .host | quote }}
             port: {{ .port }}
             username: {{ .username | quote }}
-            password: {{ .password | quote }}
+            passwordFile: "/etc/ldap-sync/ldap-secrets/POSTGRES_USER_PASSWORD"
             database: {{ .database | quote }}
             sslmode: {{ .sslmode | default "disable" | quote }}
             matchObjectClass: {{ .matchObjectClass | default "helxUser" | quote }}

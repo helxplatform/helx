@@ -223,10 +223,14 @@ config:
     # get/create/update on Secrets.
     postgresUser:
       enabled: false
-      # Postgres admin connection (admin = the postgres account).
+      # Postgres admin connection (admin = the postgres account). The admin
+      # password is read from POSTGRES_USER_PASSWORD in the Secret selected by
+      # secret.mode and is never rendered into the ConfigMap.
       host: ""
       port: 5432
       username: postgres
+      # Deprecated: copied into a chart-managed Secret as
+      # POSTGRES_USER_PASSWORD. Set secret.values.POSTGRES_USER_PASSWORD instead.
       password: ""
       database: ""
       sslmode: disable

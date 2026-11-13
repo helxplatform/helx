@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"sort"
 	"sync"
 	"testing"
@@ -208,7 +209,7 @@ func TestPG_FirstCreate(t *testing.T) {
 		t.Errorf("unexpected revokes: %v", admin.revokes)
 	}
 
-	s, err := secrets.Get(context.Background(), "ns", "pg_creds_jdoe")
+	s, err := secrets.Get(context.Background(), "ns", "pg-creds-jdoe")
 	if err != nil {
 		t.Fatalf("expected secret created: %v", err)
 	}
@@ -250,13 +251,13 @@ func TestPG_PasswordReusedOnResync(t *testing.T) {
 	if err := p.Apply(context.Background(), userEvent("jdoe", nil)); err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
-	s1, _ := secrets.Get(context.Background(), "ns", "pg_creds_jdoe")
+	s1, _ := secrets.Get(context.Background(), "ns", "pg-creds-jdoe")
 	pw1 := string(s1.Data["password"])
 
 	if err := p.Apply(context.Background(), userEvent("jdoe", nil)); err != nil {
 		t.Fatalf("second Apply: %v", err)
 	}
-	s2, _ := secrets.Get(context.Background(), "ns", "pg_creds_jdoe")
+	s2, _ := secrets.Get(context.Background(), "ns", "pg-creds-jdoe")
 	pw2 := string(s2.Data["password"])
 
 	if pw1 != pw2 {
@@ -296,7 +297,7 @@ func TestPG_ReconcileRevokesDroppedGroup(t *testing.T) {
 func TestPG_CreateAlreadyExistsBenign(t *testing.T) {
 	admin := newFakePGAdmin()
 	secrets := newFakeSecretClient()
-	secrets.createErr = apierrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, "pg_creds_jdoe")
+	secrets.createErr = apierrors.NewAlreadyExists(schema.GroupResource{Resource: "secrets"}, "pg-creds-jdoe")
 	p := newTestPGPlugin(t, admin, secrets)
 
 	if err := p.Apply(context.Background(), userEvent("jdoe", nil)); err != nil {
@@ -340,4 +341,31 @@ func equalStrs(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestPG_LoadPasswordFile(t *testing.T) {
+	path := t.TempDir() + "/password"
+	if err := os.WriteFile(path, []byte(" admin-secret \n"), 0600); err != nil {
+		t.Fatalf("write password: %v", err)
+	}
+	cfg := postgresUserConfig{Password: "inline", PasswordFile: path}
+	if err := loadPostgresUserPassword(&cfg); err != nil {
+		t.Fatalf("loadPostgresUserPassword: %v", err)
+	}
+	if cfg.Password != "admin-secret" {
+		t.Errorf("password = %q, want file contents", cfg.Password)
+	}
+
+	cfg = postgresUserConfig{Password: "inline"}
+	if err := loadPostgresUserPassword(&cfg); err != nil {
+		t.Fatalf("loadPostgresUserPassword without file: %v", err)
+	}
+	if cfg.Password != "inline" {
+		t.Errorf("password = %q, want inline value kept", cfg.Password)
+	}
+
+	cfg = postgresUserConfig{PasswordFile: t.TempDir() + "/missing"}
+	if err := loadPostgresUserPassword(&cfg); err == nil {
+		t.Error("expected an error for a missing password file")
+	}
 }

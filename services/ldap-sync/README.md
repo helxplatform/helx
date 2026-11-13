@@ -185,13 +185,15 @@ contain these keys:
 
 - `SOURCE_BIND_PASSWORD`
 - `TARGET_BIND_PASSWORD`
+- `POSTGRES_USER_PASSWORD`, only when `config.plugins.postgresUser.enabled`
+  is true: the admin password the postgres-user plugin connects with
 
 Choose one mode:
 
 1. **Existing Secret**: set `secret.mode: existingSecret` and name the
    caller-managed Secret in `secret.existingSecret`. The chart does not create
    or modify that Secret.
-2. **Chart values**: set `secret.mode: values` and provide both keys under
+2. **Chart values**: set `secret.mode: values` and provide the keys under
    `secret.values`. The chart creates `<release>-secrets` and mounts the values
    as files.
 3. **External Secrets Operator**: set `secret.mode: externalSecret`, provide
@@ -199,10 +201,12 @@ Choose one mode:
 
 The generated application config references the mounted files at
 `/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD` and
-`/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD`. The deprecated
-`config.source.bindPassword` and `config.target.bindPassword` values are only
-copied into a chart-managed Secret for upgrade compatibility; they are never
-rendered into the ConfigMap.
+`/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD`, and the postgres-user
+plugin reads `/etc/ldap-sync/ldap-secrets/POSTGRES_USER_PASSWORD`. The
+deprecated `config.source.bindPassword`, `config.target.bindPassword`, and
+`config.plugins.postgresUser.password` values are only copied into a
+chart-managed Secret for upgrade compatibility; they are never rendered into
+the ConfigMap.
 
 ## Building
 

@@ -48,6 +48,9 @@ func buildPlugin(cfg PluginConfig) (Plugin, error) {
 		if err := decodeOptions(cfg.Options, &opts); err != nil {
 			return nil, fmt.Errorf("postgres-user: decode options: %w", err)
 		}
+		if err := loadPostgresUserPassword(&opts); err != nil {
+			return nil, err
+		}
 		opts = opts.withDefaults()
 		dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
 			opts.Username, opts.Password, opts.Host, opts.Port, opts.Database, opts.SSLMode)

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -28,12 +29,13 @@ type pgRoleSpec struct {
 // options block.
 type postgresUserConfig struct {
 	// Postgres admin connection.
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	Database string `yaml:"database"`
-	SSLMode  string `yaml:"sslmode"`
+	Host         string `yaml:"host"`
+	Port         int    `yaml:"port"`
+	Username     string `yaml:"username"`
+	Password     string `yaml:"password"`
+	PasswordFile string `yaml:"passwordFile"`
+	Database     string `yaml:"database"`
+	SSLMode      string `yaml:"sslmode"`
 
 	// Behavior.
 	MatchObjectClass string                `yaml:"matchObjectClass"`
@@ -73,6 +75,20 @@ func (c postgresUserConfig) withDefaults() postgresUserConfig {
 		c.Port = defaultPGPort
 	}
 	return c
+}
+
+// loadPostgresUserPassword replaces an inline admin password with the contents
+// of a Secret-mounted file, so Kubernetes deployments keep it out of ConfigMaps.
+func loadPostgresUserPassword(c *postgresUserConfig) error {
+	if c.PasswordFile == "" {
+		return nil
+	}
+	passwordBytes, err := os.ReadFile(c.PasswordFile)
+	if err != nil {
+		return fmt.Errorf("postgres-user: read password file: %w", err)
+	}
+	c.Password = strings.TrimSpace(string(passwordBytes))
+	return nil
 }
 
 // pgAdmin is the slice of Postgres admin operations the plugin uses. Tests

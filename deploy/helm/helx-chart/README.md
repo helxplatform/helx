@@ -88,6 +88,7 @@ NAMESPACE=ai-sb-test
 helm registry login ghcr.io
 export LDAP_ADMIN_PASSWORD='choose-an-admin-password'
 export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
+export LDAP_APPSTORE_PASSWORD='choose-an-appstore-password'
 bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
 
@@ -126,8 +127,6 @@ You can view the README.md files for each subchart to see the variables that exi
 | appstore.tycho.appRoutingMode | string | `"proxy"` | routing data plane for Tycho-launched apps: "proxy" (ClusterIP + /private, resolved by appstore via resty) or "ambassador" (legacy). |
 | backup-pvc-cronjob.enabled | bool | `false` | enable/disable deployment of backup-pvc-cronjob |
 | global.ambassador_service_name | string | `"ambassador"` |  |
-| global.redis.existingSecret | string | `"redis-secret"` |  |
-| global.redis.existingSecretPasswordKey | string | `"redis-password"` |  |
 | global.restartr_api_service_name | string | `"helx-restartr-api-service"` |  |
 | global.stdnfsPvc | string | `"stdnfs"` |  |
 | helx-ldap.enabled | bool | `true` | enable/disable deployment of the HeLx LDAP service |

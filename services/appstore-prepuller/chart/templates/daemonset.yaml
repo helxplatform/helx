@@ -39,5 +39,7 @@ spec:
       containers:
         - name: pause
           image: {{ .Values.daemonset.pauseImage }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.daemonset.resources | nindent 12 }}

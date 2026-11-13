@@ -26,6 +26,13 @@ service:
   serverName: _
   # nodePort: 31337
 
+# -- Container securityContext, applied to every container this chart renders.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+
 resources:
   limits:
     cpu: 100m
@@ -65,6 +72,12 @@ ingress:
       # nginx.ingress.kubernetes.io/whitelist-source-range: "172.25.0.0/16,152.54.0.0/22,152.54.8.0/23,152.54.6.0/24,152.54.4.0/23,152.54.15.132/32"
 
 
+# -- nginx's pid file, proxy/fastcgi/etc. temp dirs, and access/error logs
+# (see nginx-configmap.yaml) need a writable mount now that the root
+# filesystem is read-only. Leave claimName unset to use an emptyDir
+# (default -- these are ephemeral working files, not application data that
+# needs to survive a pod restart). Set claimName to persist them on a PVC
+# instead.
 varStorage:
   existingClaim: false
   claimName:
@@ -139,16 +152,13 @@ stubStatus:
 dnsResolver: kube-dns.kube-system.svc.cluster.local
 
 global:
-  ambassador_service_name: ambassador
-  dug_web_service_name: dug-web
-  dug_search_client_service_name: dug-search-client
   restartr_api_service_name: restartr-api-service
   # -- PROTOTYPE (ambassador removal): direct backend service names that
   # were previously reached only through the "ambassador" service.
-  # appstore_service_name / ui_service_name: leave null to auto-derive — the
-  # bare chart name ("appstore"/"ui") when resty is deployed on its own, or
-  # "<release>-appstore"/"<release>-ui" when deployed as a subchart of the
-  # umbrella. Set explicitly only if your Service names differ.
+  # appstore_service_name / ui_service_name: leave null to use the bare chart
+  # name ("appstore"/"ui"), which is what those charts name their Service. Set
+  # explicitly only when appstore.fullnameOverride or ui.fullnameOverride is
+  # set, to the same value.
   appstore_service_name:
   ui_service_name:
   appstore_sockets_service_name: appstore-sockets-service

@@ -159,14 +159,27 @@ apply_candidate_values() {
   "$PYTHON" .github/scripts/ci.py candidate-values "${arguments[@]}"
 }
 
+# Lint values come from .github/helm/lint-values/<chart name>.yaml; the
+# umbrella's are composed from its dependencies' files, so ci.py writes them.
 lint_chart() {
   local chart_dir=$1
-  local chart_name=$2
-  local values_file=".github/helm/lint-values/$chart_name.yaml"
-  local -a arguments=("$chart_dir")
+  local values_file status=0
 
-  [[ -f "$values_file" ]] && arguments+=(--values "$values_file")
-  helm lint "${arguments[@]}"
+  values_file=$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lint-values.XXXXXX")
+  "$PYTHON" .github/scripts/ci.py lint-values "$chart_dir" --output "$values_file"
+  helm lint "$chart_dir" --values "$values_file" || status=$?
+  rm -f "$values_file"
+  return "$status"
+}
+
+# Only the umbrella assembles every service chart, and only it has
+# per-environment values files, so it is the one chart rendered here. The
+# dependencies prepare_dependencies vendored are what it renders.
+check_privilege_escalation() {
+  local chart_dir=$1
+
+  [[ "${chart_dir%/}" == "$UMBRELLA_CHART" ]] || return 0
+  "$PYTHON" .github/scripts/ci.py check-privilege-escalation "$chart_dir"
 }
 
 package_chart() {
@@ -176,9 +189,9 @@ package_chart() {
   local package_dir package pointer
 
   # CHART_PACKAGE_DIR puts the archive somewhere the caller can predict, so a
-  # later step -- make helm-deploy -- can deploy exactly what this build
-  # produced. CI leaves it unset: it reads the path from $GITHUB_OUTPUT and has
-  # no second invocation to hand it to.
+  # later step -- make helm-deploy-from-local -- can deploy exactly what this
+  # build produced. CI leaves it unset: it reads the path from $GITHUB_OUTPUT
+  # and has no second invocation to hand it to.
   if [[ -n "${CHART_PACKAGE_DIR:-}" ]]; then
     package_dir="$CHART_PACKAGE_DIR"
     mkdir -p "$package_dir"
@@ -244,7 +257,8 @@ main() {
     apply_candidate_values "$chart_dir"
   fi
 
-  lint_chart "$chart_dir" "$chart_name"
+  lint_chart "$chart_dir"
+  check_privilege_escalation "$chart_dir"
   package_chart "$chart_dir" "$chart_name" "$chart_version"
 }
 

@@ -31,7 +31,7 @@ the only way to close that window.
   "targetName" $targetName
   "values" (dict)
   "migration" (dict "legacyName" $legacySecretName)
-) | fromYaml -}}
+) | fromJson -}}
 {{- $data := default (dict) $payload.data -}}
 {{- if empty (default "" (get $data "postgres-password")) -}}
   {{- fail (printf "ldap-sync: Secret %q must contain postgres-password before migration" $legacySecretName) -}}

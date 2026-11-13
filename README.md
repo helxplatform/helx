@@ -1,10 +1,12 @@
 ## HeLxPlatform
+
 This is the HeLxplatform monorepo. From July 2026 and onward all changes to the code should flow through here. In effort to make HeLx simple to maintain, deploy and automate the platform has been united into a Majestic Monorepo!
+
 ## DevEx
 
 Everything CI does can be run locally with the same scripts CI uses, so you can
 get a green answer before pushing. The CI internals are documented separately in
-[`.github/README.md`](.github/README.md); this section is the working developer's
+[`.github/CI.md`](.github/CI.md); this section is the working developer's
 view.
 
 ### Prerequisites
@@ -13,8 +15,8 @@ You need `git`, `helm` 3.x, and Python 3 on your PATH. CI pins Helm 3.18.6 and
 Python 3.12; anything close works locally. Docker is only needed to build images.
 
 Python tooling lives in a project virtualenv, which `make setup` ensures is
-provisioned automatically, along with git remotes/service subtrees and git hooks. Run
-`make setup` to set these up. Python tooling happens once and is re-run only
+provisioned automatically, along with git remotes/service subtrees and git hooks.
+Run `make setup` to set these up. Python tooling happens once and is re-run only
 when `.github/requirements-ci.txt` changes.
 
 Other Python targets also provision `.venv` automatically the first time, so you
@@ -76,7 +78,410 @@ in the right group no matter where it sits in the file. Comments cannot expand
 | `make build-helx-chart` | Package the umbrella chart |
 | `make docker-build SERVICE=<name>` | Build one service image as CI builds it |
 | `make candidate-version` | Print the version the candidate channel publishes under |
-| `make help` | Help documentation
+| `make helm-deploy-from-ghcr` | Deploy the current `develop` candidate from GHCR |
+| `make helm-deploy-from-local` | Deploy the umbrella chart `make build-helx-chart` packaged |
+| `make uninstall-release RELEASE=<name>` | Uninstall a release and delete the storage and credentials Helm leaves behind |
+| `make help` | List the setup targets and index the rest by topic |
+
+### Before you push
+
+```bash
+make pre-push
+```
+
+That runs the unit tests, `validate-config`, the version gate, the lock check,
+and a whitespace check. `make setup` also points `core.hooksPath` at
+[`.githooks/`](.githooks), so `git push` runs the same checks. No package
+manager, nothing downloaded. Bypass a single push with
+`git push --no-verify`, and uninstall with `git config --unset core.hooksPath`.
+
+The umbrella chart's version only has to sit **above the last release**, not
+increase on every change. So the first pull request after a release picks the
+next version — patch, minor, or major, whichever fits — and later pull requests
+leave it alone. Raising it starts publishing a new `<version>-develop` candidate
+channel; `make candidate-version` tells you which is current. Umbrella
+dependency pins still have to move with the charts they point at.
+
+The version gate compares against `develop` by default and includes uncommitted
+and untracked files. That last part matters: without it a chart file you have
+created but not yet committed is invisible, and a local pass can still fail in
+CI. Override with `BASE=<ref>`, or `CHECK_VERSIONS_FLAGS=` for committed-only.
+It also fetches `origin main` first, because the release floor is read from
+`origin/main` and the `v*` tags; if the fetch fails it warns and uses what you
+have.
+
+### Values Files
+
+`make helm-deploy-from-ghcr` and `make helm-deploy-from-local` both take values
+files from two places, applied in this order:
+
+1. every path listed in `deploy/local-dev/local-values-files.env`
+2. every path in `VALUES="a.yaml b.yaml"`, so those win on any shared key
+
+That first file is a useful place to enumerate local values files. Local
+deploys usually need several values files, including ones holding secrets,
+and retyping `--values` for each of them every time is how they get
+forgotten. It is one path per line, each relative to the repository root,
+with `~/` expanded for you; blank lines and `#` comments are ignored. It
+is gitignored, so your cluster's paths and secrets stay out of the
+repository. Start from the sample:
+
+```bash
+cp deploy/local-dev/local-values-files.env.sample deploy/local-dev/local-values-files.env
+```
+
+Then list your own files in it. For example:
+
+```text
+# deploy/local-dev/local-values-files.env
+deploy/helm/values/azure/defaults/values.yaml
+deploy/helm/values/azure/envs/ai-sb-test/values.yaml
+~/helm-values/ai-sandbox/ai-sb-test-modern/secrets.yaml
+...
+```
+
+A missing list, an empty one, or a line naming a file that is not there is a
+warning rather than an error — but since the usual result is a release quietly
+missing its secrets, the deploy asks before continuing.
+
+### Deploying from GHCR
+
+Every push to `develop` publishes a mutable "candidate" of the umbrella, pinned
+to that commit's images, at
+`oci://ghcr.io/helxplatform/helm-charts/helx:<umbrella-version>-develop`. It is
+a SemVer prerelease, so it always sorts below the matching release. To deploy
+the current one:
+
+```bash
+make chart-registry-login
+make helm-deploy-from-ghcr RELEASE=<release-name> NAMESPACE=<deploy-namespace>
+```
+
+`make chart-registry-login` runs `helm registry login` for the host part of
+`CHART_REGISTRY`, which is `ghcr.io` for the default
+`oci://ghcr.io/helxplatform/helm-charts`. Helm logs in to a registry host, not
+to a path inside it, and that one login covers every pull from the host. For
+GHCR the username is your GitHub username and the password a personal access
+token (classic) with the `read:packages` scope. Helm keeps the login, so you
+only repeat this when the token changes or expires.
+
+By default, the version deployed is the current candidate version, which comes
+from concatenating the umbrella's version in `Chart.yaml` on `origin/develop`
+with `-develop`. On an up-to-date `develop` checkout, this prints the candidate
+version without deploying anything:
+
+```bash
+make candidate-version
+```
+
+`CHART_VERSION=<version>` deploys any other published umbrella version
+instead, such as a release. Because a candidate is republished under the same
+version on every push, you get whatever CI published last; a `develop` run
+still in progress has not replaced it yet.
+
+Before deploying it prints the chart, version, release, context, namespace, and
+values files, reminds you to be logged in to GHCR, and asks for a `y`
+confirmation every time, warnings or not. `ASSUME_YES=1` answers it in advance
+for a non-interactive run; with no terminal to ask on, the deploy cancels
+rather than assuming yes. To pass in your values files, see
+[Values Files](#values-files).
+`HELM_FLAGS` works as it does for a local build; see [Installing a local
+build](#installing-a-local-build).
+
+For deploying uncommitted work, see the next section.
+
+### Deploying HeLx with your own build of one or more services
+
+A Helm chart with dependencies cannot be rendered or installed from a directory
+until the dependency archives are physically present in its `charts/`
+subdirectory. Helm does not fetch them at install time. `make sync-locks` writes
+only `Chart.lock`, which is metadata. `make build-helx-chart` is what actually
+vendors every dependency and produces a self-contained `.tgz` you can install
+anywhere.
+
+**For work that is not pushed yet**, or if you just want to build everything locally:
+
+1. Make your changes, then bump the service chart `version:` and its pin in
+   `deploy/helm/helx-chart/Chart.yaml`. `make ci-validate-everything` will tell
+   you if you miss either one.
+2. Set environment variables for make targets. Only `SERVICES` is required,
+   but set `TAG` as well: left unset, it is recomputed from HEAD on every
+   command, so a commit between building the images and packaging the chart
+   leaves the chart pointing at a tag nothing was built under.
+   `IMAGE_REGISTRY` is optional and defaults to Harbor.
+
+   ```bash
+   export SERVICES="user-mutator ui"  # to build just these services; otherwise use "all"
+   export TAG=test-my-branch  # default test-<short-sha>
+   # export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform  # only for a registry other than Harbor
+   ```
+
+3. Build images for just the services you changed:
+
+   ```bash
+   make build-helx-images
+   ```
+
+   A service with several image variants, like `appstore-sockets`, builds all of them. 
+   If you changed enough that listing them is a chore, `SERVICES=all` stands for every
+   service that builds an image; it works on every step below, and cannot be combined
+   with individual names.
+
+   Images build for `linux/amd64`, the one architecture CI publishes, no matter
+   what your workstation is. On Apple Silicon that means an emulated build, so
+   it is slower than a native one. Override `IMAGE_PLATFORM` when the cluster
+   you are aiming at is not amd64 -- a local `kind`/`minikube`/`k3d` on Apple
+   Silicon wants `IMAGE_PLATFORM=linux/arm64`. Getting this wrong is not subtle:
+   the pod starts and the container exits with `exec format error`.
+4. Get those images to your cluster. For a local cluster, load them directly,
+   no registry involved:
+
+   ```bash
+   make load-helx-images
+   ```
+
+   `kind`, `minikube`, and `k3d` are auto-detected; override with
+   `CLUSTER_TOOL=` and `CLUSTER_NAME=`. For Sterling/Azure/ASHE, push to Harbor
+   instead (`docker login containers.renci.org`):
+
+   ```bash
+   make push-helx-images
+   ```
+
+   To use a registry other than Harbor (your own ACR, for example) set
+   `IMAGE_REGISTRY` to its base URL + project path, after logging in to it.
+   By convention, the project path usually used is `helxplatform`, to match
+   the Harbor project name.
+
+   ```bash
+   az acr login -n myregistry
+   export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   make build-helx-images push-helx-images
+   ```
+
+   The value is a host, an optional port, and an optional project path;
+   `localhost:5000` and `myregistry.azurecr.io/helxplatform` are both fine, and
+   an `https://` prefix is dropped for you. Repository names are unchanged
+   underneath it, so `ui` publishes as `myregistry.azurecr.io/helxplatform/helx-ui`.
+
+   Because the project path is easy to forget and a missing one yields
+   references nothing was ever pushed to, a remote registry not ending in
+   `helxplatform` prints a warning and continues. Ignore it if you meant it. A
+   `localhost` registry never warns, since those serve from their root.
+   Set it on the build too: the images get tagged with the registry/project path
+   at build time, so pushing with a different registry finds nothing.
+5. Package the umbrella with those services pinned to your tag:
+
+   ```bash
+   make build-helx-chart
+   ```
+
+   Every umbrella dependency already resolves from your working tree, so this
+   picks up your modified charts. Passing `SERVICES` additionally writes your
+   image tag into the packaged values for **only those services** — everything
+   else stays on its released `v<appVersion>`. No `--set` flags needed.
+
+   `SERVICES` rewrites image tags and nothing else. It does not set
+   `enabled: true` for the services you name or `enabled: false` for the rest —
+   the ones you leave out are still installed, just on their released images.
+   What gets deployed is decided only by the `<name>.enabled` values in
+   [`deploy/helm/helx-chart/values.yaml`](deploy/helm/helx-chart/values.yaml)
+   and whatever your own `--values` file says. To install just what you
+   rebuilt, turn the others off yourself at install time:
+
+   ```bash
+   helm upgrade --install helx /path/to/helx-<version>-local.tgz \
+     -n <deploy-namespace> --values my-values.yaml \
+     --set appstore.enabled=false --set appstore-sockets.enabled=false
+   ```
+
+   If you pushed to your own registry, pass it here as well, or the chart will
+   still send the cluster to Harbor for those images (unless you `export`ed
+   these variables to your shell session):
+
+   ```bash
+   make build-helx-chart SERVICES="user-mutator ui" \
+     IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
+   ```
+
+   That writes both the tag and the repository for those services. Everything
+   outside `SERVICES` keeps pulling from Harbor, so the cluster needs
+   credentials for both registries unless you mirrored the rest yourself.
+6. You can install the `.tgz` it prints:
+
+   ```bash
+   helm upgrade --install helx /path/to/helx-<version>-local.tgz \
+     -n <deploy-namespace> --values my-values.yaml
+   ```
+
+   Or let `make helm-deploy-from-local` find that archive and your values
+   files for you; see [Deploying and tearing down a local
+   build](#deploying-and-tearing-down-a-local-build).
+
+### Deploying and tearing down a local build
+
+`make helm-deploy-from-local` installs what `make build-helx-chart` just
+packaged, and `make uninstall-release` removes an installed release along with
+most of the storage and credentials Helm deliberately leaves behind. Both talk
+to whatever cluster your current `kubectl` context points at, and both print the
+context and namespace before they do anything. Everything below about
+`RELEASE`, `NAMESPACE`, `ASSUME_YES`, and `HELM_FLAGS` applies to
+`make helm-deploy-from-ghcr` too.
+
+#### Installing a local build
+
+```bash
+make build-helx-chart SERVICES="user-mutator ui"
+make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace>
+```
+
+You do not need to name the archive. `build-helx-chart` writes its path to
+`dist/charts/.helx-chart.path`, and `helm-deploy-from-local` reads it from
+there, so the two always agree on which build is being installed. If that
+pointer is missing, or names an archive that has been deleted, the deploy
+stops and tells you to package again.
+
+`RELEASE` defaults to `helx`. `NAMESPACE` defaults to whatever your context
+selects; if you don't have a selected namespace, the deploy stops rather than
+assuming something.
+
+To pass in your values files, see [Values Files](#values-files). The deploy
+asks for a `y` confirmation only when that values-file check warns.
+`ASSUME_YES=1` answers it in advance for a non-interactive run; with no
+terminal to ask on, the deploy cancels rather than assuming yes.
+
+`HELM_FLAGS` is passed through to `helm upgrade --install` last, which is how
+you get a dry run:
+
+```bash
+make helm-deploy-from-local RELEASE=helx NAMESPACE=<deploy-namespace> \
+  HELM_FLAGS="--dry-run --debug"
+```
+
+#### Tearing down
+
+```bash
+make uninstall-release RELEASE=helx NAMESPACE=<deploy-namespace>
+```
+
+`helm uninstall` on its own does not leave the namespace clean. The
+chart-managed Secrets are annotated `helm.sh/resource-policy: keep`, so that
+handing a Secret's ownership to `existingSecret` or External Secrets does not
+delete the live credentials mid-migration. The `data-*` claims belong to
+StatefulSet `volumeClaimTemplates`, which Helm never owned in the first place.
+All of that survives the uninstall and is then adopted by the next install,
+which is exactly wrong when you are trying to start clean.
+
+So this target uninstalls the release and then deletes those leftovers:
+
+| Variable | Default |
+| --- | --- |
+| `UNINSTALL_PVCS` | `appstore-postgresql-pvc`, `data-$(RELEASE)-postgresql-0`, `data-$(RELEASE)-ldap-sync-postgres-0`, `data-openldap-0` |
+| `UNINSTALL_SECRETS` | `$(RELEASE)-appstore-secrets`, `$(RELEASE)-appstore-sockets`, `$(RELEASE)-ldap-sync-secrets`, `$(RELEASE)-postgresql`, `openldap-credentials`, `pgadmin-env` |
+
+`appstore-postgresql-pvc` is the one entry Helm normally deletes with the
+release; it is listed so that a copy left behind by an older install goes too.
+
+The shared user storage claim `stdnfs` also carries `helm.sh/resource-policy:
+keep` and survives the uninstall, but it is deliberately left off the default
+list: it holds every user's home directory, and on a dynamically provisioned
+volume deleting the claim deletes the files with it. Name it to delete it:
+
+```bash
+make uninstall-release RELEASE=helx \
+  UNINSTALL_PVCS="appstore-postgresql-pvc stdnfs data-helx-postgresql-0 data-helx-ldap-sync-postgres-0 data-openldap-0"
+```
+
+or simply delete it manually after using `make uninstall-release`.
+
+Only the names that actually exist are touched, and everything found is listed
+for confirmation before anything is deleted:
+
+```text
+Uninstalling helx
+  context   my-cluster
+  namespace my-namespace
+  release   installed
+  pvcs      appstore-postgresql-pvc data-helx-postgresql-0
+  secrets   helx-appstore-secrets pgadmin-env
+Deleting those claims destroys the data in them; this cannot be undone.
+Proceed? [y/N]
+```
+
+`ASSUME_YES=1` skips that prompt; with no terminal to ask on, the target
+cancels rather than assuming yes.
+
+Unlike every other target here, `RELEASE` has to be named explicitly — the
+`helx` default is not assumed for a command that deletes data. `NAMESPACE`
+does resolve exactly as it does for the deploy, though.
+
+A release that is already gone is not an error: the uninstall is skipped and
+only the leftovers are deleted, which is what lets this finish a teardown that
+stopped halfway. If nothing is there at all, it says so and exits cleanly.
+
+Set either variable to override the list, or to empty to leave that kind of
+resource alone:
+
+```bash
+make uninstall-release RELEASE=helx UNINSTALL_PVCS=
+```
+
+Two things it deliberately does not do. It deletes nothing the charts did not
+create, `PersistentVolume`s included: a `Retain` volume outlives its claim, and
+removing it is yours to do. And it takes no `HELM_FLAGS` — there is no dry run,
+because the confirmation listing already is one.
+
+### Artifact Cache
+
+If deploying to an environment like ASHE, where the GitHub for `helx-apps` is
+not accessible, you can use the artifact cache to host `helx-apps` within your
+namespace. Get started by cloning the artifact-cache repo, installing the chart,
+and running `make archive`:
+
+```bash
+git clone https://github.com/helxplatform/artifact-cache
+cd artifact-cache
+helm install artifact-cache -n <namespace> ./chart
+set -a && source .env.sample && export NAMESPACE=<namespace>
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Before running the next command, make sure the actual `helx-apps` repo at
+`https://github.com/helxplatform/helx-apps.git` has a branch that contains the 
+context data you want to deploy, with a brand and the apps all the way you
+want them. Once that's the case, run this:
+
+```bash
+make archive
+```
+
+Then, add these lines to your environment's override values file:
+
+```yaml
+resty:
+  artifactCache:    # <------ 
+    enabled: true   # <------ 
+```
+
+and change your `appstore:tycho:externalAppRegistryRepo:` and
+`appstore-prepuller:appRegistry:repo:` values to be equal to:
+
+```yaml
+appstore:
+  tycho:
+    externalAppRegistryRepo: <your-app-base-url>/artifact/assets/helx-apps
+appstore-prepuller:
+  appRegistry:
+    repo: <your-app-base-url>/artifact/assets/helx-apps
+```
+
+Once those lines are added, you've deployed, and `make archive` has been run successfully,
+you should see the artifact cache enabled in the `helx` namespace. You might need to bounce
+the `appstore` pod for the changes to take effect. Note that any time you need to make changes
+to your `helx-apps` branch, you will need to run `make archive` again and bounce the `appstore`
+pod.
 
 ### Working on a chart
 
@@ -130,7 +535,8 @@ resolved lock; ordinary regenerated locks remain unstaged. `make pull-develop`
 uses this behavior after merging `origin/develop`, but stops rather than commits
 when conflicts outside generated locks need manual resolution. If you need
 `charts/` populated to render or install a chart locally, use
-`helm-build-chart.sh` above, which vendors them.
+`make build-chart SERVICE=<name>` from [Working on a chart](#working-on-a-chart),
+or `make build-helx-chart` for the umbrella; both vendor them.
 
 If validation reports that `Chart.yaml` and `Chart.lock` "dependency
 name/version/repository tuples differ", this prints exactly what is being
@@ -165,421 +571,21 @@ make pull-remotes           # every subtree in sequence
 ```
 
 `ambassador`, `pod-reaper`, and `resty` are not subtrees. Their charts were
-mirrored by content from subdirectories of `helxplatform/helx-chart`, which
-`git subtree` cannot map. That mirror was retired ahead of the monorepo
-cutover: these charts are maintained here now and have no upstream to pull
-from.
+vendored from subdirectories of `helxplatform/helx-chart` (`charts/<name>`),
+which `git subtree` cannot map. Each records the upstream commit it has
+incorporated in `services/<name>/UPSTREAM_COMMIT`, and a pull replays only the
+upstream commits since then, so local divergence survives:
+
+```bash
+make check-vendored-sync                # how far behind each one is
+make pull-vendored-chart NAME=resty     # or pull-vendored for all three
+```
+
+`resty` is deliberately ahead of upstream, so never replace it wholesale with
+an upstream copy. `make help-subtrees` covers resolving a replay that conflicts.
 
 After any upstream pull, run `validate-config`. An upstream chart version bump
 leaves the umbrella pin stale, which is a failure this will catch.
-
-### Deploying a branch
-
-Every push to `develop` publishes a mutable candidate of the umbrella, pinned to
-that commit's images:
-
-```bash
-helm registry login ghcr.io
-helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version <umbrella-version>-develop -n <deploy-namespace>
-```
-
-It is a SemVer prerelease, so it always sorts below the matching release. To
-find the version without opening the workflow run:
-
-```bash
-make candidate-version
-```
-
-To reproduce what CI builds, from your branch:
-
-```bash
-make build-helx-chart CHART_CHANNEL=develop
-```
-
-That vendors your branch's service charts by name, ignoring the locked versions,
-and pins image tags to `develop-<short-sha>`. `CHART_CHANNEL_COMMIT` defaults to
-`HEAD`. Your working tree is restored afterwards.
-
-Note that those `develop-<sha>` images only exist if CI built that exact commit.
-For deploying uncommitted work, see the next section.
-
-### Deploying HeLx with your own build of one or more services
-
-A Helm chart with dependencies cannot be rendered or installed from a directory
-until the dependency archives are physically present in its `charts/`
-subdirectory. Helm does not fetch them at install time. `make sync-locks` writes
-only `Chart.lock`, which is metadata. `make build-helx-chart` is what actually
-vendors every dependency and produces a self-contained `.tgz` you can install
-anywhere.
-
-**If your change is already on `develop`**, do nothing locally. CI has published
-a candidate with your commit's images already pinned:
-
-```bash
-helm registry login ghcr.io
-helm upgrade --install helx oci://ghcr.io/helxplatform/helm-charts/helx \
-  --version $(make -s candidate-version) -n <deploy-namespace> \
-  --values my-values.yaml
-```
-
-**For work that is not pushed yet**, build everything locally. Nothing has to
-reach GitHub:
-
-1. Make your changes, then bump the service chart `version:` and its pin in
-   `deploy/helm/helx-chart/Chart.yaml`. `make ci-validate-everything` will tell
-   you if you miss either one.
-2. Set environment variables for make targets. Only `SERVICES` is required.
-
-   ```bash
-   export SERVICES="user-mutator ui"
-   export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform  # default Harbor
-   export TAG=test-my-branch  # default test-<short-sha>
-   ```
-
-3. Build images for just the services you changed:
-
-   ```bash
-   make build-helx-images
-   ```
-
-   A service with several image variants, like `appstore-sockets`, builds all of them. 
-   If you changed enough that listing them is a chore, `SERVICES=all` stands for every
-   service that builds an image; it works on every step below, and cannot be combined
-   with individual names.
-
-   Images build for `linux/amd64`, the one architecture CI publishes, no matter
-   what your workstation is. On Apple Silicon that means an emulated build, so
-   it is slower than a native one. Override `IMAGE_PLATFORM` when the cluster
-   you are aiming at is not amd64 -- a local `kind`/`minikube`/`k3d` on Apple
-   Silicon wants `IMAGE_PLATFORM=linux/arm64`. Getting this wrong is not subtle:
-   the pod starts and the container exits with `exec format error`.
-4. Get those images to your cluster. For a local cluster, load them directly,
-   no registry involved:
-
-   ```bash
-   make load-helx-images
-   ```
-
-   `kind`, `minikube`, and `k3d` are auto-detected; override with
-   `CLUSTER_TOOL=` and `CLUSTER_NAME=`. For Sterling/Azure/ASHE, push to Harbor
-   instead (`docker login containers.renci.org`):
-
-   ```bash
-   make push-helx-images
-   ```
-
-   To use a registry other than Harbor (your own ACR, a scratch project, a
-   registry running beside the cluster) set `IMAGE_REGISTRY` to its base URL,
-   after logging in to it:
-
-   ```bash
-   docker login myregistry.azurecr.io
-   export IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
-   make build-helx-images push-helx-images
-   ```
-
-   The value is a host, an optional port, and an optional project path;
-   `localhost:5000` and `myregistry.azurecr.io/helxplatform` are both fine, and
-   an `https://` prefix is dropped for you. Repository names are unchanged
-   underneath it, so `ui` publishes as `myregistry.azurecr.io/helxplatform/helx-ui`.
-
-   Because the project path is easy to forget and a missing one yields
-   references nothing was ever pushed to, a remote registry not ending in
-   `helxplatform` prints a warning and continues. Ignore it if you meant it. A
-   `localhost` registry never warns, since those serve from their root.
-   Set it on the build too: the reference is baked into the image at build
-   time, so pushing with a registry the build did not use finds nothing.
-5. Package the umbrella with those services pinned to your tag:
-
-   ```bash
-   make build-helx-chart
-   ```
-
-   Every umbrella dependency already resolves from your working tree, so this
-   picks up your modified charts. Passing `SERVICES` additionally writes your
-   image tag into the packaged values for **only those services** — everything
-   else stays on its released `v<appVersion>`. No `--set` flags needed.
-
-   `SERVICES` rewrites image tags and nothing else. It does not set
-   `enabled: true` for the services you name or `enabled: false` for the rest —
-   the ones you leave out are still installed, just on their released images.
-   What gets deployed is decided only by the `<name>.enabled` values in
-   [`deploy/helm/helx-chart/values.yaml`](deploy/helm/helx-chart/values.yaml)
-   and whatever your own `--values` file says. To install just what you
-   rebuilt, turn the others off yourself at install time:
-
-   ```bash
-   helm upgrade --install helx /path/to/helx-<version>-local.tgz \
-     -n <deploy-namespace> --values my-values.yaml \
-     --set appstore.enabled=false --set appstore-sockets.enabled=false
-   ```
-
-   If you pushed to your own registry, pass it here as well, or the chart will
-   still send the cluster to Harbor for those images:
-
-   ```bash
-   make build-helx-chart SERVICES="user-mutator ui" \
-     IMAGE_REGISTRY=myregistry.azurecr.io/helxplatform
-   ```
-
-   That writes both the tag and the repository for those services. Everything
-   outside `SERVICES` keeps pulling from Harbor, so the cluster needs
-   credentials for both registries unless you mirrored the rest yourself.
-5. Install the `.tgz` it prints:
-
-   ```bash
-   helm upgrade --install helx /path/to/helx-<version>-local.tgz \
-     -n <deploy-namespace> --values my-values.yaml
-   ```
-
-   Or let `make helm-deploy` find that archive and your values files for
-   you; see [Deploying and tearing down a local
-   build](#deploying-and-tearing-down-a-local-build).
-
-`TAG` reaches the chart only through `SERVICES`. There is no flag that retags
-everything at once: with `CHART_CHANNEL` and no `SERVICES`,
-`make build-helx-chart` computes the tag itself as `<channel>-<short-sha>`
-and ignores `TAG` entirely. To put one tag of your choosing on every image, use
-`SERVICES=all`:
-
-```bash
-make build-helx-chart TAG=my-tag SERVICES=all
-```
-
-`all` expands to every component with an image in
-[`.github/ci/images.yaml`](.github/ci/images.yaml) — currently `appstore`,
-`appstore-prepuller`, `appstore-sockets`, `ldap-sync`, `ui`, and `user-mutator`,
-covering all seven images, since `appstore-sockets` owns two. It is read from
-that file at run time, so a service added there is picked up without touching
-the Makefile. The command prints the list it expanded to. The chart-only
-dependencies `helx-ldap`, `pod-reaper`, and `resty` build no image, so nothing
-pins them; they keep the tags their own charts ship. Only pin services you
-actually built and pushed at that tag, or the chart will point at images that do
-not exist — with `all`, that means having run the build and push steps with
-`all` too.
-
-To override an image by hand instead, pass it to `helm` at install time. The
-packaged `.tgz` does not have to be rebuilt; these are ordinary subchart
-values, and the key is the umbrella dependency name plus the chart's own tag
-key:
-
-```text
-appstore.image.tag                      ldap-sync.image.tag
-appstore-sockets.image.tag              ui.image.tag
-appstore-sockets.monitoring.image.tag   user-mutator.image.tag
-appstore-prepuller.controller.image.tag
-```
-
-Two of those are not simply `<service-name>.image.tag` because those charts read a different key; see
-`tag_path` in [`.github/ci/images.yaml`](.github/ci/images.yaml).
-
-Each has a `repository` sibling that names the registry, so swapping
-`.tag` for `.repository` in any key above gives you the other half —
-`ui.image.repository`, `appstore-prepuller.controller.image.repository`, and so
-on. That pair is exactly what `IMAGE_REGISTRY` writes for you.
-
-Set them on the command line:
-
-```bash
-helm upgrade --install helx /path/to/helx-<version>.tgz -n <deploy-namespace> \
-  --values my-values.yaml \
-  --set ui.image.tag=my-tag \
-  --set ui.image.repository=myregistry.azurecr.io/helxplatform/helx-ui \
-  --set appstore-sockets.monitoring.image.tag=my-tag
-```
-
-or, better for anything you want to keep, in your own values file, where the
-dependency name is a top-level key:
-
-```yaml
-ui:
-  image:
-    tag: my-tag
-    repository: myregistry.azurecr.io/helxplatform/helx-ui
-appstore-sockets:
-  monitoring:
-    image:
-      tag: my-tag
-```
-
-Both win over whatever `build-helx-chart` baked into the packaged values, so
-this also works to correct a pin after the fact. The image has to already exist
-at that tag in whichever registry the repository names — overriding values does
-not build or push anything.
-
-### Deploying and tearing down a local build
-
-`make helm-deploy` installs what `make build-helx-chart` just packaged,
-and `make uninstall-release` removes an installed release along with the
-storage and credentials Helm deliberately leaves behind. Both talk to whatever
-cluster your current `kubectl` context points at, and both print the context and
-namespace before they do anything.
-
-#### Installing
-
-```bash
-make build-helx-chart SERVICES="user-mutator ui"
-make helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace>
-```
-
-You do not name the archive. `build-helx-chart` writes its path to
-`dist/charts/.helx-chart.path`, and `helm-deploy` reads it from there, so
-the two always agree on which build is being installed — a candidate build
-derives its version from the channel and commit, so the file name is not
-something you could predict anyway. If that pointer is missing, or names an
-archive that has been deleted, the deploy stops and tells you to package again.
-
-`RELEASE` defaults to `helx`. `NAMESPACE` defaults to whatever your context
-selects; if it selects none either, the deploy stops rather than assuming
-something.
-
-Values files come from two places, applied in this order:
-
-1. every path listed in `deploy/local-dev/local-values-files.env`
-2. every path in `VALUES="a.yaml b.yaml"`, so those win on any shared key
-
-That first file is the point: local deploys usually need several values files,
-including ones holding secrets, and retyping `--values` for each of them every
-time is how they get forgotten. It is one path per line, each relative to the
-repository root, with `~/` expanded for you; blank lines and `#` comments are
-ignored. It is gitignored, so your cluster's paths and secrets stay out of the
-repository:
-
-```text
-# deploy/local-dev/local-values-files.env
-~/helm-values/my-cluster/helx/values.yaml
-~/helm-values/my-cluster/appstore/secrets.yaml
-```
-
-A missing list, an empty one, or a line naming a file that is not there is a
-warning rather than an error — but since the usual result is a release quietly
-missing its secrets, the deploy asks before continuing. `ASSUME_YES=1` answers
-that in advance for a non-interactive run, and with no terminal to ask on it
-cancels instead of assuming yes.
-
-`HELM_FLAGS` is passed through to `helm upgrade --install` last, which is how
-you get a dry run:
-
-```bash
-make helm-deploy RELEASE=helx NAMESPACE=<deploy-namespace> \
-  HELM_FLAGS="--dry-run --debug"
-```
-
-#### Artifact Cache
-
-If deploying to an environment like ASHE, where the Github for `helx-apps` is
-not accessible, you can use the artifact cache to host `helx-apps` within your
-namespace. Get started by cloning the artifact-cache repo, installing the chart,
-and running `make archive`:
-
-```bash
-git clone https://github.com/helxplatform/artifact-cache
-cd artifact-cache
-helm install artifact-cache -n <namespace> ./chart
-set -a && source .env.sample && export NAMESPACE=<namespace>
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Before running the next command, make sure the actual `helx-apps` repo at
-`https://github.com/helxplatform/helx-apps.git` has a branch that contains the 
-context data you want to deploy, with a brand and the apps all the way you
-want them. Once that's the case, run this:
-
-```bash
-make archive
-```
-
-Then, add these lines to your environment's override values file:
-
-```yaml
-resty:
-  artifactCache:    # <------ 
-    enabled: true   # <------ 
-```
-
-and add change your `appstore:tycho:externalAppRegistryRepo:` and 
-`appstore-prepuller:appRegistry:repo:` values to be equal to:
-
-```yaml
-appstore:
-  tycho:
-    externalAppRegistryRepo: <your-app-base-url>/artifact/assets/helx-apps
-appstore-prepuller:
-  appRegistry:
-    repo: <your-app-base-url>/artifact/assets/helx-apps
-```
-
-Once those lines are added, you've deployed, and `make archive` has been run successfully,
-you should see the artifact cache enabled in the `helx` namespace. You might need to bounce
-the `appstore` pod for the changes to take effect. Note that any time you need to make changes
-to your `helx-apps` branch, you will need to run `make archive` again and bounce the `appstore`
-pod.
-
-
-#### Tearing down
-
-```bash
-make uninstall-release RELEASE=helx NAMESPACE=<deploy-namespace>
-```
-
-`helm uninstall` on its own does not leave the namespace clean. The
-chart-managed Secrets are annotated `helm.sh/resource-policy: keep`, so that
-handing a Secret's ownership to `existingSecret` or External Secrets does not
-delete the live credentials mid-migration. The shared user storage claim
-`stdnfs` carries that same annotation, and the `data-*` claims belong to
-StatefulSet `volumeClaimTemplates`, which Helm never owned in the first place.
-All of that survives the uninstall and is then adopted by the next install,
-which is exactly wrong when you are trying to start clean.
-
-So this target uninstalls the release and then deletes those leftovers:
-
-| Variable | Default |
-| --- | --- |
-| `UNINSTALL_PVCS` | `appstore-postgresql-pvc`, `stdnfs`, `data-$(RELEASE)-postgresql-0`, `data-$(RELEASE)-ldap-sync-postgres-0`, `data-openldap-0` |
-| `UNINSTALL_SECRETS` | `$(RELEASE)-appstore-secrets`, `$(RELEASE)-appstore-sockets`, `$(RELEASE)-ldap-sync-secrets`, `$(RELEASE)-postgresql`, `openldap-credentials`, `pgadmin-env` |
-
-`appstore-postgresql-pvc` is the one entry Helm normally deletes with the
-release; it is listed so that a copy left behind by an older install goes too.
-
-Only the names that actually exist are touched, and everything found is listed
-for confirmation before anything is deleted:
-
-```text
-Uninstalling helx
-  context   my-cluster
-  namespace my-namespace
-  release   installed
-  pvcs      appstore-postgresql-pvc stdnfs data-helx-postgresql-0
-  secrets   helx-appstore-secrets pgadmin-env
-Deleting those claims destroys the data in them; this cannot be undone.
-Proceed? [y/N]
-```
-
-`ASSUME_YES=1` skips that prompt; with no terminal to ask on, the target
-cancels rather than assuming yes.
-
-Unlike every other target here, `RELEASE` has to be named explicitly — the
-`helx` default is not assumed for a command that deletes data. `NAMESPACE`
-resolves exactly as it does for the deploy.
-
-A release that is already gone is not an error: the uninstall is skipped and
-only the leftovers are deleted, which is what lets this finish a teardown that
-stopped halfway. If nothing is there at all, it says so and exits cleanly.
-
-Set either variable to override the list, or to empty to leave that kind of
-resource alone:
-
-```bash
-make uninstall-release RELEASE=helx UNINSTALL_PVCS=
-```
-
-Two things it deliberately does not do. It deletes nothing the charts did not
-create, `PersistentVolume`s included: a `Retain` volume outlives its claim, and
-removing it is yours to do. And it takes no `HELM_FLAGS` — there is no dry run,
-because the confirmation listing already is one.
 
 ### Working on the CI itself
 
@@ -596,35 +602,6 @@ Workflow YAML itself is linted by `actionlint` in CI only — there is no local
 target, since workflow files change rarely and CI gates them on every pull
 request. If you are editing them often, `brew install actionlint` and run
 `actionlint .github/workflows/*.yml` yourself; CI pins 1.7.12.
-
-### Before you push
-
-```bash
-make pre-push
-```
-
-That runs the unit tests, `validate-config`, the version gate, the lock check,
-and a whitespace check. To have it run automatically:
-
-```bash
-make install-hooks
-```
-
-That points `core.hooksPath` at [`.githooks/`](.githooks), so `git push` runs the
-same checks. No package manager, nothing downloaded. Bypass a single push with
-`git push --no-verify`, and uninstall with `git config --unset core.hooksPath`.
-
-The umbrella chart's version only has to sit **above the last release**, not
-increase on every change. So the first pull request after a release picks the
-next version — patch, minor, or major, whichever fits — and later pull requests
-leave it alone. Raising it starts publishing a new `<version>-develop` candidate
-channel; `make candidate-version` tells you which is current. Umbrella
-dependency pins still have to move with the charts they point at.
-
-The version gate compares against `develop` by default and includes uncommitted
-and untracked files. That last part matters: without it a chart file you have
-created but not yet committed is invisible, and a local pass can still fail in
-CI. Override with `BASE=<ref>`, or `CHECK_VERSIONS_FLAGS=` for committed-only.
 
 ### Gotchas
 

@@ -3,21 +3,11 @@ appstore:
   djangoSettings: helx
   django:
     ALLOW_SAML_LOGIN: "true"
-  global:
-    imageRegistry: aisandboxrencitgt.azurecr.io
   gunicorn:
     workers: 5
-  imagePostgresql:
-    registry: aisandboxrencitgt.azurecr.io
-    repository: helxplatform/bitnami-postgresql
-    tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
-    image:
-      registry: aisandboxrencitgt.azurecr.io
-      repository: helxplatform/bitnami-postgresql
-      tag: 17.5.0-debian-12-r18
     primary:
       resources:
         limits:
@@ -28,8 +18,8 @@ appstore:
           memory: 2Gi
     volumePermissions:
       image:
-        registry: aisandboxrencitgt.azurecr.io
-        repository: helxplatform/os-shell
+        registry: containers.renci.org
+        repository: bitnami/os-shell
         tag: 12-debian-12-r50
   replicaCount: 1
   resources:
@@ -79,25 +69,12 @@ appstore-prepuller:
 appstore-sockets:
   securityContext:
     runAsUser: 1001
-global:
-  imagePullSecrets:
-  - renci-registry-creds
-  - aisandboxrencitgt-creds
 ldap-sync:
   searchBootstrap:
     id: get-groups
-    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:internal:*))'
     baseDN: ou=groups,dc=unc,dc=edu
   config:
-    hooks:
-    - args:
-        - --baseGid=1025
-        - --baseGroup=helx-users
-      image:
-        repository: aisandboxrencitgt.azurecr.io/helxplatform/unc-group-x
-        tag: v2.4.1
-      name: unc-group-x
-      url: http://localhost:5001/hook
     source:
       url: "ldaps://ldap.unc.edu/"
       bindDN: "cn=unc:app:renci:helx:ns,ou=Applications,dc=unc,dc=edu"
@@ -129,15 +106,18 @@ pod-reaper:
       max_duration: 3h
       require_label_values: blackbalsam,cloud-top,dicom-cloudtop,dicom-gh,filebrowser,gsforge,imagej,jupyter-datascience-db,jupyter-ds,jupyter-education,jupyter-helx-notebook,jupyter-helx-db-notebook,jupyter-lab,jupyter-minimal-notebook,napari,octave,pgadmin,rstudio-server,scout,webtop,webtop-image-apps,webtop-octave,webtop-pgadmin,vscode,biome
 resty:
-  image:
-    repository: aisandboxrencitgt.azurecr.io/helxplatform/openresty
+  # The TLS Secret named here must exist before install: resty mounts it, so
+  # its pod cannot start without it. cert-manager cannot issue it on AKS, whose
+  # HTTPS-only Ingress policy denies the solver Ingress HTTP-01 needs (it has
+  # no spec.tls), so no cluster-issuer annotation is set below. Create the
+  # Secret out of band, or add the annotation per environment only with an
+  # issuer that uses DNS-01.
   SSL:
     nginxTLSSecret: # CHANGEME
   enabled: true
   dnsResolver: 10.0.0.10
   ingress:
     annotations:
-      cert-manager.io/cluster-issuer: letsencrypt
       nginx.ingress.kubernetes.io/proxy-body-size: 100m
       nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
     create: true
@@ -180,33 +160,6 @@ ui:
     requests:
       cpu: 0.5
       memory: 1Gi
-  service:
-    annotations:
-      getambassador.io/config: |
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: helx-ui
-        prefix: /helx
-        service: helx-ui:80
-        rewrite: /helx
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: ui-static
-        prefix: /static/frontend
-        service: helx-ui:80
-        rewrite: /static/frontend
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
 user-mutator:
   config:
     features:
@@ -216,3 +169,13 @@ user-mutator:
         username: "cn=admin,dc=example,dc=org"
         user_base_dn: "ou=users,dc=example,dc=org"
         group_base_dn: "ou=groups,dc=example,dc=org"
+  webhook:
+    # Tell AKS's Admissions Enforcer to leave this webhook alone. Without this,
+    # AKS adds its own rules to the webhook's namespaceSelector when the webhook
+    # is created, and Kubernetes records AKS as the owner of that field. Helm 4
+    # applies charts server-side, so the next upgrade tries to set the field
+    # back to the chart's value and fails with a conflict, naming
+    # "admissionsenforcer". AKS's extra rules aren't needed here: the chart's
+    # selector already limits the webhook to the namespaces it lists.
+    annotations:
+      admissions.enforcer/disabled: "true"

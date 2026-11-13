@@ -18,7 +18,7 @@ USER_MUTATOR_URL                ?= https://github.com/helxplatform/user-mutator.
 APPSTORE_PREFIX                 ?= services/appstore
 APPSTORE_BRANCH                 ?= master
 APPSTORE_CHART_PREFIX           ?= services/appstore/chart
-APPSTORE_CHART_BRANCH           ?= develop
+APPSTORE_CHART_BRANCH           ?= main
 APPSTORE_PREPULLER_PREFIX       ?= services/appstore-prepuller
 APPSTORE_PREPULLER_BRANCH       ?= main
 APPSTORE_SOCKETS_PREFIX         ?= services/appstore-sockets
@@ -63,7 +63,7 @@ COMMON_CHART                    ?= deploy/helm/helx-common/chart
 # Defaults for the developer-facing targets. All are overridable on the command
 # line.
 BASE                            ?= develop
-CHECK_VERSIONS_FLAGS            ?= --include-untracked --umbrella-above-release
+CHECK_VERSIONS_FLAGS            ?= --include-untracked
 CHANNEL                         ?= develop
 SERVICE                         ?=
 CHART_CHANNEL                   ?=
@@ -109,18 +109,32 @@ IMAGE_PLATFORM                  ?= linux/amd64
 # naming the archive each build produced. Only the local targets set this; CI
 # reads the path out of $$GITHUB_OUTPUT and keeps using a scratch directory.
 CHART_DIST                      ?= dist/charts
-# The pointer build-helx-chart writes and helm-deploy reads. It is named
-# after the chart directory because that is the one part of the archive's
+# The pointer build-helx-chart writes and helm-deploy-from-local reads. It is
+# named after the chart directory because that is the one part of the archive's
 # identity known before the build runs -- a candidate build derives its version
 # from the channel and commit, so the file name is not predictable.
 UMBRELLA_PACKAGE_POINTER         = $(CHART_DIST)/.$(notdir $(UMBRELLA_CHART)).path
-# Release helm-deploy installs or upgrades, and where it puts it. An empty
-# NAMESPACE means whatever namespace the current kubectl context selects; if the
-# context selects none either, the deploy stops rather than assuming 'default'.
+# Release the helm-deploy-* targets install or upgrade, and where they put it.
+# An empty NAMESPACE means whatever namespace the current kubectl context
+# selects; if the context selects none either, the deploy stops rather than
+# assuming 'default'.
 RELEASE                         ?= helx
 NAMESPACE                       ?=
-# Values files for helm-deploy, space separated; each is passed as one -f.
-# These are applied after LOCAL_VALUES_FILE's, so they win on any shared key.
+# Where helm-deploy-from-ghcr pulls the umbrella chart from, and which version.
+# An empty CHART_VERSION means the current CHANNEL candidate. CI publishes the
+# develop channel from the develop branch, so that version is read from the
+# umbrella's Chart.yaml on origin/<CHANNEL>, never from the working tree: a
+# branch can carry an umbrella version the channel never published, or one it
+# has since abandoned. Set CHART_VERSION to deploy any other published version,
+# such as a release.
+CHART_REGISTRY                  ?= oci://ghcr.io/helxplatform/helm-charts
+CHART_VERSION                   ?=
+# The host alone -- ghcr.io for the default -- since Helm logs in to a host,
+# not a chart URL, and keeps one login per host.
+CHART_REGISTRY_HOST              = $(firstword $(subst /, ,$(patsubst oci://%,%,$(CHART_REGISTRY))))
+# Values files for the helm-deploy-* targets, space separated; each is passed
+# as one -f. These are applied after LOCAL_VALUES_FILE's, so they win on any
+# shared key.
 VALUES                          ?=
 # Untracked list of local values files, one path per line. A relative path is
 # relative to the repository root, and a leading ~/ is expanded to $$HOME --
@@ -131,18 +145,19 @@ LOCAL_VALUES_FILE               ?= deploy/local-dev/local-values-files.env
 # Answer that confirmation prompt -- and the one uninstall-release always
 # asks -- in advance, for a non-interactive run.
 ASSUME_YES                      ?=
-# Anything else to hand helm, e.g. HELM_FLAGS="--dry-run --debug"
+# Anything else to hand Helm, e.g. HELM_FLAGS="--dry-run --debug"
 HELM_FLAGS                      ?=
-# What uninstall-release deletes once the release itself is gone. helm
+# What uninstall-release deletes once the release itself is gone. Helm's
 # uninstall leaves every one of these behind: the Secrets are chart-managed and
 # annotated helm.sh/resource-policy: keep, the appstore and user storage claims
 # carry that same annotation, and the data-* claims come from StatefulSet
-# volumeClaimTemplates, which helm never owned in the first place. Names the
+# volumeClaimTemplates, which Helm never owned in the first place. Names the
 # charts build out of the release name are written with $(RELEASE); the rest are
 # fixed by whichever chart creates them. Set either variable empty to leave that
-# kind of resource alone.
+# kind of resource alone. The shared user storage claim stdnfs is deliberately
+# not in the default: it holds every user's home directory, so deleting it has
+# to be asked for by name, e.g. UNINSTALL_PVCS="stdnfs ...".
 UNINSTALL_PVCS                  ?= appstore-postgresql-pvc \
-                                   stdnfs \
                                    data-$(RELEASE)-postgresql-0 \
                                    data-$(RELEASE)-ldap-sync-postgres-0 \
                                    data-openldap-0
@@ -219,7 +234,9 @@ CLUSTER_NAME                    ?=
         build-helx-images \
         load-helx-images \
         push-helx-images \
-        helm-deploy \
+        helm-deploy-from-local \
+        chart-registry-login \
+        helm-deploy-from-ghcr \
         uninstall-release \
         docker-build \
         pre-push \
@@ -234,9 +251,9 @@ help:
 	@echo
 	@echo 'More help:'
 	@echo '  make help-subtrees    Pulling service subtrees, mirroring vendored charts'
-	@echo '  make help-ci          Checks and lock maintenance that mirror CI'
+	@echo '  make help-ci          Checks that mirror CI'
 	@echo '  make help-build       Building and inspecting service charts and images'
-	@echo '  make help-local-dev   Building, deploying, and tearing down local builds'
+	@echo '  make help-local-dev   Deploying local builds or GHCR candidates, tearing down'
 	@echo '  make help-locks       Regenerating and verifying Chart.lock files'
 	@echo '  make help-all-vars    Every variable those targets accept'
 
@@ -246,7 +263,7 @@ help-subtrees:
 	@echo
 	@echo 'Every variable these accept: make help-all-vars'
 
-#help-ci: Show the CI-shaped checks and lock-maintenance targets
+#help-ci: Show the CI-shaped checks
 help-ci:
 	@awk -f $(HELP_AWK) -v topic=ci $(THIS_MAKEFILE)
 	@echo
@@ -273,13 +290,13 @@ help-locks:
 #help-all-vars: Show every variable the targets accept
 help-all-vars:
 	@echo 'Environment variables:'
-	@echo '  PYTHON=<path>           Interpreter to use.'
+	@echo '  PYTHON=<path>            Interpreter to use.'
 	@echo '                           Default: $(VENV_PYTHON); skips venv setup.'
-	@echo '  VENV=<dir>              Virtualenv location. Default: .venv.'
+	@echo '  VENV=<dir>               Virtualenv location. Default: .venv.'
 	@echo '  BOOTSTRAP_PYTHON=<path>  Python used to create the virtualenv.'
 	@echo '                           Default: python3.'
 	@echo '  SERVICE=<name>           Required by per-service targets (make help-build).'
-	@echo '  SERVICES="a b"          Services rebuilt locally; only these get pinned.'
+	@echo '  SERVICES="a b"           Services rebuilt locally; only these get pinned.'
 	@echo '  SERVICES=all             Every service that builds an image.'
 	@echo '  TAG=<tag>                Image tag to build, push, and pin.'
 	@echo '                           Default: test-<short-sha>.'
@@ -288,16 +305,24 @@ help-all-vars:
 	@echo '  IMAGE_PLATFORM=<arch>    Architecture to build for. Default: linux/amd64.'
 	@echo '  CLUSTER_TOOL=<tool>      kind, minikube, k3d, or auto. Default: auto.'
 	@echo '  CLUSTER_NAME=<name>      Cluster to load into when the tool needs it.'
-	@echo '  RELEASE=<name>           Release helm-deploy installs or upgrades.'
+	@echo '  RELEASE=<name>           Release the helm-deploy-* targets install or upgrade.'
 	@echo '                           Default: helx; required by uninstall-release.'
 	@echo '  NAMESPACE=<ns>           Namespace to deploy into or uninstall from.'
 	@echo '                           Default: current kubectl context namespace.'
-	@echo '  VALUES="a.yaml b.yaml"  Extra helm-deploy values files, applied last.'
-	@echo '  LOCAL_VALUES_FILE=<f>    Untracked list of values files, one path per line.'
+	@echo '  CHART_VERSION=<version>  Umbrella version helm-deploy-from-ghcr deploys.'
+	@echo '                           Default: current CHANNEL candidate.'
+	@echo '  CHART_REGISTRY=<oci-url> Where helm-deploy-from-ghcr pulls the umbrella;'
+	@echo '                           chart-registry-login logs in to its host.'
+	@echo '                           Default: oci://ghcr.io/helxplatform/helm-charts.'
+	@echo '  VALUES="a.yaml b.yaml"   Extra helm-deploy-* values files, applied last.'
+	@echo '  LOCAL_VALUES_FILE=<f>    Untracked file containing list of values files to use'
+	@echo '                             when deploying, one path per line.'
 	@echo '  UNINSTALL_PVCS="a b"     Claims uninstall-release deletes after uninstall.'
 	@echo '  UNINSTALL_SECRETS="a"    Secrets uninstall-release also deletes.'
 	@echo '  ASSUME_YES=1             Skip confirmation prompts.'
-	@echo '  HELM_FLAGS=<flags>       Extra helm arguments, e.g. --dry-run --debug.'
+	@echo '  HELP_WIDTH=<columns>     Width make help wraps to.'
+	@echo '                           Default: the terminal width (60-120), else 80.'
+	@echo '  HELM_FLAGS=<flags>       Extra Helm arguments, e.g. --dry-run --debug.'
 	@echo '  CHART_DIST=<dir>         Where packaged charts land. Default: dist/charts.'
 	@echo '  BASE=<ref>               Base revision for ci-check-versions.'
 	@echo '                           Default: develop.'
@@ -310,41 +335,41 @@ help-all-vars:
 	@echo '  FORCE=1                  Let chart mirrors overwrite uncommitted work.'
 	@echo
 	@echo 'Subtree configuration (defaults are at the top of this Makefile):'
-	@echo '  MAX_SUBTREE_BLOB_BYTES=<bytes>  Maximum incoming subtree file size.'
-	@echo '  REMOTE=<name>            Required by pull-subtree.'
-	@echo '  PREFIX=<path>            Required by pull-subtree.'
-	@echo '  BRANCH=<branch>          Required by pull-subtree.'
-	@echo '  APPSTORE_URL=<url>       appstore remote URL.'
-	@echo '  APPSTORE_PREFIX=<path>   appstore local subtree path.'
-	@echo '  APPSTORE_BRANCH=<branch> appstore branch to add or pull.'
-	@echo '  APPSTORE_CHART_URL=<url>       appstore-chart remote URL.'
-	@echo '  APPSTORE_CHART_PREFIX=<path>   appstore-chart local subtree path.'
-	@echo '  APPSTORE_CHART_BRANCH=<branch> appstore-chart branch to add or pull.'
-	@echo '  APPSTORE_PREPULLER_URL=<url>       appstore-prepuller remote URL.'
-	@echo '  APPSTORE_PREPULLER_PREFIX=<path>   appstore-prepuller local subtree path.'
-	@echo '  APPSTORE_PREPULLER_BRANCH=<branch> appstore-prepuller branch to add or pull.'
-	@echo '  APPSTORE_SOCKETS_URL=<url>       appstore-sockets remote URL.'
-	@echo '  APPSTORE_SOCKETS_PREFIX=<path>   appstore-sockets local subtree path.'
-	@echo '  APPSTORE_SOCKETS_BRANCH=<branch> appstore-sockets branch to add or pull.'
+	@echo '  MAX_SUBTREE_BLOB_BYTES=<bytes>         Maximum incoming subtree file size.'
+	@echo '  REMOTE=<name>                          Required by pull-subtree.'
+	@echo '  PREFIX=<path>                          Required by pull-subtree.'
+	@echo '  BRANCH=<branch>                        Required by pull-subtree.'
+	@echo '  APPSTORE_URL=<url>                     appstore remote URL.'
+	@echo '  APPSTORE_PREFIX=<path>                 appstore local subtree path.'
+	@echo '  APPSTORE_BRANCH=<branch>               appstore branch to pull.'
+	@echo '  APPSTORE_CHART_URL=<url>               appstore-chart remote URL.'
+	@echo '  APPSTORE_CHART_PREFIX=<path>           appstore-chart local subtree path.'
+	@echo '  APPSTORE_CHART_BRANCH=<branch>         appstore-chart branch to pull.'
+	@echo '  APPSTORE_PREPULLER_URL=<url>           appstore-prepuller remote URL.'
+	@echo '  APPSTORE_PREPULLER_PREFIX=<path>       appstore-prepuller local subtree path.'
+	@echo '  APPSTORE_PREPULLER_BRANCH=<branch>     appstore-prepuller branch to pull.'
+	@echo '  APPSTORE_SOCKETS_URL=<url>             appstore-sockets remote URL.'
+	@echo '  APPSTORE_SOCKETS_PREFIX=<path>         appstore-sockets local subtree path.'
+	@echo '  APPSTORE_SOCKETS_BRANCH=<branch>       appstore-sockets branch to pull.'
 	@echo '  APPSTORE_SOCKETS_CHART_URL=<url>       appstore-sockets-chart remote URL.'
 	@echo '  APPSTORE_SOCKETS_CHART_PREFIX=<path>   appstore-sockets-chart subtree path.'
-	@echo '  APPSTORE_SOCKETS_CHART_BRANCH=<branch> appstore-sockets-chart branch.'
-	@echo '  HELX_LDAP_URL=<url>       helx-ldap remote URL.'
-	@echo '  HELX_LDAP_PREFIX=<path>   helx-ldap local subtree path.'
-	@echo '  HELX_LDAP_BRANCH=<branch> helx-ldap branch to add or pull.'
-	@echo '  LDAP_SYNC_URL=<url>       ldap-sync remote URL.'
-	@echo '  LDAP_SYNC_PREFIX=<path>   ldap-sync local subtree path.'
-	@echo '  LDAP_SYNC_BRANCH=<branch> ldap-sync branch to add or pull.'
-	@echo '  UI_URL=<url>              UI remote URL.'
-	@echo '  UI_PREFIX=<path>          UI local subtree path.'
-	@echo '  UI_BRANCH=<branch>        UI branch to add or pull.'
-	@echo '  UI_CHART_URL=<url>        UI chart remote URL.'
-	@echo '  UI_CHART_PREFIX=<path>    UI chart local subtree path.'
-	@echo '  UI_CHART_BRANCH=<branch>  UI chart branch to add or pull.'
-	@echo '  USER_MUTATOR_URL=<url>       user-mutator remote URL.'
-	@echo '  USER_MUTATOR_PREFIX=<path>   user-mutator local subtree path.'
-	@echo '  USER_MUTATOR_BRANCH=<branch> user-mutator branch to add or pull.'
-	@echo '  RECORD=1                     check-subtree-sync prints MIGRATION.md rows.'
+	@echo '  APPSTORE_SOCKETS_CHART_BRANCH=<branch> appstore-sockets-chart branch to pull.'
+	@echo '  HELX_LDAP_URL=<url>                    helx-ldap remote URL.'
+	@echo '  HELX_LDAP_PREFIX=<path>                helx-ldap local subtree path.'
+	@echo '  HELX_LDAP_BRANCH=<branch>              helx-ldap branch to pull.'
+	@echo '  LDAP_SYNC_URL=<url>                    ldap-sync remote URL.'
+	@echo '  LDAP_SYNC_PREFIX=<path>                ldap-sync local subtree path.'
+	@echo '  LDAP_SYNC_BRANCH=<branch>              ldap-sync branch to pull.'
+	@echo '  UI_URL=<url>                           UI remote URL.'
+	@echo '  UI_PREFIX=<path>                       UI local subtree path.'
+	@echo '  UI_BRANCH=<branch>                     UI branch to pull.'
+	@echo '  UI_CHART_URL=<url>                     UI chart remote URL.'
+	@echo '  UI_CHART_PREFIX=<path>                 UI chart local subtree path.'
+	@echo '  UI_CHART_BRANCH=<branch>               UI chart branch to pull.'
+	@echo '  USER_MUTATOR_URL=<url>                 user-mutator remote URL.'
+	@echo '  USER_MUTATOR_PREFIX=<path>             user-mutator local subtree path.'
+	@echo '  USER_MUTATOR_BRANCH=<branch>           user-mutator branch to pull.'
+	@echo '  RECORD=1                  check-subtree-sync prints MIGRATION.md rows.'
 	@echo
 	@echo 'Vendored chart configuration (ambassador, pod-reaper, resty):'
 	@echo '  HELX_CHART_URL=<url>      helx-chart remote URL.'
@@ -364,7 +389,12 @@ help-all-vars:
 setup: $(PYTHON_READY) add-subtrees install-hooks
 
 # ensure-remote: Add a remote, or verify that an existing one has the expected
-# URL.
+# URL. Either way, stop it fetching tags: the upstream repos have their own v*
+# tags (e.g. helx-ui v6.4.4) that only clutter the clone; check-versions ignores
+# them, since they carry no umbrella chart. A clone that already has them can
+# drop them with:
+# git tag -l | sort | comm -23 - <(git ls-remote --tags origin |
+#   sed 's#.*refs/tags/##;s#\^{}##' | sort -u) | xargs -r git tag -d
 define ensure-remote
 	@if git remote get-url "$(1)" >/dev/null 2>&1; then \
 		if test "$$(git remote get-url "$(1)")" != "$(2)"; then \
@@ -377,7 +407,8 @@ define ensure-remote
 	else \
 		echo "Adding remote $(1) -> $(2)"; \
 		git remote add "$(1)" "$(2)"; \
-	fi
+	fi; \
+	git config "remote.$(1).tagOpt" --no-tags
 endef
 
 # check-incoming: Refuse to pull a subtree whose incoming tree has oversized
@@ -671,11 +702,12 @@ add-vendored-remote:
 # check-vendored-sync: Report whether each vendored chart still matches the
 # upstream subdirectory it was taken from. Read-only: it fetches and compares,
 # and never merges or edits files. Succeeds even when a chart is behind, so it
-# reads as the status report it is; STRICT=1 exits non-zero instead, which is
-# how CI gates on it. "local edits" means the chart also differs from upstream
-# at its recorded commit, so a pull may conflict; it is the expected state for
-# resty. Like check-versions, this compares committed content, so an
-# uncommitted or staged chart edit is invisible to it.
+# reads as the status report it is; STRICT=1 exits non-zero instead, for a
+# caller that wants to gate on it (no workflow runs this target). "local edits"
+# means the chart also differs from upstream at its recorded commit, so a pull
+# may conflict; it is the expected state for resty. Like check-versions, this
+# compares committed content, so an uncommitted or staged chart edit is
+# invisible to it.
 # [HELX_CHART_URL, HELX_CHART_BRANCH, VENDORED_CHARTS, STRICT]
 check-vendored-sync: add-vendored-remote
 	@set -euo pipefail; \
@@ -907,6 +939,10 @@ ci-validate-everything: $(PYTHON_READY)
 ci-check-versions: $(PYTHON_READY)
 	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
 		echo "BASE=$(BASE) does not resolve. Try BASE=origin/develop."; exit 1; }
+	@# The release floor is read from origin/main and the v* tags on it.
+	@# A stale copy sets the floor too low, so a local pass could fail in CI.
+	@git fetch --quiet origin main 2>/dev/null || \
+		echo "warning: could not fetch origin main; the release floor may be stale." >&2
 	@$(PYTHON) $(CI_SCRIPT) check-versions --base "$(BASE)" $(CHECK_VERSIONS_FLAGS)
 
 # ci-tests: Run the unit tests for the CI helpers. [PYTHON, VENV]
@@ -969,6 +1005,7 @@ pull-develop:
 		exit 1; \
 	fi; \
 	GIT_EDITOR=true git commit --no-edit
+##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 # Recreate generated locks, then stage only locks that were unmerged before
 # regeneration. Ordinary stale locks remain unstaged, as before.
@@ -984,6 +1021,7 @@ define sync-lock-and-resolve
 	fi
 endef
 
+##@ locks Chart.lock maintenance
 # sync-locks: Regenerate Chart.lock for every chart that declares dependencies.
 # Charts without dependencies are skipped rather than treated as an error.
 # [PYTHON, VENV]
@@ -1002,7 +1040,6 @@ sync-helx-lock:
 check-locks:
 	$(call require-pyyaml)
 	@$(PYTHON) $(CI_SCRIPT) sync-lock --all --check
-##> Python setup is automatic; run make ci-pip-install to do it explicitly
 
 ##@ build Building and inspecting one service
 # build-chart SERVICE=<name>: Vendor dependencies, lint, and package one
@@ -1137,27 +1174,17 @@ build-helx-chart: $(PYTHON_READY)
 	CHART_IMAGE_REGISTRY="$(IMAGE_REGISTRY)" \
 	CHART_PACKAGE_DIR="$(CHART_DIST)" \
 		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
-	@echo 'Next: make helm-deploy RELEASE=<name> NAMESPACE=<ns> VALUES="a.yaml b.yaml"'
+	@echo 'Next: make helm-deploy-from-local RELEASE=<name> NAMESPACE=<ns> VALUES="a.yaml b.yaml"'
 
-# helm-deploy: Install or upgrade RELEASE from the archive build-helx-chart
-# packaged, found through the pointer that build leaves behind. Values files
-# come from LOCAL_VALUES_FILE, then VALUES.
-# [RELEASE, NAMESPACE, VALUES, LOCAL_VALUES_FILE, ASSUME_YES, HELM_FLAGS,
-#  CHART_DIST]
-helm-deploy:
-	@set -euo pipefail; \
-	pointer="$(UMBRELLA_PACKAGE_POINTER)"; \
-	if test ! -f "$$pointer"; then \
-		echo "No packaged umbrella chart at $$pointer."; \
-		echo 'Run: make build-helx-chart'; \
-		exit 1; \
-	fi; \
-	package=$$(cat "$$pointer"); \
-	if test ! -f "$$package"; then \
-		echo "$$pointer names $$package, which no longer exists."; \
-		echo 'Run: make build-helx-chart to package it again.'; \
-		exit 1; \
-	fi; \
+# The helm-deploy-* targets differ only in where the chart comes from. Each
+# define below is one piece of a single shell script that hands shell variables
+# to the next -- values_args, values_shown, warnings, context, namespace, and
+# chart_args -- so they are spliced into one recipe line, in the order the
+# targets use them, and never run on their own.
+
+# deploy-values-files: collect the files LOCAL_VALUES_FILE lists into
+# values_args, warning about anything missing and counting it in warnings.
+define deploy-values-files
 	list="$(LOCAL_VALUES_FILE)"; \
 	warnings=0; \
 	values_shown=""; \
@@ -1196,7 +1223,12 @@ helm-deploy:
 		echo "           deploy/local-dev/my-secret-values.yaml"; \
 		echo "         It is gitignored, so it stays out of the repository."; \
 		warnings=$$((warnings + 1)); \
-	fi; \
+	fi
+endef
+
+# deploy-namespace: the current kubectl context, and the namespace to deploy
+# into -- NAMESPACE, or else the one that context selects.
+define deploy-namespace
 	context=$$(kubectl config current-context 2>/dev/null || echo '<none>'); \
 	namespace="$(NAMESPACE)"; \
 	if test -z "$$namespace"; then \
@@ -1205,13 +1237,16 @@ helm-deploy:
 			echo "No namespace to deploy into: NAMESPACE is unset and context"; \
 			echo "$$context selects none. Deploying into 'default' is not assumed."; \
 			echo 'Name one for this command:'; \
-			echo '  make helm-deploy NAMESPACE=<ns>'; \
+			echo '  make $@ NAMESPACE=<ns>'; \
 			echo 'or set one on the context, for every command that follows:'; \
 			echo '  kubectl config set-context --current --namespace=<ns>'; \
 			exit 1; \
 		fi; \
-	fi; \
-	echo "Deploying $$package"; \
+	fi
+endef
+
+# deploy-summary: the lines every deploy prints under its own heading.
+define deploy-summary
 	echo "  release   $(RELEASE)"; \
 	echo "  context   $$context"; \
 	echo "  namespace $$namespace"; \
@@ -1227,12 +1262,27 @@ helm-deploy:
 		done; \
 	else \
 		echo "  values    (none)"; \
-	fi; \
-	if test "$$warnings" -gt 0; then \
+	fi
+endef
+
+# deploy-confirm: ask on the terminal before deploying -- every time when called
+# with always, or with on-warnings only when something above warned.
+# ASSUME_YES answers in advance; with no terminal to ask on, the deploy is
+# cancelled rather than assumed.
+define deploy-confirm
+	if test "$(1)" = always || test "$$warnings" -gt 0; then \
+		question='Proceed with the deploy?'; \
+		if test "$$warnings" -gt 0; then \
+			question='Proceed with the deploy anyway?'; \
+		fi; \
 		if test -n "$(ASSUME_YES)"; then \
-			echo "ASSUME_YES is set; continuing past $$warnings warning(s)."; \
+			if test "$$warnings" -gt 0; then \
+				echo "ASSUME_YES is set; continuing past $$warnings warning(s)."; \
+			else \
+				echo 'ASSUME_YES is set; continuing without asking.'; \
+			fi; \
 		elif (: < /dev/tty) 2>/dev/null; then \
-			printf 'Proceed with the deploy anyway? [y/N] ' > /dev/tty; \
+			printf '%s [y/N] ' "$$question" > /dev/tty; \
 			read -r reply < /dev/tty || reply=''; \
 			case "$$reply" in \
 				y|Y) ;; \
@@ -1240,21 +1290,110 @@ helm-deploy:
 			esac; \
 		else \
 			echo 'No terminal to ask on, so cancelling rather than assuming yes.'; \
-			echo 'Set ASSUME_YES=1 to deploy past warnings without the prompt.'; \
+			echo 'Set ASSUME_YES=1 to deploy without the prompt.'; \
 			exit 1; \
 		fi; \
-	fi; \
-	helm upgrade --install "$(RELEASE)" "$$package" \
+	fi
+endef
+
+# deploy-helm-upgrade: install or upgrade RELEASE from chart_args -- the chart,
+# plus anything that picks its version -- then every values file, then
+# HELM_FLAGS.
+define deploy-helm-upgrade
+	helm upgrade --install "$(RELEASE)" "$${chart_args[@]}" \
 		--namespace "$$namespace" \
 		$${values_args[@]+"$${values_args[@]}"} \
 		$(foreach values_file,$(VALUES),--values "$(values_file)") \
 		$(HELM_FLAGS)
+endef
+
+# helm-deploy-from-local: Install or upgrade RELEASE from the archive
+# build-helx-chart packaged, found through the pointer that build leaves
+# behind. Values files come from LOCAL_VALUES_FILE, then VALUES. Asks first
+# only when something looks wrong.
+# [RELEASE, NAMESPACE, VALUES, LOCAL_VALUES_FILE, ASSUME_YES, HELM_FLAGS,
+#  CHART_DIST]
+helm-deploy-from-local:
+	@set -euo pipefail; \
+	pointer="$(UMBRELLA_PACKAGE_POINTER)"; \
+	if test ! -f "$$pointer"; then \
+		echo "No packaged umbrella chart at $$pointer."; \
+		echo 'Run: make build-helx-chart'; \
+		exit 1; \
+	fi; \
+	package=$$(cat "$$pointer"); \
+	if test ! -f "$$package"; then \
+		echo "$$pointer names $$package, which no longer exists."; \
+		echo 'Run: make build-helx-chart to package it again.'; \
+		exit 1; \
+	fi; \
+	$(call deploy-values-files); \
+	$(call deploy-namespace); \
+	echo "Deploying $$package"; \
+	$(call deploy-summary); \
+	$(call deploy-confirm,on-warnings); \
+	chart_args=("$$package"); \
+	$(call deploy-helm-upgrade)
 ##> Exporting TAG keeps all four agreeing; left unset it is recomputed from HEAD
 ##> each command. Unset SERVICES to leave every image on its released tag.
 
+##@ local-dev Deploying a published candidate
+# chart-registry-login: Log Helm in to the host of CHART_REGISTRY, ghcr.io by
+# default, so helm-deploy-from-ghcr can pull from it. Helm asks for a username
+# and password; for GHCR they are your GitHub username and a personal access
+# token (classic) with the read:packages scope. [CHART_REGISTRY]
+chart-registry-login:
+	@echo 'Logging Helm in to $(CHART_REGISTRY_HOST), the host of $(CHART_REGISTRY).'
+	$(if $(filter ghcr.io,$(CHART_REGISTRY_HOST)),@echo 'Username: your GitHub username. Password: a personal access token (classic) with read:packages.')
+	@helm registry login "$(CHART_REGISTRY_HOST)"
+
+# helm-deploy-from-ghcr: Install or upgrade RELEASE from the umbrella chart CI
+# published to GHCR: the current CHANNEL candidate, unless CHART_VERSION names
+# another version. Run make chart-registry-login first. Values files come from
+# LOCAL_VALUES_FILE, then VALUES. Always asks before deploying.
+# [CHART_VERSION, CHANNEL, CHART_REGISTRY, RELEASE, NAMESPACE, VALUES,
+#  LOCAL_VALUES_FILE, ASSUME_YES, HELM_FLAGS, PYTHON, VENV]
+helm-deploy-from-ghcr: $(PYTHON_READY)
+	@set -euo pipefail; \
+	chart="$(CHART_REGISTRY)/helx"; \
+	$(call deploy-values-files); \
+	version="$(CHART_VERSION)"; \
+	version_source=""; \
+	if test -z "$$version"; then \
+		ref="origin/$(CHANNEL)"; \
+		if ! git fetch --quiet origin "$(CHANNEL)" 2>/dev/null; then \
+			echo "WARNING: could not fetch origin $(CHANNEL), so $$ref may be"; \
+			echo "         behind the candidate CI last published."; \
+			warnings=$$((warnings + 1)); \
+		fi; \
+		scratch=$$(mktemp -d); \
+		trap 'rm -rf "$$scratch"' EXIT; \
+		if ! git show "$$ref:$(UMBRELLA_CHART)/Chart.yaml" > "$$scratch/Chart.yaml" 2>/dev/null; then \
+			echo "Cannot read $(UMBRELLA_CHART)/Chart.yaml from $$ref, so the"; \
+			echo "current $(CHANNEL) candidate is unknown. Name a version instead:"; \
+			echo '  make $@ CHART_VERSION=<version>'; \
+			exit 1; \
+		fi; \
+		version=$$($(PYTHON) $(CI_SCRIPT) candidate-version --channel "$(CHANNEL)" --chart-dir "$$scratch"); \
+		version_source=" (current $(CHANNEL) candidate, from $$ref)"; \
+	fi; \
+	$(call deploy-namespace); \
+	echo "Deploying $$chart"; \
+	echo "  version   $$version$$version_source"; \
+	$(call deploy-summary); \
+	echo 'You must be logged in to $(CHART_REGISTRY_HOST) before continuing, since Helm pulls'; \
+	echo 'the chart from there. If you are not, answer n, then run:'; \
+	echo '  make chart-registry-login$(if $(filter-out file,$(origin CHART_REGISTRY)), CHART_REGISTRY=$(CHART_REGISTRY))'; \
+	$(call deploy-confirm,always); \
+	chart_args=("$$chart" --version "$$version"); \
+	$(call deploy-helm-upgrade)
+##> A candidate is republished under the same version on every push to its
+##> branch, so this deploys whatever CI published last. A run still in progress
+##> has not replaced it yet.
+
 ##@ local-dev Tearing down a release
 # uninstall-release RELEASE=<name>: Uninstall RELEASE, then delete the
-# storage and credentials helm leaves behind -- UNINSTALL_PVCS and
+# storage and credentials Helm leaves behind -- UNINSTALL_PVCS and
 # UNINSTALL_SECRETS name them, and only the ones that exist are touched.
 # Everything is listed for confirmation before anything is deleted. RELEASE has
 # to be named explicitly: this deletes data, so the default is not assumed. A

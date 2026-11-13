@@ -9,6 +9,9 @@ spec:
       {{- include "resty.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        checksum/nginx-conf: {{ include (print $.Template.BasePath "/nginx-configmap.yaml") . | sha256sum }}
+        checksum/default-nginx-conf: {{ include (print $.Template.BasePath "/nginx-default-configmap.yaml") . | sha256sum }}
       labels:
         {{- include "resty.labels" . | nindent 8 }}
     spec:
@@ -16,6 +19,8 @@ spec:
       - image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         name: ambassador-nginx-conf
+        securityContext:
+          {{- toYaml .Values.containerSecurityContext | nindent 10 }}
         ports:
         - containerPort: {{ .Values.service.httpTargetPort }}
         {{- if .Values.SSL }}
@@ -33,14 +38,15 @@ spec:
         - name: secret-volume
           mountPath: /opt/bitnami/openresty/nginx/conf/certs
         {{- end }}
-#        {{- if .Values.varStorage.claimName }}
-#        - name: var-mounts-claim
-#          mountPath: /var/cache/nginx
-#          subPath: var_cache_nginx
-#        - name: var-mounts-claim
-#          mountPath: /var/run
-#          subPath: var_run
-#        {{- end }}
+        # nginx.conf (see nginx-configmap.yaml) points its pid file, proxy/
+        # fastcgi/etc. temp dirs, and access/error logs here -- the only paths
+        # this process writes to.
+        - name: var-mounts
+          mountPath: /opt/bitnami/openresty/nginx/tmp
+          subPath: tmp
+        - name: var-mounts
+          mountPath: /opt/bitnami/openresty/nginx/logs
+          subPath: logs
         # Uncomment command/args for debugging when things go wrong.
         # command: ['/bin/bash', '-c']
         # args: ["while true; do date; sleep 5; done"]
@@ -58,7 +64,10 @@ spec:
             secretName: {{ .Values.SSL.nginxTLSSecret }}
         {{- end }}
         {{- if .Values.varStorage.claimName }}
-        - name: var-mounts-claim
+        - name: var-mounts
           persistentVolumeClaim:
             claimName: {{ .Values.varStorage.claimName }}
+        {{- else }}
+        - name: var-mounts
+          emptyDir: {}
         {{- end }}

@@ -95,6 +95,10 @@ Without preserveKeys, every saved key wins over values. This works well for a
 Secret that contains only generated credentials. With preserveKeys, only the
 listed saved keys win; the rest follow the values in the chart. Use this when a
 Secret contains both credentials and regular configuration.
+
+Returns a JSON object with annotations, data, and stringData; read it with
+fromJson. JSON keeps every string exact, while a YAML round trip drops the final
+line break of the last block scalar, such as a PEM key.
 */}}
 {{- define "helx-common.secret.payload.v1" -}}
 {{- $root := required "helx-common: secret root context is required" .root -}}
@@ -134,10 +138,17 @@ Secret contains both credentials and regular configuration.
   {{- end -}}
 {{- end -}}
 
-{{- $existingAnnotations := dict -}}
-{{- if and $targetSecret $targetSecret.metadata $targetSecret.metadata.annotations -}}
-  {{- $existingAnnotations = $targetSecret.metadata.annotations -}}
-{{- end -}}
+{{/*
+"and"'s arguments are all evaluated eagerly before it's called -- Go
+templates have no short-circuiting "and" -- so
+"and $targetSecret $targetSecret.metadata $targetSecret.metadata.annotations"
+evaluates the final chained lookup even when an earlier argument is nil,
+which is exactly what lookup returns for a Secret that doesn't exist yet
+(a fresh install, or any render with no live cluster to look up against,
+such as `helm template`/lint). dig navigates the nested path safely,
+returning the given default the moment any level along it is missing.
+*/}}
+{{- $existingAnnotations := dig "metadata" "annotations" (dict) (default (dict) $targetSecret) -}}
 {{- $wasMigrated := and $legacyName (hasKey $existingAnnotations $migrationAnnotation) -}}
 
 {{- $annotations := dict -}}
@@ -171,12 +182,7 @@ Secret contains both credentials and regular configuration.
   {{- end -}}
 {{- end -}}
 
-annotations:
-{{ toYaml $annotations | nindent 2 }}
-data:
-{{ toYaml $data | nindent 2 }}
-stringData:
-{{ toYaml $stringData | nindent 2 }}
+{{- dict "annotations" $annotations "data" $data "stringData" $stringData | toJson -}}
 {{- end -}}
 
 {{/*
@@ -242,7 +248,7 @@ values file without checking secret.mode.v1 first.
   {{- if hasKey . "preserveKeys" -}}
     {{- $_ := set $payloadArgs "preserveKeys" (default (list) .preserveKeys) -}}
   {{- end -}}
-  {{- $payload := include "helx-common.secret.payload.v1" $payloadArgs | fromYaml -}}
+  {{- $payload := include "helx-common.secret.payload.v1" $payloadArgs | fromJson -}}
   {{- $data := default (dict) $payload.data -}}
   {{- $stringData := default (dict) $payload.stringData -}}
   {{- range $key := (default (list) .requiredKeys) -}}
@@ -264,7 +270,6 @@ metadata:
   annotations:
 {{- toYaml . | nindent 4 }}
 {{- end }}
-type: {{ $secretType }}
 {{- with $payload.data }}
 data:
 {{- toYaml . | nindent 2 }}
@@ -273,6 +278,11 @@ data:
 stringData:
 {{- toYaml . | nindent 2 }}
 {{- end }}
+{{- /*
+type comes last so no value ends the document: Helm trims trailing whitespace
+from each manifest, which would cut the extra line breaks kept by a |+ scalar.
+*/}}
+type: {{ $secretType }}
 {{- end -}}
 
 {{- if eq $mode "externalSecret" }}

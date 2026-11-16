@@ -109,18 +109,18 @@ def patch_daemonset(
     init_containers: list[client.V1Container],
 ) -> None:
     """Patch the prepuller DaemonSet so its init containers match the desired list."""
-    patch = {
-        "spec": {
-            "template": {
-                "spec": {
-                    "initContainers": [
-                        client.ApiClient().sanitize_for_serialization(c)
-                        for c in init_containers
-                    ]
-                }
-            }
-        }
-    }
+    # A list body is sent as a JSON patch, whose "add" replaces the whole list
+    # (and works when the field is absent). A dict body would be a strategic
+    # merge patch, which matches init containers by name and never removes
+    # one, so apps dropped from the catalog would keep being pulled.
+    patch = [{
+        "op": "add",
+        "path": "/spec/template/spec/initContainers",
+        "value": [
+            client.ApiClient().sanitize_for_serialization(c)
+            for c in init_containers
+        ],
+    }]
     apps_api.patch_namespaced_daemon_set(
         name=DAEMONSET_NAME,
         namespace=DAEMONSET_NAMESPACE,

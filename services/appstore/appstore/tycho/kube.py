@@ -62,10 +62,17 @@ class KubernetesCompute(Compute):
         return namespace
 
     def check_volumes(self, volumes, namespace):
+        """ Return the indexes of PVC-backed volumes whose PVC doesn't exist,
+            so start() can drop them. Only kind "pvc" volumes are checked:
+            an emptyDir (including emptyDirSeeded) is created with the pod and
+            never has a PVC, so checking it would always drop it. Volumes
+            without a kind are treated as PVCs, as before kind existed. """
         try:
             volumesNA = []
             api_response = self.api.list_namespaced_persistent_volume_claim(namespace=namespace)
             for index, volume in enumerate(volumes):
+                if volume.get("kind", "pvc") != "pvc":
+                    continue
                 notExists = True
                 if volume["volume_name"] != "stdnfs":
                     for item in api_response.items:

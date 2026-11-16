@@ -48,8 +48,14 @@ class Volumes:
         self.pvcs = []
         self.empty_dirs = []
 
-    def volume(self, container_name, pvc_name, volume_name, path=None, subpath=None, empty_dir_name=None, needs_seed=False):
-        self.volumes.append({"container_name": container_name, "pvc_name": pvc_name, "volume_name": volume_name, "path": path, "subpath": subpath, "empty_dir_name": empty_dir_name, "needs_seed": needs_seed})
+    def volume(self, container_name, pvc_name, volume_name, path=None, subpath=None, empty_dir_name=None, needs_seed=False, kind="pvc"):
+        # kind records which scheme declared the volume ("pvc" or "emptyDir";
+        # emptyDirSeeded is an emptyDir). It can't be inferred from the other
+        # fields: pvc_name and empty_dir_name are both None on every reference
+        # to a shared name after the first, so a repeat PVC and a repeat
+        # emptyDir look the same without it. KubernetesCompute.check_volumes
+        # uses it to validate only PVC-backed volumes.
+        self.volumes.append({"container_name": container_name, "pvc_name": pvc_name, "volume_name": volume_name, "path": path, "subpath": subpath, "empty_dir_name": empty_dir_name, "needs_seed": needs_seed, "kind": kind})
 
     def process_volumes(self):
        for index, container in enumerate(self.containers):
@@ -73,7 +79,7 @@ class Volumes:
                    self.empty_dirs.append(volume_name)
                    path = parts[2] if len(parts) == 3 else None
                    subpath = "/".join(parts[1].split("/")[3:]) if len(parts) == 3 else None
-                   self.volume(container['name'], None, volume_name, path, subpath, empty_dir_name=empty_dir_name)
+                   self.volume(container['name'], None, volume_name, path, subpath, empty_dir_name=empty_dir_name, kind="emptyDir")
                elif parts[0] == "emptyDirSeeded":
                    # Same as emptyDir://, except the subPath target is a file
                    # that already exists in the container image (e.g.
@@ -94,7 +100,7 @@ class Volumes:
                    self.empty_dirs.append(volume_name)
                    path = parts[2] if len(parts) == 3 else None
                    subpath = "/".join(parts[1].split("/")[3:]) if len(parts) == 3 else None
-                   self.volume(container['name'], None, volume_name, path, subpath, empty_dir_name=empty_dir_name, needs_seed=True)
+                   self.volume(container['name'], None, volume_name, path, subpath, empty_dir_name=empty_dir_name, needs_seed=True, kind="emptyDir")
                else:
                    logger.debug(f"Volume definition should follow the pattern: pvc://<pvc_name>/<sub-path>:<container-path> or pvc://<sub-path>:<container-path> or emptyDir://<volume-name>/<sub-path>:<container-path> or emptyDirSeeded://<volume-name>/<sub-path>:<container-path>")
                    raise Exception(f"Wrong Volume definition in Container:{container['name']} and Volume:{volume}")

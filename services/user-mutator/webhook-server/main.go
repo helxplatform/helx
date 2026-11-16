@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1420,6 +1421,84 @@ func printPatchOperations(operations []jsonpatch.JsonPatchOperation) {
 
 func boolPtr(b bool) *bool { return &b }
 
+func int64PtrCopy(p *int64) *int64 {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
+// mergeCapabilities appends each capability in add that list doesn't already have.
+func mergeCapabilities(list, add []corev1.Capability) []corev1.Capability {
+	for _, c := range add {
+		if !slices.Contains(list, c) {
+			list = append(list, c)
+		}
+	}
+	return list
+}
+
+// mergeContainerSecurityContext returns a copy of existing with the user's
+// identity applied on top. Only the fields the identity sets are changed
+// (RunAsUser, RunAsGroup, and any capabilities it adds or drops), so
+// everything the launcher already set -- readOnlyRootFilesystem,
+// runAsNonRoot, capabilities.drop, seccompProfile -- survives. Replacing the
+// whole context instead silently dropped all of those from launched apps.
+// The result is always a fresh copy, so containers never share one context.
+func mergeContainerSecurityContext(existing, identity *corev1.SecurityContext) *corev1.SecurityContext {
+	merged := &corev1.SecurityContext{}
+	if existing != nil {
+		merged = existing.DeepCopy()
+	}
+	if identity == nil {
+		return merged
+	}
+	if identity.RunAsUser != nil {
+		merged.RunAsUser = int64PtrCopy(identity.RunAsUser)
+	}
+	if identity.RunAsGroup != nil {
+		merged.RunAsGroup = int64PtrCopy(identity.RunAsGroup)
+	}
+	if identity.Capabilities != nil && (len(identity.Capabilities.Add) > 0 || len(identity.Capabilities.Drop) > 0) {
+		if merged.Capabilities == nil {
+			merged.Capabilities = &corev1.Capabilities{}
+		}
+		merged.Capabilities.Add = mergeCapabilities(merged.Capabilities.Add, identity.Capabilities.Add)
+		merged.Capabilities.Drop = mergeCapabilities(merged.Capabilities.Drop, identity.Capabilities.Drop)
+	}
+	return merged
+}
+
+// mergePodSecurityContext returns a copy of existing with the user's identity
+// applied on top: RunAsUser, RunAsGroup and FSGroup when the identity sets
+// them, and the identity's supplemental groups added to any already there.
+// Other pod-level fields (seccompProfile, fsGroupChangePolicy, ...) are kept.
+func mergePodSecurityContext(existing, identity *corev1.PodSecurityContext) *corev1.PodSecurityContext {
+	merged := &corev1.PodSecurityContext{}
+	if existing != nil {
+		merged = existing.DeepCopy()
+	}
+	if identity == nil {
+		return merged
+	}
+	if identity.RunAsUser != nil {
+		merged.RunAsUser = int64PtrCopy(identity.RunAsUser)
+	}
+	if identity.RunAsGroup != nil {
+		merged.RunAsGroup = int64PtrCopy(identity.RunAsGroup)
+	}
+	if identity.FSGroup != nil {
+		merged.FSGroup = int64PtrCopy(identity.FSGroup)
+	}
+	for _, g := range identity.SupplementalGroups {
+		if !slices.Contains(merged.SupplementalGroups, g) {
+			merged.SupplementalGroups = append(merged.SupplementalGroups, g)
+		}
+	}
+	return merged
+}
+
 // applyResourcesToContainers applies the given resources to each container in the slice.
 func applyResourcesToContainers(containers []corev1.Container, resources ProfileResources, identityExemptContainers map[string]bool) {
 	for i := range containers {
@@ -1428,10 +1507,11 @@ func applyResourcesToContainers(containers []corev1.Container, resources Profile
 		// Add volume mounts
 		container.VolumeMounts = append(container.VolumeMounts, resources.VolumeMounts...)
 
-		// Apply SecurityContext
+		// Apply the user's identity on top of the container's own security
+		// context, keeping the fields the launcher set.
 		if resources.SecurityContext != nil {
 			if !identityExemptContainers[container.Name] {
-				container.SecurityContext = resources.SecurityContext
+				container.SecurityContext = mergeContainerSecurityContext(container.SecurityContext, resources.SecurityContext)
 			}
 		}
 		if container.SecurityContext == nil {
@@ -1478,9 +1558,10 @@ func calculatePatch(admissionReview *admissionv1.AdmissionReview, resources Prof
 	// security context and are not touched by Tycho's per-container resize.
 	modifiedDeployment.Spec.Template.Spec.InitContainers = append(modifiedDeployment.Spec.Template.Spec.InitContainers, resources.InitContainers...)
 
-	// Apply PodSecurityContext
+	// Apply the user's identity on top of the pod's own security context.
 	if resources.PodSecurityContext != nil {
-		modifiedDeployment.Spec.Template.Spec.SecurityContext = resources.PodSecurityContext
+		modifiedDeployment.Spec.Template.Spec.SecurityContext = mergePodSecurityContext(
+			modifiedDeployment.Spec.Template.Spec.SecurityContext, resources.PodSecurityContext)
 	}
 
 	slog.Info("marshalling original new JSON")

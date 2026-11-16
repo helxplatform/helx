@@ -87,6 +87,15 @@ extra permissions.
 {{- end }}
 
 {{/*
+True when the postgres-user plugin is enabled in values. Used to gate the
+Secrets RBAC role/rolebinding so clusters without the plugin don't get the
+extra permissions.
+*/}}
+{{- define "ldap-sync.postgresUserEnabled" -}}
+{{- ((((.Values.config).plugins).postgresUser).enabled) | ternary "true" "" -}}
+{{- end }}
+
+{{/*
 Name of the chart-managed LDAP credential Secret.
 */}}
 {{- define "ldap-sync.managedSecretName" -}}

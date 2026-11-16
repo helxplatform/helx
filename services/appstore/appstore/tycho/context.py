@@ -288,7 +288,20 @@ class TychoContext:
 
     def update(self, request):
         return self.client.patch(request)
-    
+
+    @staticmethod
+    def merge_security_context(spec_security_context, registry_security_context):
+        """ Combine the app spec's own top-level security_context with the
+            registry entry's securityContext, the registry winning on any key
+            both set. Replacing the spec's with the registry's (or with {} when
+            the registry has none) silently discarded settings the spec asked
+            for, such as readOnlyRootFilesystem. Returns a new dict: get_spec
+            hands back its cached spec, so the result must be the same however
+            many times an app is launched. """
+        merged = dict(spec_security_context or {})
+        merged.update(registry_security_context or {})
+        return merged
+
     def start (self, principal, app_id, resource_request, host, extra_container_env={}):
         """ Get application metadata, docker-compose structure, settings, and compose API request. """
         logger.info(f"\nprincipal: {principal}\napp_id: {app_id}\n"
@@ -316,7 +329,8 @@ class TychoContext:
         }
         principal_params_json = json.dumps(principal_params, indent=4)
         """ Security Context that are set for the app """
-        spec["security_context"] = self.apps[app_id]["securityContext"] if 'securityContext' in self.apps[app_id].keys() else {}
+        spec["security_context"] = self.merge_security_context(
+            spec.get("security_context"), self.apps[app_id].get("securityContext"))
         spec["services"][app_id]["ext"] = self.apps[app_id]["ext"] if 'ext' in self.apps[app_id].keys() else None
 
         # If ephemeralStorage is set in the app's docker-compose.yaml then

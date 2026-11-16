@@ -184,3 +184,29 @@ func TestMergeCapabilitiesUnionsAddAndDrop(t *testing.T) {
 		t.Errorf("merge must not modify the existing context")
 	}
 }
+
+// TestNSLCDSidecarReadOnlyRootFilesystem: the injected nslcd sidecar runs with
+// a read-only root (UNCDSR-182) and still sets nothing else the namespace's
+// custom SCC would reject (runAsNonRoot, capabilities, seccomp).
+func TestNSLCDSidecarReadOnlyRootFilesystem(t *testing.T) {
+	_, _, sidecar := getNSLCDVolumesMountsAndSidecar("nslcd-config", "nslcd-sidecar:test")
+	sc := sidecar.SecurityContext
+	if sc == nil || sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+		t.Fatalf("nslcd sidecar should set readOnlyRootFilesystem: %+v", sc)
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		t.Errorf("allowPrivilegeEscalation should be false: %+v", sc)
+	}
+	if sc.RunAsNonRoot != nil || sc.Capabilities != nil || sc.SeccompProfile != nil {
+		t.Errorf("sidecar must leave runAsNonRoot/capabilities/seccomp to the SCC: %+v", sc)
+	}
+	var socketMounted bool
+	for _, m := range sidecar.VolumeMounts {
+		if m.MountPath == nslcdSocketDir && m.Name == nslcdSocketVol {
+			socketMounted = true
+		}
+	}
+	if !socketMounted {
+		t.Errorf("nslcd needs its writable socket emptyDir at %s", nslcdSocketDir)
+	}
+}

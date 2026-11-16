@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest import TestCase, mock
 
 from tycho.config import Config
+from tycho.context import TychoContext
 from tycho.kube import KubernetesCompute
 from tycho.model import System, Volumes
 
@@ -145,3 +146,71 @@ class SeededSpecRenderTests(TestCase):
         seed = next(c for c in pod_spec["initContainers"] if c["name"] == "seed-volumes")
         self.assertEqual(seed["image"], "example.invalid/jupyter:test")
         self.assertIn('cp -a "/etc/passwd.default"', seed["args"][0])
+
+
+class MergeSecurityContextTests(TestCase):
+    """ TychoContext.start keeps the spec's own security_context, with the
+        registry entry's securityContext winning where both set a key. """
+
+    merge = staticmethod(TychoContext.merge_security_context)
+
+    def test_spec_setting_survives_when_registry_has_none(self):
+        self.assertEqual(self.merge({"readOnlyRootFilesystem": True}, None),
+                         {"readOnlyRootFilesystem": True})
+
+    def test_registry_setting_applies_when_spec_has_none(self):
+        self.assertEqual(self.merge(None, {"runAsUser": 1000}), {"runAsUser": 1000})
+
+    def test_registry_wins_on_conflict_and_both_sides_kept(self):
+        merged = self.merge({"readOnlyRootFilesystem": True, "fsGroup": 0},
+                            {"fsGroup": 1000, "runAsUser": 1000})
+        self.assertEqual(merged, {"readOnlyRootFilesystem": True, "fsGroup": 1000, "runAsUser": 1000})
+
+    def test_nothing_set_is_empty(self):
+        self.assertEqual(self.merge(None, None), {})
+
+    def test_inputs_unchanged_and_repeat_launch_is_stable(self):
+        spec_sc = {"readOnlyRootFilesystem": True}
+        registry_sc = {"runAsUser": 1000}
+        once = self.merge(spec_sc, registry_sc)
+        # get_spec returns its cached spec, so a second launch merges the
+        # already-merged result again.
+        twice = self.merge(once, registry_sc)
+        self.assertEqual(once, twice)
+        self.assertEqual(spec_sc, {"readOnlyRootFilesystem": True})
+        self.assertEqual(registry_sc, {"runAsUser": 1000})
+        self.assertIsNot(once, spec_sc)
+
+
+class SpecSecurityContextRenderTests(TestCase):
+    """ A spec-level readOnlyRootFilesystem, merged as TychoContext.start does,
+        reaches the rendered container; an empty TYCHO_APP_FS_GROUP renders no
+        pod fsGroup, while the chart's default of 0 renders fsGroup: 0. """
+
+    SPEC = {
+        "version": "3.6",
+        "services": {"filebrowser": {
+            "image": "example.invalid/filebrowser:test",
+            "ports": ["8080:8080"],
+            "volumes": ["emptyDir://filebrowser-tmp:/tmp"],
+        }},
+        "security_context": {"readOnlyRootFilesystem": True},
+    }
+
+    def _render(self, fs_group_env):
+        spec = json.loads(json.dumps(self.SPEC))
+        spec["security_context"] = TychoContext.merge_security_context(spec.get("security_context"), None)
+        with mock.patch.dict(os.environ, {"DEV_PHASE": "test", "TYCHO_APP_FS_GROUP": fs_group_env}):
+            system = System.parse(Config(), "filebrowser", json.dumps({"username": "alice"}),
+                                  spec, "default", env={}, services={})
+            return next(m for m in system.render("pod.yaml") if m and m.get("kind") == "Pod")["spec"]
+
+    def test_read_only_root_filesystem_rendered_from_spec(self):
+        pod_spec = self._render("")
+        self.assertIs(pod_spec["containers"][0]["securityContext"].get("readOnlyRootFilesystem"), True)
+
+    def test_empty_fs_group_env_renders_no_fs_group(self):
+        self.assertNotIn("fsGroup", (self._render("").get("securityContext") or {}))
+
+    def test_default_fs_group_env_renders_root_fs_group(self):
+        self.assertEqual(self._render("0")["securityContext"].get("fsGroup"), 0)

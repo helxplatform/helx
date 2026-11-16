@@ -48,20 +48,61 @@ spec:
     fsGroup: {{ system.security_context.fs_group }}
     {% endif %}
   {% endif %}
-  {% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
+  {% set seed_volumes = system.volumes | selectattr('container_name', 'equalto', container.name) | selectattr('needs_seed', 'equalto', True) | list %}
+  {% if seed_volumes or ((system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test")) %}
   initContainers:
+  {% if seed_volumes %}
+  # UNCDSR-182: seeds each emptyDirSeeded:// volume's real file (from
+  # "<container-path>.default", baked into the image at build time) into the
+  # volume via a whole-volume (non-subPath) mount, using this container's own
+  # image (not the generic init image) since the seed content lives there.
+  # Must run before volume-tasks/userless-volume-tasks below, which mount the
+  # same volumes (with the same subPath) for this container: without a real
+  # file already in place, kubelet creates a directory at the subPath source
+  # instead, which breaks anything -- including the container runtime's own
+  # user lookup -- that expects a file there.
+  - name: seed-volumes
+    image: {{ container.image }}
+    imagePullPolicy: IfNotPresent
+    securityContext:
+      allowPrivilegeEscalation: false
+    resources:
+      requests:
+        memory: {{ system.init_memory }}
+        cpu: {{ system.init_cpus }}
+      limits:
+        memory: {{ system.init_memory }}
+        cpu: {{ system.init_cpus }}
+    command: [ 'sh', '-c' ]
+    args:
+      - |
+        set -eu
+        {% for volume in seed_volumes %}
+        SEED_DEST="/tycho-seed/{{ volume["volume_name"] }}/{{ volume["subpath"] }}"
+        mkdir -p "$(dirname "$SEED_DEST")"
+        if [ ! -e "$SEED_DEST" ]; then
+          cp -a "{{ volume["path"] }}.default" "$SEED_DEST"
+        fi
+        {% endfor %}
+        echo OK
+    volumeMounts:
+    {% for volume in seed_volumes %}
+    - name: {{ volume["volume_name"] }}
+      mountPath: "/tycho-seed/{{ volume["volume_name"] }}"
+    {% endfor %}
+  {% endif %}
+  {% if (system.enable_init_container == "true") and (system.create_home_dirs == "true") and (system.dev_phase != "test") %}
   - name: volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     imagePullPolicy: IfNotPresent
-    {% if system.init_security_context.run_as_user or system.init_security_context.run_as_group %}
     securityContext:
+      allowPrivilegeEscalation: false
       {% if system.init_security_context.run_as_user %}
       runAsUser: {{ system.init_security_context.run_as_user }}
       {% endif %}
       {% if system.init_security_context.run_as_group %}
       runAsGroup: {{ system.init_security_context.run_as_group }}
       {% endif %}
-    {% endif %}
     # Fixed resources
     resources:
       requests:
@@ -111,6 +152,7 @@ spec:
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     imagePullPolicy: IfNotPresent
     securityContext:
+      allowPrivilegeEscalation: false
       runAsUser: {{ system.init_nobody_uid }}
       runAsGroup: {{ system.init_nobody_gid }}
     # Fixed resources
@@ -226,20 +268,25 @@ spec:
     {% endfor %}
     {% endif %}
   {% endif %}
+  {% endif %}
 {% endfor %}
   containers:
 {% for container in system.containers %}    
   - name: {{ container.name }}
     image: {{ container.image }}
-    {% if system.security_context.run_as_user or system.security_context.run_as_group %}
+    # Always set: AKS denies pods whose containers leave it unset, and the
+    # user-mutator webhook is not guaranteed to have added it.
     securityContext:
+      allowPrivilegeEscalation: false
       {% if system.security_context.run_as_user %}
       runAsUser: {{ system.security_context.run_as_user }}
       {% endif %}
       {% if system.security_context.run_as_group %}
       runAsGroup: {{ system.security_context.run_as_group }}
       {% endif %}
-    {% endif %}
+      {% if system.security_context.read_only_root_filesystem == "true" %}
+      readOnlyRootFilesystem: true
+      {% endif %}
 {% if container.command %}
     command: {{ container.command }}
 {% endif %}
@@ -304,6 +351,11 @@ spec:
     {% endif %}
   {% endfor %}
 {% endif %}
+    # Referenced rather than read so appstore needs no access to secrets.
+    envFrom:
+    - secretRef:
+        name: {{ system.system_name }}-env
+        optional: true
 {% if container.expose|length > 0 %}
     ports:
 {% for port in container.expose %}
@@ -438,6 +490,10 @@ spec:
   - name: {{ volume["volume_name"] }}
     persistentVolumeClaim:
       claimName: {{ volume["pvc_name"] }}
+  {% endif %}
+  {% if volume["empty_dir_name"] != None %}
+  - name: {{ volume["volume_name"] }}
+    emptyDir: {}
   {% endif %}
   {% endif %}
   {% endfor %}

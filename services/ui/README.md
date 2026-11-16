@@ -13,17 +13,17 @@ npm install
 npm start
 ```
 
-NOTE: You must run `make init` once you've cloned the repo to enable the commit-msg git hook so that conventional commits will apply automatically.
+Git hooks come from the monorepo: run `make setup` at the repository root
+instead of `make init` here. Commit messages do not drive versions.
 
 ### Appstore backend
 
 ### Appstore local development
 
-Using a local installation of Appstore:
+Using a local installation of Appstore, from the repository root:
 
 ```bash
-git clone https://github.com/helxplatform/appstore.git
-cd appstore
+cd services/appstore
 cp .env.sample .env
 make install
 make start
@@ -33,16 +33,17 @@ NOTE: This cannot launch apps due to running in stub mode, but will allow login 
 Django admin, see details below for social login) and serve up some stubbed data.
 The default user is when running Appstore locally is username: admin and password: admin.
 
-Refer to the [Appstore repo](https://github.com/helxplatform/appstore/) for more info.
+Refer to `services/appstore/README.md` for more info.
 
 ### Appstore in Kubernetes
 
-You can install the `helx` helm chart as detailed [here](https://github.com/helxplatform/helm-charts/blob/develop/deploy-helx.md)
-and port forward so that the appstore endpoints are available to your local network space.
+You can install the `helx` umbrella chart as the root `README.md` describes
+and port forward so that the appstore endpoints are available to your local
+network space.
 
 ```bash
-# Port-forward Appstore to http://localhost:8000
-kubectl port-forward service/helx-nginx 8000:80
+# Port-forward resty, the front door, to http://localhost:8000
+kubectl port-forward service/resty 8000:80
 ```
 
 Navigate to the site at `http://localhost:8000/`.
@@ -100,8 +101,13 @@ For UNC/Onyen SAML login, you'll need to send in a ticket to ITS requesting for 
 You can register a ticket [here](https://help.unc.edu/sp) by clicking Report an Issue.
 
 ## CICD
-This project uses github actions to test, build, and release both development and new release images depending on the branch code is merged to. A development image is built upon merge to the develop branch and a new relelase is created, tagged (based on Semver) when merging to the main/master branch.
 
-#### Fail on Vulnerability Detection
+The monorepo workflows build this image and package its chart; the root
+`README.md` and `.github/CI.md` describe them. They run neither `npm run lint`
+nor a vulnerability scanner, so run lint yourself.
 
-During PR's several vulnerability scanners are run. If there are vulnerabilities detected, the pr checks will fail and a report will be sent to Github Security Dashboard for viewing. Please ensure the vulnerability is mitigated prior to continuing the merge to protected branches.
+Images are pushed only to Harbor, `containers.renci.org/helxplatform/helx-ui`:
+`develop-<short-sha>` on every push to `develop`, and `v<appVersion>` (from
+`chart/Chart.yaml`) on every push to `main`. Versions never come from commit
+messages: to release an image change, bump `appVersion` and `version` in
+`chart/Chart.yaml`, then the ui pin in `deploy/helm/helx-chart/Chart.yaml`.

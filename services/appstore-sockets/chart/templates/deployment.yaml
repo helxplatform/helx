@@ -24,6 +24,8 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - containerPort: 5555
           resources:
@@ -46,9 +48,14 @@ spec:
                 configMapKeyRef:
                   key: APPSTORE_HOST
                   name: {{ include "appstore-sockets.fullname" . }}-env
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
         - name: {{ .Chart.Name }}-monitoring
           image: "{{ .Values.monitoring.image.repository }}:{{ .Values.monitoring.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
           imagePullPolicy: {{ .Values.monitoring.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           resources:
             {{- toYaml .Values.monitoring.resources | nindent 12 }}
           env:
@@ -61,6 +68,17 @@ spec:
                 secretKeyRef:
                   key: PUBLISHER_SECRET
                   name: {{ include "appstore-sockets.secretName" . }}
+          # UNCDSR-182: the monitoring sidecar's Python kubernetes client
+          # (dynamic.DynamicClient -> tempfile.gettempdir()) needs a writable
+          # /tmp to cache its API discovery data; it crashes outright
+          # (FileNotFoundError: No usable temporary directory) without one
+          # once the root filesystem is read-only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

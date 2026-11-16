@@ -25,6 +25,25 @@ spec:
             - name: controller
               image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag | default (printf "v%s" .Chart.AppVersion) }}"
               imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              # UNCDSR-182: the controller's own prepuller.py makes no local
+              # file writes, but the appstore package it pip-installs
+              # (git+https://github.com/helxplatform/appstore.git@pip-installable
+              # -- a separate repo from this monorepo's own services/appstore,
+              # whose equivalent cache path was already fixed in 2e4b61da)
+              # opens requests_cache.CachedSession(cache_name='tycho-registry')
+              # with a bare name, which resolves to a sqlite file in the CWD.
+              # The Dockerfile's WORKDIR /app holds the application source,
+              # now read-only; redirect the CWD to a writable emptyDir
+              # instead. The image's ENTRYPOINT uses a path relative to that
+              # WORKDIR, so it must be respecified in absolute form here once
+              # workingDir changes.
+              workingDir: /tmp
+              command: ["python", "-u", "/app/prepuller.py"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
               env:
                 - name: PREPULLER_DAEMONSET_NAME
                   value: {{ include "appstore-prepuller.daemonsetName" . }}
@@ -40,3 +59,6 @@ spec:
                   value: "{{- include "appstore-prepuller.intValue" .Values.daemonset.initRunAsUser }}"
               resources:
                 {{- toYaml .Values.controller.resources | nindent 16 }}
+          volumes:
+            - name: tmp
+              emptyDir: {}

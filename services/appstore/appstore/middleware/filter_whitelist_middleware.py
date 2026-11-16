@@ -1,6 +1,5 @@
 import os
 import logging
-import re
 from functools import lru_cache
 
 from django.conf import settings
@@ -12,7 +11,6 @@ from smtplib import SMTPSenderRefused, SMTPResponseException
 
 from ldap3 import Server, Connection, SUBTREE  # NEW
 from ldap3.utils.conv import escape_filter_chars
-from core.models import AuthorizedUser
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +73,10 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
         # changing the filter, e.g. (uid=*) would match every user.
         flt    = (f"(|(mail={escape_filter_chars(user.email)})"
                   f"(uid={escape_filter_chars(user.username)}))")
+        # Users from provisioned domains are found by mail only: a uid match
+        # could be someone else with the same name, e.g. a synced UNC onyen.
+        if (user.email or "").rpartition("@")[2].lower() in settings.LDAP_PROVISION_EMAIL_DOMAINS:
+            flt = f"(mail={escape_filter_chars(user.email)})"
 
         conn = None
         for attempt in range(cls.LDAP_RETRIES + 1):
@@ -92,7 +94,7 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
 
             logger.debug("[LDAP] Searching base=%s filter=%s", base, flt)
             try:
-                ok = conn.search(base, flt, SUBTREE, attributes=[])
+                ok = conn.search(base, flt, SUBTREE, attributes=["uid"])
                 logger.debug("[LDAP] Search ok=%s; hits=%s", ok, len(conn.entries))
                 if not ok or not conn.entries:
                     return False
@@ -104,14 +106,20 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
                                    ", ".join(e.entry_dn for e in conn.entries))
                     return False
                 user_dn = conn.entries[0].entry_dn
-                logger.debug("[LDAP] Resolved user_dn=%s", user_dn)
+                uids = conn.entries[0].entry_attributes_as_dict.get("uid", [])
+                logger.debug("[LDAP] Resolved user_dn=%s uid=%s", user_dn, uids)
             except Exception as exc:                           # noqa: BLE001
                 logger.error("[LDAP] Search failed: %s", exc)
                 continue
 
             try:
-                result = conn.compare(group_dn, "member", user_dn)
-                logger.debug("[LDAP] compare(%s member %s) → %s", group_dn, user_dn, result)
+                # A groupOfNames lists member DNs; a posixGroup (e.g. ldap-sync's
+                # helx-users) lists memberUid. A comparison against an attribute
+                # the group doesn't have is false.
+                result = (conn.compare(group_dn, "member", user_dn)
+                          or any(conn.compare(group_dn, "memberUid", u) for u in uids))
+                logger.debug("[LDAP] compare(%s member %s / memberUid %s) → %s",
+                             group_dn, user_dn, uids, result)
                 return result
             except Exception as exc:                           # noqa: BLE001
                 logger.error("[LDAP] Compare failed: %s", exc)
@@ -189,45 +197,16 @@ class AllowWhiteListedUserOnly(MiddlewareMixin):
     
 
     @staticmethod
-    def is_auto_whitelisted_email(user):
-        email = user.email
-        for pattern in settings.AUTO_WHITELIST_PATTERNS:
-            if re.match(pattern, email) is not None:
-                return True
-        return False
-    
-    @staticmethod
-    def is_whitelisted_username(user):
-        username = user.username
-        
-
-    @staticmethod
     def is_authorized(user):
+        """Only users in the LDAP group get in. Apps take their user identity
+        from LDAP, so a user admitted without an entry could launch apps that
+        never start. The AuthorizedUser table and AUTO_WHITELIST_PATTERNS are no
+        longer consulted."""
         logger.debug("[AUTHZ] Testing %s / %s", user.username, user.email)
-
-        if user.email and AuthorizedUser.objects.filter(email=user.email).exists():
-            logger.debug("[AUTHZ] email match in AuthorizedUser")
-            return True
-
-        if AllowWhiteListedUserOnly.is_auto_whitelisted_email(user):
-            logger.debug("[AUTHZ] AUTO-pattern match → persisting email")
-            # AuthorizedUser.objects.get_or_create(
-            #     email=user.email, defaults={"username": user.username}
-            # )
-            return True
-
-        if AuthorizedUser.objects.filter(username=user.username).exists():
-            logger.debug("[AUTHZ] username match in AuthorizedUser")
-            return True
-
         if AllowWhiteListedUserOnly._ldap_group_member(user):
-            logger.debug("[AUTHZ] LDAP group match → persisting email")
-            # AuthorizedUser.objects.get_or_create(
-            #     email=user.email, defaults={"username": user.username}
-            # )
+            logger.debug("[AUTHZ] LDAP group match")
             return True
-
-        logger.debug("[AUTHZ] No rule matched; user is NOT authorised")
+        logger.debug("[AUTHZ] Not in the LDAP group; user is NOT authorised")
         return False
 
 

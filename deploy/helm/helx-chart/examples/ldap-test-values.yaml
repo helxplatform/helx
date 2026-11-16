@@ -5,7 +5,8 @@
 #
 # kubectl -n <namespace> create secret generic openldap-credentials \\
 #   --from-literal=LDAP_ADMIN_PASSWORD='replace-me' \\
-#   --from-literal=LDAP_CONFIG_ADMIN_PASSWORD='replace-me'
+#   --from-literal=LDAP_CONFIG_ADMIN_PASSWORD='replace-me' \\
+#   --from-literal=LDAP_APPSTORE_PASSWORD='replace-me'
 
 ambassador:
   enabled: false

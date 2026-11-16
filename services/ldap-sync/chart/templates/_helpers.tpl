@@ -31,6 +31,15 @@ Create the bounded name used by the search bootstrap resources.
 {{- end }}
 
 {{/*
+Name of the chart's Service: the bare chart name, not "<release>-<chart>",
+so other components can address it at a fixed name. fullnameOverride still
+takes over, which lets two releases share a namespace.
+*/}}
+{{- define "ldap-sync.serviceName" -}}
+{{- default .Chart.Name .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
 Create chart name and version as used by the chart label.
 */}}
 {{- define "ldap-sync.chart" -}}
@@ -75,6 +84,15 @@ extra permissions.
 */}}
 {{- define "ldap-sync.pvcGroupEnabled" -}}
 {{- ((((.Values.config).plugins).pvcGroup).enabled) | ternary "true" "" -}}
+{{- end }}
+
+{{/*
+True when the postgres-user plugin is enabled in values. Used to gate the
+Secrets RBAC role/rolebinding so clusters without the plugin don't get the
+extra permissions.
+*/}}
+{{- define "ldap-sync.postgresUserEnabled" -}}
+{{- ((((.Values.config).plugins).postgresUser).enabled) | ternary "true" "" -}}
 {{- end }}
 
 {{/*

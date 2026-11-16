@@ -28,11 +28,15 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
-securityContext: {}
+# -- Container securityContext, applied to every container in the pod.
+# allowPrivilegeEscalation: false is required by the AKS policy that denies
+# privilege escalation, and is harmless elsewhere; keep it when overriding.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
   # capabilities:
   #   drop:
   #   - ALL
-  # readOnlyRootFilesystem: true
   # runAsNonRoot: true
   # runAsUser: 1000
 
@@ -159,6 +163,10 @@ searchBootstrap:
       runAsUser: 100
       runAsNonRoot: true
       allowPrivilegeEscalation: false
+      # UNCDSR-182: readOnlyRootFilesystem: true is safe here -- the bootstrap
+      # script only makes curl requests against the ldap-sync API and holds
+      # state in shell variables, with no local file writes.
+      readOnlyRootFilesystem: true
       capabilities:
         drop:
           - ALL
@@ -172,9 +180,11 @@ config:
         - --baseGroup=helx-users
       image:
         repository: containers.renci.org/helxplatform/unc-group-x
-        tag: v2.4.1
+        tag: v2.4.2
       name: unc-group-x
       url: http://localhost:5001/hook
+  # Floor, in seconds, applied to every search refresh interval.
+  minRefresh: 60
   hookRetry:
     maxRetries: 10
     initialDelayMs: 100
@@ -198,7 +208,7 @@ config:
   plugins:
     # Creates a PVC in the release namespace for every synced group
     # entry. When enabled, the chart also installs a Role/RoleBinding
-    # granting the service account get/list/create on PVCs.
+    # granting the service account list/create on PVCs.
     pvcGroup:
       enabled: true
       # -- Storage class for the PVC. Change this to the desired storage class.
@@ -206,6 +216,42 @@ config:
       size: 10Gi
       accessModes:
         - ReadWriteMany
+    # Provisions a Postgres login role + a credentials Secret for every
+    # synced user (objectClass helxUser). Roles are granted based on the
+    # user's LDAP group memberships via groupRoles below. When enabled, the
+    # chart also installs a Role/RoleBinding granting the service account
+    # get/create/update on Secrets.
+    postgresUser:
+      enabled: false
+      # Postgres admin connection (admin = the postgres account). The admin
+      # password is read from POSTGRES_USER_PASSWORD in the Secret selected by
+      # secret.mode and is never rendered into the ConfigMap.
+      host: ""
+      port: 5432
+      username: postgres
+      # Deprecated: copied into a chart-managed Secret as
+      # POSTGRES_USER_PASSWORD. Set secret.values.POSTGRES_USER_PASSWORD instead.
+      password: ""
+      database: ""
+      sslmode: disable
+      matchObjectClass: helxUser
+      namePrefix: "pguser-"
+      # Map each LDAP group short-name to a Postgres role and the privilege
+      # statements that define it. Privileges are plain SQL run verbatim when
+      # the role is first ensured. The "users" group is REQUIRED and acts as
+      # the default role every user receives.
+      groupRoles:
+        {}
+        # users:
+        #   role: viewer
+        #   privileges:
+        #     - "GRANT CONNECT ON DATABASE app TO viewer"
+        #     - "GRANT USAGE ON SCHEMA public TO viewer"
+        #     - "GRANT SELECT ON ALL TABLES IN SCHEMA public TO viewer"
+        # admin:
+        #   role: db_admin
+        #   privileges:
+        #     - "GRANT ALL PRIVILEGES ON DATABASE app TO db_admin"
 
 # PostgreSQL configuration
 postgres:
@@ -228,6 +274,10 @@ postgres:
   persistence:
     enabled: true
     size: 8Gi
+  # The dependency's own data/run/tmp mounts are already wired for a
+  # read-only root; its default (false) is just conservative, not required.
+  containerSecurityContext:
+    readOnlyRootFilesystem: true
   auth:
     # Username for the database
     username: ldapsync

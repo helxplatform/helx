@@ -5,7 +5,7 @@ import time
 from django.conf import settings
 from django.contrib.auth.models import User, Group
 from django.http import HttpResponseRedirect
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from ldap3.core.exceptions import LDAPSocketOpenError, LDAPSocketReceiveError
 from mock import Mock, patch
@@ -15,12 +15,13 @@ from core.models import AuthorizedUser
 from middleware.filter_whitelist_middleware import AllowWhiteListedUserOnly
 
 
+@patch.object(AllowWhiteListedUserOnly, "send_whitelist_email")
 class AllowWhiteListedUserOnlyTests(TestCase):
     """ Test the authorization filter middleware. """
 
     def setUp(self):
         """ Configure the authorization filter. """
-        self.middleware = AllowWhiteListedUserOnly()
+        self.middleware = AllowWhiteListedUserOnly(get_response=Mock())
         self.request = Mock()
         self.request.META = {
             "HTTP_REMOTE_USER": "testuser",
@@ -36,63 +37,46 @@ class AllowWhiteListedUserOnlyTests(TestCase):
         self.request.session = {}
         self.groups = Group.objects.create(name="whitelisted")
 
-    def test_request_processing(self):
-        """ Test processing a request. """
-        self.client.login(username="admin", password="adminx")
-        response = self.middleware.process_request(self.request)
-        self.assertIsNone(response)
-
-    def _create_user_and_login(
-        self, username="test", email="test@test.com", password="admin"
-    ):
-        """Test for creating user"""
-        user = User.objects.create(username=username, email=email)
-        user.set_password(password)
-        user.save()
-        self.client.login(username=username, password=password)
-        return user
-
-    def test_login_whitelisted_user(self):
-        print("---- TESTING FOR WHITELISTED USER (steve_whitelist) ----- ")
-        user = self._create_user_and_login(
-            username="Steve_whitelist", email="steve@renci.com", password="admin"
-        )
-        AuthorizedUser.objects.create(email=user.email)
+    def _process(self, in_ldap_group, superuser=False):
+        """Run the filter for a logged-in user, with the LDAP group check stubbed."""
+        user = User.objects.create(username="steve", email="steve@renci.org",
+                                   is_superuser=superuser)
+        self.client.force_login(user)
         self.request.user = user
         self.request.session = self.client.session
-        response = self.middleware.process_request(self.request)
-        self.assertFalse(isinstance(response, HttpResponseRedirect))
-        self.assertEqual(
-            list(self.request.user.groups.values_list("name", flat=True))[0],
-            self.groups.name,
-        )
+        with patch.object(AllowWhiteListedUserOnly, "_ldap_group_member",
+                          return_value=in_ldap_group):
+            response = self.middleware.process_request(self.request)
+        return user, response
 
-    def test_login_whitelisted_username(self):
-        print("---- TESTING FOR WHITELISTED USERNAME (steve_whitelist) ----- ")
-        user = self._create_user_and_login(
-            username="Steve_whitelist", email="steve@renci.com", password="admin"
-        )
-        AuthorizedUser.objects.create(username=user.username)
-        self.request.user = user
-        self.request.session = self.client.session
-        response = self.middleware.process_request(self.request)
-        self.assertFalse(isinstance(response, HttpResponseRedirect))
-        self.assertEqual(
-            list(self.request.user.groups.values_list("name", flat=True))[0],
-            self.groups.name,
-        )
-
-    def test_redirect_non_whitelisted_user(self):
-        user = self._create_user_and_login(
-            username="Steve_nonwhitelist",
-            email="steve@non-whitelestd.com",
-            password="admin",
-        )
-        self.request.user = user
-        self.request.session = self.client.session
-        response = self.middleware.process_request(self.request)
-        self.assertTrue(isinstance(response, HttpResponseRedirect))
+    def _assert_refused(self, response, send_email):
+        self.assertIsInstance(response, HttpResponseRedirect)
         self.assertEqual(response.url, settings.LOGIN_WHITELIST_URL)
+        send_email.assert_called_once()
+
+    def test_ldap_group_member_is_admitted(self, send_email):
+        user, response = self._process(in_ldap_group=True)
+        self.assertIsNone(response)
+        self.assertTrue(user.groups.filter(name=self.groups.name).exists())
+
+    def test_user_outside_ldap_group_is_refused(self, send_email):
+        user, response = self._process(in_ldap_group=False)
+        self._assert_refused(response, send_email)
+
+    def test_authorized_user_table_is_ignored(self, send_email):
+        # Without an LDAP identity, the user's apps would never start.
+        AuthorizedUser.objects.create(email="steve@renci.org", username="steve")
+        user, response = self._process(in_ldap_group=False)
+        self._assert_refused(response, send_email)
+
+    @override_settings(AUTO_WHITELIST_PATTERNS=[".*"])
+    def test_auto_whitelist_patterns_are_ignored(self, send_email):
+        user, response = self._process(in_ldap_group=False)
+        self._assert_refused(response, send_email)
+
+    def test_superuser_skips_the_check(self, send_email):
+        user, response = self._process(in_ldap_group=False, superuser=True)
+        self.assertIsNone(response)
 
 
 @patch.dict(os.environ, {
@@ -114,7 +98,8 @@ class LdapGroupMemberRetryTests(SimpleTestCase):
     def _live_conn(member=True):
         conn = Mock()
         conn.search.return_value = True
-        conn.entries = [Mock(entry_dn="uid=tcheek9,ou=users,dc=example,dc=org")]
+        conn.entries = [Mock(entry_dn="uid=tcheek9,ou=users,dc=example,dc=org",
+                             entry_attributes_as_dict={"uid": ["tcheek9"]})]
         conn.compare.return_value = member
         return conn
 
@@ -210,6 +195,20 @@ class LdapGroupMemberRetryTests(SimpleTestCase):
         # would add clauses of its own.
         self.assertEqual(self._filter_for("*", "x)(uid=*"),
                          "(|(mail=x\\29\\28uid=\\2a)(uid=\\2a))")
+
+    def test_posix_group_member_is_admitted(self):
+        # e.g. ldap-sync's helx-users lists memberUid, not member.
+        conn = self._live_conn()
+        conn.compare.side_effect = lambda dn, attr, value: (attr, value) == ("memberUid", "tcheek9")
+        result, connects = self._check([conn])
+        self.assertTrue(result)
+        self.assertEqual(connects, 1)
+
+    @override_settings(LDAP_PROVISION_EMAIL_DOMAINS=["duke.edu"])
+    def test_filter_for_provisioned_domain_is_mail_only(self):
+        # A uid match could be a UNC user with the same name.
+        self.assertEqual(self._filter_for("tcheek9", "tcheek9@Duke.edu"),
+                         "(mail=tcheek9@Duke.edu)")
 
     @patch.dict(os.environ, {"LDAP_URI": ""})
     def test_ldap_disabled_does_not_retry(self):

@@ -1,0 +1,19 @@
+# CI-only lint values for the appstore chart, used when it is linted on its own
+# and, nested under appstore:, when the umbrella is. Helm lint does not contact
+# a cluster, so these values exercise the caller-managed Secret mode without
+# putting synthetic credentials in manifests. Without them, helx-common's
+# missing-value check prints "[INFO] Fail: ..." on every lint.
+secret:
+  mode: existingSecret
+  existingSecret: appstore-lint-secrets
+# appstore 5.1.4 performs a cluster lookup when this is empty. Supplying a
+# CI-only value keeps offline lint deterministic.
+django:
+  APPSTORE_DJANGO_PASSWORD: lint-only-admin-password
+# pgadmin-secrets.yaml renders its own helx-common-managed Secret the same
+# way the chart's main secret.yaml does. Same existingSecret override, for
+# the same reason.
+pgadmin:
+  secret:
+    mode: existingSecret
+    existingSecret: pgadmin-lint-secrets

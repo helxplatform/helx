@@ -185,13 +185,15 @@ contain these keys:
 
 - `SOURCE_BIND_PASSWORD`
 - `TARGET_BIND_PASSWORD`
+- `POSTGRES_USER_PASSWORD`, only when `config.plugins.postgresUser.enabled`
+  is true: the admin password the postgres-user plugin connects with
 
 Choose one mode:
 
 1. **Existing Secret**: set `secret.mode: existingSecret` and name the
    caller-managed Secret in `secret.existingSecret`. The chart does not create
    or modify that Secret.
-2. **Chart values**: set `secret.mode: values` and provide both keys under
+2. **Chart values**: set `secret.mode: values` and provide the keys under
    `secret.values`. The chart creates `<release>-secrets` and mounts the values
    as files.
 3. **External Secrets Operator**: set `secret.mode: externalSecret`, provide
@@ -199,10 +201,12 @@ Choose one mode:
 
 The generated application config references the mounted files at
 `/etc/ldap-sync/ldap-secrets/SOURCE_BIND_PASSWORD` and
-`/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD`. The deprecated
-`config.source.bindPassword` and `config.target.bindPassword` values are only
-copied into a chart-managed Secret for upgrade compatibility; they are never
-rendered into the ConfigMap.
+`/etc/ldap-sync/ldap-secrets/TARGET_BIND_PASSWORD`, and the postgres-user
+plugin reads `/etc/ldap-sync/ldap-secrets/POSTGRES_USER_PASSWORD`. The
+deprecated `config.source.bindPassword`, `config.target.bindPassword`, and
+`config.plugins.postgresUser.password` values are only copied into a
+chart-managed Secret for upgrade compatibility; they are never rendered into
+the ConfigMap.
 
 ## Building
 
@@ -281,6 +285,31 @@ startup delays (e.g., when hook sidecars are still initializing):
 
 This ensures hooks have time to start before the main application
 begins processing entries.
+
+### Source Connection and Polling
+
+All searches share a single bound connection to the source LDAP, so the
+number of binds (authentications against the source) scales with reconnects,
+not with the number of searches or how often they poll.
+
+```yaml
+min_refresh: 60   # Floor in seconds for every search's refresh interval (default: 60)
+```
+
+- A refresh interval below `min_refresh`, whether requested through the API
+  or by a hook's derived search, is raised to `min_refresh`
+- Poll intervals are jittered by ±10% so searches do not poll in lockstep
+- After a failed connect or bind, no new attempt is made for a backoff
+  period shared by all searches: 10s, doubling up to 5 minutes. Rejected
+  credentials go straight to the 5-minute backoff
+- A derived search re-emitted by a hook with an unchanged spec keeps
+  running; it is only restarted when its filter, refresh, base DN or
+  one-shot flag changes
+- Entries are compared ignoring the order of values within multi-valued
+  attributes, so server-side value reordering is not treated as a change
+
+The bundled hooks (`unc-group-x`, `ordrd-group-x`) request a 300 second
+refresh for their derived searches by default; override with `--refresh`.
 
 ### Database Persistence
 

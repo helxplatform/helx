@@ -293,6 +293,14 @@ export class WorkspacesAPI implements IWorkspacesAPI {
     }
 
     @APIRequest()
+    loginRedirect(path: string) {
+        // Log in through a provider by redirecting to its login path as returned by
+        // /providers/ (e.g. /accounts/oidc/keycloak/login/). Like CILogon and Dex,
+        // this is a full-page redirect: OIDC providers usually refuse popups.
+        window.location.href = `${this.apiUrl}../..${path}`
+    }
+
+    @APIRequest()
     loginSAMLGoogle() {
         /** I've been informed that we aren't actually using Google SAML, we're using OAuth... but this gets the job done regardless. */
         return this.loginSAML(`${this.apiUrl}../../accounts/google/login/?process=`, 450, 600)

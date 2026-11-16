@@ -1,9 +1,14 @@
 import logging
-from allauth.account.adapter import DefaultAccountAdapter
+from allauth.account.adapter import DefaultAccountAdapter, get_adapter as get_account_adapter
+from allauth.account.utils import user_username
+from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 
 from django.conf import settings
 from django.forms import ValidationError
+from django.http import HttpResponseRedirect
+
+from core import ldap_provision
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,37 @@ class LoginRedirectAdapter(DefaultAccountAdapter, DefaultSocialAccountAdapter):
         return url
     
 class SocialAccountAdapter(DefaultSocialAccountAdapter):
+    def pre_social_login(self, request, sociallogin):
+        """With USERNAME_FROM_LDAP, make the username the LDAP uid for the login's
+        verified email, refusing the login when there's none or it doesn't match
+        the existing user's. See settings.USERNAME_FROM_LDAP."""
+        if not settings.USERNAME_FROM_LDAP or sociallogin.account.get_provider(request).id == "saml":
+            return
+        user = sociallogin.user
+        email = next((a.email for a in sociallogin.email_addresses if a.verified), None)
+        if not email:
+            self._refuse("%s has no verified email", user_username(user))
+        uid = ldap_provision.login_uid(email, user)
+        if not uid:
+            self._refuse("no LDAP entry for %s", email)
+        if sociallogin.is_existing:
+            if user_username(user) != uid:
+                self._refuse("%s is user %s, but its LDAP uid is %s",
+                             email, user_username(user), uid)
+            return
+        try:
+            # Validity and availability; allauth would otherwise replace a
+            # rejected username with one built from the email.
+            get_account_adapter(request).clean_username(uid)
+        except ValidationError as err:
+            self._refuse("LDAP uid %s for %s can't be a username: %s", uid, email, err)
+        user_username(user, uid)
+
+    @staticmethod
+    def _refuse(message, *args):
+        logger.warning("Refusing social login: " + message, *args)
+        raise ImmediateHttpResponse(HttpResponseRedirect(settings.LOGIN_WHITELIST_URL))
+
     def on_authentication_error(self, request, provider, error=None, exception=None, extra_context=None):
         provider_id = provider.id if provider else "unknown"
         error_code = error.name if error else "unknown"

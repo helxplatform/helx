@@ -6,7 +6,7 @@ import { LoginForm } from '@ant-design/pro-form'
 import classNames from 'classnames'
 import { FormWrapper } from './form-wrapper'
 import { UsernameInput, PasswordInput } from './form-fields'
-import { CILogonSSO, GithubSSO, GoogleSSO, UNCSSO, DexOAuth } from './sso'
+import { CILogonSSO, GithubSSO, GoogleSSO, UNCSSO, DexOAuth, GenericSSO } from './sso'
 import { withAPIReady } from '../'
 import { useDest, useEnvironment, useWorkspacesAPI } from '../../../contexts'
 import '@ant-design/pro-form/dist/form.css'
@@ -40,7 +40,11 @@ const WhitelistRequired = (props) => (
     // </Space>
 )
 
-const SSOLoginOptions = ({ main, unc, google, github, cilogon, dex, onWhitelistRequired, onSignupRequired }) => (
+// Provider names that have a dedicated button (or, for Django, the form).
+// Any other provider /providers/ reports gets a generic button.
+const KNOWN_PROVIDERS = ["Django", "UNC Chapel Hill Single Sign-On", "Google", "GitHub", "CILogon", "dex"]
+
+const SSOLoginOptions = ({ main, unc, google, github, cilogon, dex, others=[], onWhitelistRequired, onSignupRequired }) => (
     <div style={{ display: "flex", justifyContent: "center", alignItems: "center", flexDirection: "column" }}>
         <Divider plain style={{ marginTop: main ? 0 : undefined }}>
             <Text style={{ color: main ? "rgba(0, 0, 0, 0.45)" : "rgba(0, 0, 0, 0.25)", fontWeight: "normal", fontSize: 14 }}>
@@ -63,6 +67,14 @@ const SSOLoginOptions = ({ main, unc, google, github, cilogon, dex, onWhitelistR
             { dex && (
                 <DexOAuth onWhitelistRequired={ onWhitelistRequired } onSignupRequired={ onSignupRequired } />
             ) }
+            { others.map((provider) => (
+                <GenericSSO
+                    key={ provider.url }
+                    provider={ provider }
+                    onWhitelistRequired={ onWhitelistRequired }
+                    onSignupRequired={ onSignupRequired }
+                />
+            )) }
         </Space>
     </div>
 )
@@ -77,7 +89,7 @@ export const WorkspaceLoginView = withAPIReady(({
 
     const [form] = useForm()
     const { context, basePath } = useEnvironment()
-    const { api, user, loggedIn, loginProviders } = useWorkspacesAPI()
+    const { api, user, loggedIn, loginProviders, loginProviderList } = useWorkspacesAPI()
     const { redirectToDest, redirectWithCurrentDest } = useDest()
     const location = useLocation()
     const navigate = useNavigate()
@@ -97,14 +109,18 @@ export const WorkspaceLoginView = withAPIReady(({
     const allowGithubLogin =  useMemo(() => loginProviders.includes("GitHub"), [loginProviders])
     const allowCILogon = useMemo(() => loginProviders.includes("CILogon"), [loginProviders])
     const allowDexLogon = useMemo(() => loginProviders.includes("dex"), [loginProviders])
+    const otherProviders = useMemo(() => (
+        (loginProviderList ?? []).filter((provider) => !KNOWN_PROVIDERS.includes(provider.name))
+    ), [loginProviderList])
 
     const hasAdditionalProviders = useMemo(() => (
         allowUncLogin ||
         allowGoogleLogin ||
         allowGithubLogin ||
         allowCILogon ||
-        allowDexLogon
-    ), [allowUncLogin, allowGoogleLogin, allowGithubLogin, allowCILogon, allowDexLogon])
+        allowDexLogon ||
+        otherProviders.length > 0
+    ), [allowUncLogin, allowGoogleLogin, allowGithubLogin, allowCILogon, allowDexLogon, otherProviders])
 
     const showWhitelistRequired = useMemo(() => {
         const required = new URLSearchParams(location.search).get("whitelist_required")
@@ -219,6 +235,7 @@ export const WorkspaceLoginView = withAPIReady(({
                                 github={ allowGithubLogin }
                                 cilogon={ allowCILogon }
                                 dex={ allowDexLogon }
+                                others={ otherProviders }
                                 onWhitelistRequired={ () => {
                                     setShowWhitelistRequired(true)
                                 } }

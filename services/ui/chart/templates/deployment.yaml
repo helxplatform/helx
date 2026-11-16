@@ -27,6 +27,28 @@ spec:
       serviceAccountName: {{ include "ui.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # UNCDSR-182: env.json doesn't pre-exist in the image, and nothing
+        # writes into the static-frontend-env emptyDir before the main
+        # container's subPath mount is prepared. Confirmed live (2026-11-06):
+        # kubelet defaults to creating a DIRECTORY at the subPath source in
+        # that situation, not a file -- same root cause already fixed for
+        # Tycho-launched apps' /etc/passwd via a seed init container (see
+        # tycho/model.py's emptyDirSeeded:// scheme), just not caught here at
+        # the time since only the main page load, not this endpoint, was
+        # tested. This mounts the same volume whole (no subPath) and touches
+        # an empty file at the exact subPath location first; start_server's
+        # populate_env then writes the real content into a file that already
+        # exists, instead of into kubelet's auto-created directory.
+        - name: seed-env-json
+          image: busybox
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+          command: ['sh', '-c', 'mkdir -p /seed && touch /seed/env.json']
+          volumeMounts:
+            - name: static-frontend-env
+              mountPath: /seed
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
@@ -53,6 +75,29 @@ spec:
             - name: branddesc
               mountPath: /usr/share/nginx/static/frontend/brand_desc.html
               subPath: brand_desc.html
+            # UNCDSR-182: nginx.conf already redirects its own temp/pid paths
+            # under /tmp ("added to run as non-root"); access/error logs are
+            # the stock nginx image's symlinks to stdout/stderr, not regular
+            # files. This one emptyDir covers all of that.
+            - name: tmp
+              mountPath: /tmp
+            # start_server (populate_env) generates this fresh; it isn't part
+            # of the build output under /usr/share/nginx/static/frontend/.
+            - name: static-frontend-env
+              mountPath: /usr/share/nginx/static/frontend/env.json
+              subPath: env.json
+            # create_index writes the generated index.html directly here now
+            # (see start_server). This mounts the whole directory, not just
+            # index.html via subPath: Kubernetes subPath cannot cleanly
+            # replace a file that already exists in the image (confirmed by
+            # direct testing against this image -- subPath onto index.html
+            # fails every time with "not a directory", while the identical
+            # mount onto a path absent from the image works). start_server
+            # re-seeds the rest of the directory (notably the stock 50x.html
+            # error page) from a pristine backup baked at
+            # /usr/share/nginx/html.default before writing index.html.
+            - name: nginx-html-index
+              mountPath: /usr/share/nginx/html
           env: 
             - name: NODE_ENV
               value: production
@@ -168,6 +213,12 @@ spec:
             items:
               - key: brand_desc.html
                 path: brand_desc.html
+        - name: tmp
+          emptyDir: {}
+        - name: static-frontend-env
+          emptyDir: {}
+        - name: nginx-html-index
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

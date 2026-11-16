@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log/slog"
+	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"reflect"
@@ -84,6 +87,9 @@ type Config struct {
 	Database  DatabaseConfig  `yaml:"database"`
 	HookRetry HookRetryConfig `yaml:"hook_retry"`
 	Plugins   PluginsConfig   `yaml:"plugins"`
+	// MinRefresh is the floor, in seconds, applied to every search's refresh
+	// interval regardless of what the API caller or hook requested.
+	MinRefresh int `yaml:"min_refresh"`
 }
 
 // SearchSpec represents a running search instance.
@@ -150,6 +156,11 @@ type HookResponse struct {
 
 var config Config
 var logger *slog.Logger
+
+// logLevel backs the handler built by initLogger. setLogLevel changes it in
+// place, because search goroutines read logger concurrently and replacing the
+// pointer would race with them.
+var logLevel = new(slog.LevelVar)
 var currentLogLevel string
 var searches = make(map[string]*SearchSpec)
 var searchResults = make(map[string]map[string]LDAPResult)
@@ -1025,15 +1036,16 @@ func initLogger(loglevel string) {
 	case "info":
 		lvl = slog.LevelInfo
 	}
+	logLevel.Set(lvl)
 	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     lvl,
+		Level:     logLevel,
 		AddSource: true,
 	})
 	logger = slog.New(h)
 	logger.Info("Logger initialized", "level", lvlStr)
 }
 
-// setLogLevel updates the global logger to the new level.
+// setLogLevel updates the level of the global logger.
 func setLogLevel(newLevel string) {
 	var lvl slog.Level = slog.LevelInfo
 	switch strings.ToLower(newLevel) {
@@ -1046,11 +1058,7 @@ func setLogLevel(newLevel string) {
 	case "info":
 		lvl = slog.LevelInfo
 	}
-	h := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     lvl,
-		AddSource: true,
-	})
-	logger = slog.New(h)
+	logLevel.Set(lvl)
 	logger.Info("Log level updated", "newLevel", newLevel)
 }
 
@@ -1090,18 +1098,142 @@ func loadConfig(path string) error {
 	return nil
 }
 
+// sourceConn is a single bound connection shared by every search goroutine.
+// *ldap.Conn multiplexes concurrent requests internally, so sharing one
+// connection is safe and keeps the bind rate proportional to reconnects rather
+// than to search cycles.
+var (
+	sourceConnMu sync.Mutex
+	sourceConn   *ldap.Conn
+	// After a failed dial or bind, every caller gets sourceErr until
+	// sourceRetryAt instead of attempting its own bind. Each bind is a
+	// Kerberos authentication of the service account against the source, and
+	// repeated failures risk locking the account.
+	sourceErr     error
+	sourceRetryAt time.Time
+	sourceBackoff time.Duration
+)
+
+const (
+	defaultMinRefresh    = 60
+	sourceDialTimeout    = 15 * time.Second
+	sourceRequestTimeout = 2 * time.Minute
+	sourceBackoffInitial = 10 * time.Second
+	sourceBackoffMax     = 5 * time.Minute
+)
+
 // connectAndBindLDAP connects to the LDAP server using the source configuration and binds using the credentials.
 // Returns an established connection or an error.
 func connectAndBindLDAP() (*ldap.Conn, error) {
-	l, err := ldap.DialURL(config.Source.URL)
+	l, err := ldap.DialURL(config.Source.URL, ldap.DialWithDialer(&net.Dialer{Timeout: sourceDialTimeout}))
 	if err != nil {
 		return nil, err
 	}
+	// A hung request on the shared connection would otherwise stall every search.
+	l.SetTimeout(sourceRequestTimeout)
 	if err = l.Bind(config.Source.BindDN, config.Source.BindPassword); err != nil {
 		l.Close()
 		return nil, err
 	}
 	return l, nil
+}
+
+// getSourceConn returns the shared source connection, dialing and binding on
+// first use or after the previous connection was dropped. Failed attempts are
+// rate limited with exponential backoff shared across all callers.
+func getSourceConn() (*ldap.Conn, error) {
+	sourceConnMu.Lock()
+	defer sourceConnMu.Unlock()
+
+	if sourceConn != nil && !sourceConn.IsClosing() {
+		return sourceConn, nil
+	}
+
+	if now := time.Now(); now.Before(sourceRetryAt) {
+		return nil, fmt.Errorf("source LDAP unavailable, next attempt in %s: %w",
+			sourceRetryAt.Sub(now).Round(time.Second), sourceErr)
+	}
+
+	l, err := connectAndBindLDAP()
+	if err != nil {
+		sourceBackoff = nextSourceBackoff(sourceBackoff, err)
+		sourceErr = err
+		sourceRetryAt = time.Now().Add(sourceBackoff)
+		logger.Error("Source LDAP connect/bind failed", "Err", err, "RetryIn", sourceBackoff)
+		return nil, err
+	}
+	sourceBackoff = 0
+	sourceErr = nil
+	sourceRetryAt = time.Time{}
+	logger.Info("Established source LDAP connection", "URL", config.Source.URL)
+	sourceConn = l
+	return sourceConn, nil
+}
+
+// nextSourceBackoff doubles the previous backoff up to sourceBackoffMax.
+// Rejected credentials go straight to the maximum: retrying a bad password
+// cannot succeed and only accumulates failed authentications.
+func nextSourceBackoff(prev time.Duration, err error) time.Duration {
+	if ldap.IsErrorWithCode(err, ldap.LDAPResultInvalidCredentials) {
+		return sourceBackoffMax
+	}
+	if prev <= 0 {
+		return sourceBackoffInitial
+	}
+	if next := prev * 2; next < sourceBackoffMax {
+		return next
+	}
+	return sourceBackoffMax
+}
+
+// effectiveRefresh clamps a requested refresh interval to floor, or to
+// defaultMinRefresh when floor is unset.
+func effectiveRefresh(refresh, floor int) time.Duration {
+	if floor <= 0 {
+		floor = defaultMinRefresh
+	}
+	if refresh < floor {
+		refresh = floor
+	}
+	return time.Duration(refresh) * time.Second
+}
+
+// jitter spreads d by ±10% so searches created together do not poll in lockstep.
+func jitter(d time.Duration) time.Duration {
+	spread := int64(d) / 5
+	if spread <= 0 {
+		return d
+	}
+	return d - time.Duration(spread/2) + time.Duration(rand.Int63n(spread))
+}
+
+// dropSourceConn closes and clears the shared connection so the next caller
+// redials. The identity check keeps a goroutine that failed on a stale
+// connection from discarding a replacement another goroutine already dialed.
+func dropSourceConn(l *ldap.Conn) {
+	sourceConnMu.Lock()
+	defer sourceConnMu.Unlock()
+
+	if sourceConn != l {
+		return
+	}
+	sourceConn.Close()
+	sourceConn = nil
+}
+
+// isConnectionError reports whether err indicates the connection itself is
+// unusable, as opposed to the server rejecting an otherwise well-formed
+// request. Only the former warrants dropping the shared connection.
+func isConnectionError(err error) bool {
+	var ldapErr *ldap.Error
+	if !errors.As(err, &ldapErr) {
+		return true
+	}
+	switch ldapErr.ResultCode {
+	case ldap.ErrorNetwork, ldap.ErrorUnexpectedMessage, ldap.ErrorUnexpectedResponse:
+		return true
+	}
+	return false
 }
 
 // performLDAPSearch performs an LDAP search using the provided connection, baseDN, and filter.
@@ -1118,6 +1250,32 @@ func performLDAPSearch(l *ldap.Conn, baseDN, filter string) (*ldap.SearchResult,
 		nil,
 	)
 	return l.Search(searchRequest)
+}
+
+// searchSource runs a search on the shared source connection, redialing once if
+// the connection turned out to be stale. Servers commonly drop idle sessions,
+// and the holder only discovers this when a search fails.
+func searchSource(baseDN, filter string) (*ldap.SearchResult, error) {
+	for attempt := 0; ; attempt++ {
+		l, err := getSourceConn()
+		if err != nil {
+			return nil, err
+		}
+
+		sr, err := performLDAPSearch(l, baseDN, filter)
+		if err == nil {
+			return sr, nil
+		}
+		if !isConnectionError(err) {
+			return nil, err
+		}
+
+		dropSourceConn(l)
+		if attempt > 0 {
+			return nil, err
+		}
+		logger.Debug("Source LDAP connection stale, redialing", "BaseDN", baseDN, "Err", err)
+	}
 }
 
 func storeDestinationLDAP(entry *TransformedEntry) (SyncOp, error) {
@@ -1257,6 +1415,10 @@ func storeDestinationLDAP(entry *TransformedEntry) (SyncOp, error) {
 
 // ldapSearchAndSync performs the LDAP search on the source server and synchronizes the results.
 func ldapSearchAndSync(id, filter, baseDN string, refresh int, oneshot bool, stopChan chan struct{}) {
+	interval := effectiveRefresh(refresh, config.MinRefresh)
+	if interval > time.Duration(refresh)*time.Second {
+		logger.Debug("Refresh raised to configured minimum", "SearchId", id, "Requested", refresh, "Effective", interval)
+	}
 	for {
 		select {
 		case <-stopChan:
@@ -1266,29 +1428,16 @@ func ldapSearchAndSync(id, filter, baseDN string, refresh int, oneshot bool, sto
 		}
 
 		logger.Debug("Performing LDAP search with filter", "Filter", filter, "SearchId", id, "BaseDN", baseDN)
-		l, err := connectAndBindLDAP()
+		sr, err := searchSource(baseDN, filter)
 		if err != nil {
-			logger.Error("Error connecting and binding to LDAP", "Err", err)
+			logger.Error("Error performing search", "Err", err, "SearchId", id)
 			select {
 			case <-stopChan:
 				return
-			case <-time.After(time.Duration(refresh) * time.Second):
+			case <-time.After(jitter(interval)):
 			}
 			continue
 		}
-
-		sr, err := performLDAPSearch(l, baseDN, filter)
-		if err != nil {
-			logger.Error("Error performing search", "Err", err)
-			l.Close()
-			select {
-			case <-stopChan:
-				return
-			case <-time.After(time.Duration(refresh) * time.Second):
-			}
-			continue
-		}
-		l.Close()
 
 		for _, entry := range sr.Entries {
 			processLDAPEntry(id, entry, oneshot)
@@ -1304,7 +1453,7 @@ func ldapSearchAndSync(id, filter, baseDN string, refresh int, oneshot bool, sto
 		case <-stopChan:
 			logger.Debug("Search cancelled", "SearchId", id)
 			return
-		case <-time.After(time.Duration(refresh) * time.Second):
+		case <-time.After(jitter(interval)):
 		}
 	}
 }
@@ -1334,6 +1483,14 @@ func processHookResponse(hookResp HookResponse, sourceSearchID string) {
 	for _, ds := range hookResp.Derived {
 		searchesMu.Lock()
 		spec, exists := searches[ds.ID]
+		if exists && !spec.Oneshot && !ds.Oneshot && spec.Filter == ds.Filter &&
+			spec.Refresh == ds.Refresh && spec.BaseDN == ds.BaseDN {
+			// Hooks re-emit their derived searches on every response. Restarting
+			// an identical search would only force an immediate extra query.
+			searchesMu.Unlock()
+			logger.Debug("Derived search unchanged", "SearchId", ds.ID)
+			continue
+		}
 		if exists {
 			// Update existing search. Hold the write lock while mutating struct
 			// fields so concurrent readers (e.g. getSearchHandler) see a
@@ -1483,6 +1640,41 @@ func sendHooks(result LDAPResult, sourceSearchID string) {
 	}
 }
 
+// sameAttributes reports whether two attribute maps hold the same values,
+// ignoring the order of values within a multi-valued attribute. LDAP servers
+// do not guarantee value order, so an order-sensitive comparison reports a
+// change on nearly every poll and re-fires hooks and target writes.
+func sameAttributes(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name, av := range a {
+		bv, ok := b[name]
+		if !ok {
+			return false
+		}
+		as, aMulti := av.([]string)
+		bs, bMulti := bv.([]string)
+		if !aMulti || !bMulti {
+			if !reflect.DeepEqual(av, bv) {
+				return false
+			}
+			continue
+		}
+		if len(as) != len(bs) {
+			return false
+		}
+		as = append([]string(nil), as...)
+		bs = append([]string(nil), bs...)
+		sort.Strings(as)
+		sort.Strings(bs)
+		if !reflect.DeepEqual(as, bs) {
+			return false
+		}
+	}
+	return true
+}
+
 // processLDAPEntry processes a single LDAP entry, updating the searchResults
 // for the given search id. It builds a structured attribute map, and logs whether
 // the entry is new, updated, or unchanged.
@@ -1518,7 +1710,7 @@ func processLDAPEntry(id string, entry *ldap.Entry, oneshot bool) {
 		logMsg = "New item retrieved"
 		shouldSend = !oneshot
 	} else {
-		if !reflect.DeepEqual(existing.Content, attrMap) {
+		if !sameAttributes(existing.Content, attrMap) {
 			results[dn] = newResult
 			logMsg = "Updated item search"
 			shouldSend = !oneshot

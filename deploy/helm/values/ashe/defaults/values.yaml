@@ -8,10 +8,6 @@ appstore:
     workers: 2
   fetcherImage:
     repository: containers.renci.org/helxplatform/url-fetch
-  imagePostgresql:
-    registry: containers.renci.org
-    repository: helxplatform/bitnami-postgresql
-    tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
@@ -26,13 +22,27 @@ appstore:
       enabled: false
       runAsUser: # CHANGEME
     primary:
+      # UNCDSR-182: enabled: true (keeping allowPrivilegeEscalation: false /
+      # readOnlyRootFilesystem: true / runAsNonRoot: true from the appstore
+      # chart's own default, and the postgresql dependency's own default)
+      # rather than disabling the whole block.
+      #
+      # runAsUser/runAsGroup/fsGroup are deliberately left unset, not nulled.
+      # Confirmed by an actual `helm upgrade --install --dry-run` through the
+      # real umbrella (helx -> appstore -> postgresql, two dependency-chart
+      # boundaries deep): nulling them here does not clear the postgresql
+      # dependency's own hardcoded runAsUser: 1001 / runAsGroup: 1001 /
+      # fsGroup: 1001 defaults -- a null supplied at this layer cannot clear
+      # a subchart's own non-null default once a dependency boundary is
+      # crossed, the same limitation already documented for helx-ldap's
+      # openldap dependency (see that chart's own values.yaml). So this
+      # accepts the fixed 1001 instead, same reasoning already applied to
+      # openldap: ldap-sync's postgres already runs fine at a different
+      # fixed UID (999) in this namespace.
       containerSecurityContext:
-        enabled: false
-        runAsUser: # CHANGEME
+        enabled: true
       podSecurityContext:
-        enabled: false
-        fsGroup: null
-        runAsUser: # CHANGEME
+        enabled: true
       resources:
         limits:
           cpu: 2
@@ -232,40 +242,21 @@ ui:
     requests:
       cpu: 250m
       memory: 256Mi
-  securityContext:
+  # UNCDSR-182: fsGroup is a pod-level field; the ui chart wires `securityContext`
+  # to the container, so it belongs under podSecurityContext instead. runAsGroup
+  # is nulled, not 0, matching what's actually working in cdsr-staging -- a
+  # fixed GID isn't needed for the SCC to assign one.
+  podSecurityContext:
     fsGroup: null
-    runAsGroup: 0
+  securityContext:
+    runAsGroup: null
     runAsUser: # CHANGEME
-  service:
-    annotations:
-      getambassador.io/config: |
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: helx-ui
-        prefix: /helx
-        service: helx-ui:80
-        rewrite: /helx
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: ui-static
-        prefix: /static/frontend
-        service: helx-ui:80
-        rewrite: /static/frontend
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
 user-mutator:
   webhook:
-    enabled: false
+    # The deployer has only namespace access, so a cluster admin applies the
+    # saved manifest. Leaving this out makes the chart default to create,
+    # which fails the deploy on permissions.
+    mode: saveToConfigMap
   config:
     features:
       ldap:

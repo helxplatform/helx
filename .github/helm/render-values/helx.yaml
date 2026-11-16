@@ -1,0 +1,16 @@
+# AKS rejects any pod with a container that doesn't set
+# securityContext.allowPrivilegeEscalation: false. To catch that before deploy,
+# `ci.py check-privilege-escalation` renders the umbrella chart with
+# helm template, once with its defaults and once per Azure environment, and
+# fails if any container leaves the setting out. This file holds the extra
+# values those renders need, and is applied last on each one.
+#
+# Secrets need nothing here: the lint values, applied first, point every
+# chart-managed Secret at an existing one, which renders without credentials.
+# Optional containers are turned on so they get checked too. The one container
+# not checked is helx-ldap's PVC migration Job, which only renders during an
+# upgrade and would need many more placeholder credentials.
+appstore:
+  saml:
+    cache:
+      enabled: true

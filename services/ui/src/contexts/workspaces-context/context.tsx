@@ -4,7 +4,7 @@ import { TimeUntil } from 'react-time-until'
 import { backOff } from 'exponential-backoff'
 import { WorkspacesAPI } from './'
 import { IWebsocketAPI, WebsocketAPI } from './ws'
-import { APIError, IWorkspacesAPI, User, ExtraLink, EnvironmentContext } from './api.types'
+import { APIError, IWorkspacesAPI, User, ExtraLink, EnvironmentContext, Provider } from './api.types'
 import { useEnvironment } from '../'
 import { usePageActivity } from '../../hooks'
 
@@ -23,6 +23,8 @@ export interface IWorkspacesAPIContext {
     user: User | null | undefined
     loggedIn: boolean | undefined
     loginProviders: string[] | undefined
+    // The same providers with their login paths, for providers the UI has no dedicated button for.
+    loginProviderList: Provider[] | undefined
     appstoreContext: EnvironmentContext | undefined
     loadingBackoff: Date | undefined
 }
@@ -38,7 +40,8 @@ export const WorkspacesAPIContext = createContext<IWorkspacesAPIContext|undefine
 export const WorkspacesAPIProvider = ({ sessionTimeoutWarningSeconds=60, children }: IWorkspacesAPIProvider) => {
     // API state
     const [user, setUser] = useState<User|null|undefined>(undefined)
-    const [loginProviders, setLoginProviders] = useState<string[]|undefined>(undefined)
+    const [loginProviderList, setLoginProviderList] = useState<Provider[]|undefined>(undefined)
+    const loginProviders = useMemo(() => loginProviderList?.map((provider) => provider.name), [loginProviderList])
     const [environmentContext, setEnvironmentContext] = useState<EnvironmentContext|undefined>(undefined)
 
     // Etc.
@@ -163,17 +166,17 @@ export const WorkspacesAPIProvider = ({ sessionTimeoutWarningSeconds=60, childre
 
     useEffect(() => {
         setUser(undefined)
-        setLoginProviders(undefined)
+        setLoginProviderList(undefined)
         setEnvironmentContext(undefined)
         void async function() {
             try {
                 const [
                     user,
-                    loginProviders,
+                    loginProviderList,
                     environmentContext
                 ] = await backOff<[
                     User | null,
-                    string[],
+                    Provider[],
                     EnvironmentContext
                 ]>(
                     async () => {
@@ -184,14 +187,14 @@ export const WorkspacesAPIProvider = ({ sessionTimeoutWarningSeconds=60, childre
                             // This could be a 403 (not signed in) or a WhitelistRequiredError, treat it as signed out regardless.
                             user = null
                         }
-                        const loginProviders = (await api.getLoginProviders()).map((provider) => provider.name)
+                        const loginProviderList = await api.getLoginProviders()
                         const environmentContext = await api.getEnvironmentContext()
-                        return [user, loginProviders, environmentContext]
+                        return [user, loginProviderList, environmentContext]
                     },
                     backoffOptions
                 )
                 setUser(user)
-                setLoginProviders(loginProviders)
+                setLoginProviderList(loginProviderList)
                 setEnvironmentContext(environmentContext)
             } catch (e: any) {
                 // Maximum backoff attempts reached. 
@@ -271,6 +274,7 @@ export const WorkspacesAPIProvider = ({ sessionTimeoutWarningSeconds=60, childre
             user,
             loggedIn,
             loginProviders,
+            loginProviderList,
             appstoreContext: environmentContext,
             loadingBackoff
         }}>

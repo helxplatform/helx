@@ -46,9 +46,10 @@ class Volumes:
         self.containers = containers
         self.volumes = []
         self.pvcs = []
+        self.empty_dirs = []
 
-    def volume(self, container_name, pvc_name, volume_name, path=None, subpath=None):
-        self.volumes.append({"container_name": container_name, "pvc_name": pvc_name, "volume_name": volume_name, "path": path, "subpath": subpath})
+    def volume(self, container_name, pvc_name, volume_name, path=None, subpath=None, empty_dir_name=None, needs_seed=False):
+        self.volumes.append({"container_name": container_name, "pvc_name": pvc_name, "volume_name": volume_name, "path": path, "subpath": subpath, "empty_dir_name": empty_dir_name, "needs_seed": needs_seed})
 
     def process_volumes(self):
        for index, container in enumerate(self.containers):
@@ -61,8 +62,41 @@ class Volumes:
                    path = parts[2] if len(parts) == 3 else None
                    subpath = "/".join(parts[1].split("/")[3:]) if len(parts) == 3 else None
                    self.volume(container['name'], pvc_name, volume_name, path, subpath)
+               elif parts[0] == "emptyDir":
+                   # Ephemeral scratch space for a readOnlyRootFilesystem container
+                   # (e.g. a cache/pid/tmp dir) -- not backed by a PVC, not
+                   # expected to survive a pod restart. Same
+                   # declare-once-per-shared-name handling as pvc:// above,
+                   # since a volume name can only be declared once per pod.
+                   volume_name = parts[1].split("/")[2:3][0]
+                   empty_dir_name = volume_name if volume_name not in self.empty_dirs else None
+                   self.empty_dirs.append(volume_name)
+                   path = parts[2] if len(parts) == 3 else None
+                   subpath = "/".join(parts[1].split("/")[3:]) if len(parts) == 3 else None
+                   self.volume(container['name'], None, volume_name, path, subpath, empty_dir_name=empty_dir_name)
+               elif parts[0] == "emptyDirSeeded":
+                   # Same as emptyDir://, except the subPath target is a file
+                   # that already exists in the container image (e.g.
+                   # /etc/passwd). Kubernetes subPath can't cleanly replace a
+                   # pre-existing file, and if it's removed from the image
+                   # instead, kubelet creates a directory at the subPath
+                   # source instead of a file when nothing has written there
+                   # yet -- breaking anything (including the container
+                   # runtime's own user lookup) that expects a file. Tagging
+                   # the volume here makes pod.yaml render an extra init
+                   # container, using this container's own image, that seeds
+                   # the real file (from "<container-path>.default", baked
+                   # into the image at build time) into the volume via a
+                   # whole-volume (non-subPath) mount, before this or any
+                   # other container subPath-mounts the same path.
+                   volume_name = parts[1].split("/")[2:3][0]
+                   empty_dir_name = volume_name if volume_name not in self.empty_dirs else None
+                   self.empty_dirs.append(volume_name)
+                   path = parts[2] if len(parts) == 3 else None
+                   subpath = "/".join(parts[1].split("/")[3:]) if len(parts) == 3 else None
+                   self.volume(container['name'], None, volume_name, path, subpath, empty_dir_name=empty_dir_name, needs_seed=True)
                else:
-                   logger.debug(f"Volume definition should follow the pattern: pvc://<pvc_name>/<sub-path>:<container-path> or pvc://<sub-path>:<container-path>")
+                   logger.debug(f"Volume definition should follow the pattern: pvc://<pvc_name>/<sub-path>:<container-path> or pvc://<sub-path>:<container-path> or emptyDir://<volume-name>/<sub-path>:<container-path> or emptyDirSeeded://<volume-name>/<sub-path>:<container-path>")
                    raise Exception(f"Wrong Volume definition in Container:{container['name']} and Volume:{volume}")
        return self.volumes
 
@@ -283,6 +317,10 @@ class System:
             security_context["fs_group"] = str(sc_from_registry.get("fsGroup"))
         else:
             security_context["fs_group"] = os.environ.get("TYCHO_APP_FS_GROUP", "0")
+        if "readOnlyRootFilesystem" in sc_from_registry.keys():
+            security_context["read_only_root_filesystem"] = str(sc_from_registry.get("readOnlyRootFilesystem")).lower()
+        else:
+            security_context["read_only_root_filesystem"] = os.environ.get("TYCHO_APP_READ_ONLY_ROOT_FILESYSTEM", "false").lower()
         return security_context
 
     @staticmethod

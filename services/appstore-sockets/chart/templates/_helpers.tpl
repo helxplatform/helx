@@ -24,11 +24,7 @@ If release name contains chart name it will be used as a full name.
 {{- end }}
 
 {{- define "appstore-sockets.appstoreServiceName" -}}
-{{- if .Values.appstoreServiceNameOverride }}
-{{- .Values.appstoreServiceNameOverride }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name "appstore" }}
-{{- end }}
+{{- default "appstore" .Values.appstoreServiceNameOverride }}
 {{- end }}
 
 {{/*

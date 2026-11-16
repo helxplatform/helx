@@ -25,6 +25,9 @@ var (
 	// against targets that don't have the helxUser schema loaded.
 	userObjectClassesFlag string
 	userObjectClasses     []string
+
+	// refresh is the poll interval, in seconds, requested for every derived search.
+	refresh int
 )
 
 // HookRequest represents the input payload for the /hook endpoint.
@@ -174,7 +177,7 @@ func processORDRDGroup(req HookRequest) HookResponse {
 			{
 				ID:      derivedID,
 				Filter:  "(|" + strings.Join(filterParts, "") + ")",
-				Refresh: 10,
+				Refresh: refresh,
 				BaseDN:  "ou=people,dc=unc,dc=edu",
 				Onesho:  false,
 			},
@@ -248,6 +251,10 @@ func processUNCUser(req HookRequest) HookResponse {
 		"uid":           uid,
 		"uidNumber":     req.Content["uidNumber"],
 	}
+	// appstore finds a social login's LDAP entry, and so its username, by mail.
+	if mail := req.Content["mail"]; mail != nil && mail != "" {
+		newContent["mail"] = mail
+	}
 	// Only include helxUser attributes when the destination schema has it loaded.
 	// user-mutator copies supplementalGroups into the pod security context.
 	if hasHelxUser() {
@@ -269,7 +276,7 @@ func processUNCUser(req HookRequest) HookResponse {
 			{
 				ID:      fmt.Sprintf("%s-posixGroups", uidNumberStr),
 				Filter:  fmt.Sprintf("(&(objectClass=posixGroup)(memberUid=%s))", uidNumberStr),
-				Refresh: 10,
+				Refresh: refresh,
 				BaseDN:  "dc=unc,dc=edu",
 				Onesho:  false,
 			},
@@ -412,6 +419,7 @@ func main() {
 	flag.StringVar(&userObjectClassesFlag, "userObjectClasses",
 		"top,inetOrgPerson,posixAccount,helxUser",
 		"Comma-separated objectClass list to assign to synced user entries")
+	flag.IntVar(&refresh, "refresh", 300, "Refresh interval in seconds for derived searches")
 	flag.Parse()
 
 	for _, oc := range strings.Split(userObjectClassesFlag, ",") {

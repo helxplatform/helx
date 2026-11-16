@@ -111,6 +111,7 @@ func TestProcessUNCUser_Basic(t *testing.T) {
 			"sn":        "Smith",
 			"givenName": "Alice",
 			"uidNumber": "1001",
+			"mail":      "Alice_Smith@unc.edu",
 		},
 	}
 	resp := processUNCUser(req)
@@ -127,6 +128,9 @@ func TestProcessUNCUser_Basic(t *testing.T) {
 	content, _ := userEntry["content"].(map[string]interface{})
 	if content["uid"] != "alice" {
 		t.Errorf("uid not set correctly: %v", content["uid"])
+	}
+	if content["mail"] != "Alice_Smith@unc.edu" {
+		t.Errorf("mail not copied: %v", content["mail"])
 	}
 	// The helxUser schema defines no groups attribute.
 	if g, ok := content["groups"]; ok {

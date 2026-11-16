@@ -10,6 +10,8 @@ spec:
   containers:
     - name: wget
       image: busybox
+      securityContext:
+        allowPrivilegeEscalation: false
       command: ['wget']
-      args: ['{{ include "ui.fullname" . }}:{{ .Values.service.port }}']
+      args: ['{{ include "ui.serviceName" . }}:{{ .Values.service.port }}']
   restartPolicy: Never

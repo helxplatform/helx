@@ -5,10 +5,6 @@ appstore:
     ALLOW_SAML_LOGIN: "true"
   gunicorn:
     workers: 5
-  imagePostgresql:
-    registry: containers.renci.org
-    repository: helxplatform/bitnami-postgresql
-    tag: 17.5.0-debian-12-r18
   ldap:
     enabled: true
   postgresql:
@@ -169,36 +165,12 @@ ui:
     requests:
       cpu: 0.5
       memory: 1Gi
-  service:
-    annotations:
-      getambassador.io/config: |
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: helx-ui
-        prefix: /helx
-        service: helx-ui:80
-        rewrite: /helx
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
-        ---
-        apiVersion: ambassador/v1
-        kind: Mapping
-        name: ui-static
-        prefix: /static/frontend
-        service: helx-ui:80
-        rewrite: /static/frontend
-        cors:
-          origins: "*"
-          methods: POST, OPTIONS
-          headers:
-          - Content-Type
 user-mutator:
   webhook:
-    enabled: false
+    # The deployer has only namespace access, so a cluster admin applies the
+    # saved manifest. Leaving this out makes the chart default to create,
+    # which fails the deploy on permissions.
+    mode: saveToConfigMap
   config:
     features:
       ldap:

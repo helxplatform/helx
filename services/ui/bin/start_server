@@ -9,9 +9,24 @@ fi
 
 # Create env.json file
 populate_env $1
-# Generate the index.html file
-create_index /usr/share/nginx/static/frontend 
-# Move into nginx html folder
-mv /usr/share/nginx/static/frontend/index.html /usr/share/nginx/html/
+
+# UNCDSR-182: /usr/share/nginx/html is now mounted wholesale as a (fresh,
+# empty) emptyDir, so the container's root filesystem can be read-only --
+# see the Dockerfile comment on /usr/share/nginx/html.default for why this
+# is a whole-directory mount rather than a subPath onto index.html alone.
+# Re-seed everything else in the directory (nginx's default 50x.html error
+# page in particular) from that pristine, never-mounted-over backup before
+# create_index writes index.html below.
+if [ ! -s /usr/share/nginx/html/50x.html ]; then
+  cp -a /usr/share/nginx/html.default/. /usr/share/nginx/html/
+fi
+
+# Generate the index.html file directly into nginx's html root. Previously
+# this wrote into static/frontend and was then `mv`d here, but `mv` across
+# separately-mounted paths needs to unlink the source from its parent
+# directory -- fine when the root filesystem is writable, not once it's
+# read-only (UNCDSR-182). Writing straight to the final path avoids that
+# entirely instead of working around it.
+create_index /usr/share/nginx/static/frontend /usr/share/nginx/html/index.html
 
 nginx -g "daemon off;"

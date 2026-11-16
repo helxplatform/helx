@@ -30,6 +30,7 @@ NAMESPACE=ai-sb-test
 helm registry login ghcr.io
 export LDAP_ADMIN_PASSWORD='choose-an-admin-password'
 export LDAP_CONFIG_ADMIN_PASSWORD='choose-a-config-password'
+export LDAP_APPSTORE_PASSWORD='choose-an-appstore-password'
 
 bash deploy/helm/helx-chart/examples/ldap-test.sh "$NAMESPACE" helx
 ```
@@ -43,6 +44,8 @@ The selected Secret must contain these keys:
 
 - `LDAP_ADMIN_PASSWORD`
 - `LDAP_CONFIG_ADMIN_PASSWORD`
+- `LDAP_APPSTORE_PASSWORD`: the account appstore binds as
+  (`configuration.appstoreAccount`), created by the configuration Job
 
 Choose the credentials Secret owner with `secret.mode`: `values` creates a
 chart-managed Secret from `secret.values`, `existingSecret` uses a Secret you

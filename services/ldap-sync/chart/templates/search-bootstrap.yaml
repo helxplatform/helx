@@ -63,7 +63,7 @@ spec:
           {{- end }}
           env:
             - name: API_URL
-              value: "http://{{ include "ldap-sync.fullname" . }}:{{ .Values.service.port }}"
+              value: "http://{{ include "ldap-sync.serviceName" . }}:{{ .Values.service.port }}"
             - name: SEARCH_ID
               value: {{ .Values.searchBootstrap.id | quote }}
             - name: SEARCH_FILTER

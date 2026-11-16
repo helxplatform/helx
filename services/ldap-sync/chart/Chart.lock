@@ -1,9 +1,9 @@
 dependencies:
 - name: helx-common
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 0.2.0
+  version: 0.2.2
 - name: postgres
   repository: oci://registry-1.docker.io/cloudpirates
   version: 0.14.4
-digest: sha256:038a5714a644388384049eaf7f3535dbb7556743ad68908a2cef5912a95f7353
-generated: '2026-09-03T16:01:03.765117+00:00'
+digest: sha256:141bf3b67c59dc040963002c106cfaf6b0e8aac9a858a92fc6eff2db9fef0612
+generated: '2026-11-06T18:28:32.244735+00:00'

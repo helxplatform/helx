@@ -48,7 +48,12 @@ class TychoContext:
             tycho_config_url += "/" if not tycho_config_url.endswith("/") else ""
         self.tycho_config_url = tycho_config_url
         logger.info (f"-- TychoContext.__init__: registry_config: {registry_config} | app_defaults_config: {app_defaults_config} | product: {product} | tycho_config_url: {self.tycho_config_url} | stub: {stub}")
-        self.http_session = CachedSession (cache_name='tycho-registry')
+        # UNCDSR-182: an absolute /tmp path, not a bare name -- a bare name
+        # resolves relative to CWD (the app's own WORKDIR, baked with the
+        # application source), which breaks under a read-only root
+        # filesystem. This cache is a plain response cache for re-fetched
+        # registry content; it doesn't need to survive a pod restart.
+        self.http_session = CachedSession (cache_name='/tmp/tycho-registry')
         self.registry = self._get_config(registry_config)
         self.app_defaults = self._get_config(app_defaults_config)
         self.log_dict(self.app_defaults, pre_dict_message="defaults = \n")

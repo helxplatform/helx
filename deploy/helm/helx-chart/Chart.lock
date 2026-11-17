@@ -7,7 +7,7 @@ dependencies:
   version: 2.1.9
 - name: appstore-prepuller
   repository: oci://ghcr.io/helxplatform/helm-charts
-  version: 0.1.7
+  version: 0.1.8
 - name: helx-ldap
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 0.3.5
@@ -26,5 +26,5 @@ dependencies:
 - name: user-mutator
   repository: oci://ghcr.io/helxplatform/helm-charts
   version: 2.2.6
-digest: sha256:61205e673e3e36b415b9646602c4cb2e29f2242a49bc116fdf337062d51cb7db
-generated: '2026-11-16T18:54:09.875718+00:00'
+digest: sha256:9560f6c92a1721e13f317fa486fc25044cd30d2d7776e100823237779b8d2f44
+generated: '2026-11-16T20:08:28.546938+00:00'

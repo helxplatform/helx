@@ -9,8 +9,10 @@ set -eu
 
 uid="$(id -u)"
 
-# Ensure the runtime UID is resolvable (arbitrary-UID OpenShift case).
-if ! getent passwd "$uid" >/dev/null 2>&1; then
+# Ensure the runtime UID is resolvable (arbitrary-UID OpenShift case). Under a
+# read-only root filesystem (UNCDSR-182) /etc/passwd can't be written; nslcd
+# doesn't need the entry (nslcd.conf sets no uid/gid), so skip it quietly.
+if [ -w /etc/passwd ] && ! getent passwd "$uid" >/dev/null 2>&1; then
     echo "nslcd:x:${uid}:0:nslcd sidecar:/var/run/nslcd:/sbin/nologin" >> /etc/passwd 2>/dev/null || true
 fi
 

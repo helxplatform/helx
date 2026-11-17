@@ -64,8 +64,10 @@ spec:
   - name: seed-volumes
     image: {{ container.image }}
     imagePullPolicy: IfNotPresent
+    # UNCDSR-182: writes only to its /tycho-seed mounts.
     securityContext:
       allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
     resources:
       requests:
         memory: {{ system.init_memory }}
@@ -95,8 +97,10 @@ spec:
   - name: volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     imagePullPolicy: IfNotPresent
+    # UNCDSR-182: writes only to the app's home/shared mounts.
     securityContext:
       allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
       {% if system.init_security_context.run_as_user %}
       runAsUser: {{ system.init_security_context.run_as_user }}
       {% endif %}
@@ -151,8 +155,11 @@ spec:
   - name: userless-volume-tasks
     image: {{ system.init_image_repository }}:{{ system.init_image_tag }}
     imagePullPolicy: IfNotPresent
+    # UNCDSR-182: writes only to the app's mounted volumes (symlinks, Trash
+    # dirs); overlay mounts, i.e. the root filesystem, are skipped.
     securityContext:
       allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
       runAsUser: {{ system.init_nobody_uid }}
       runAsGroup: {{ system.init_nobody_gid }}
     # Fixed resources

@@ -214,3 +214,32 @@ class SpecSecurityContextRenderTests(TestCase):
 
     def test_default_fs_group_env_renders_root_fs_group(self):
         self.assertEqual(self._render("0")["securityContext"].get("fsGroup"), 0)
+
+
+class InitContainerReadOnlyRootTests(TestCase):
+    """ Tycho's init containers (seed-volumes, volume-tasks,
+        userless-volume-tasks) render with a read-only root filesystem. """
+
+    SPEC = {
+        "version": "3.6",
+        "services": {"jupyter": {
+            "image": "example.invalid/jupyter:test",
+            "ports": ["8888:8888"],
+            "volumes": ["emptyDirSeeded://etc-passwd/passwd:/etc/passwd",
+                        "emptyDir://scratch:/scratch"],
+        }},
+    }
+
+    @mock.patch.dict(os.environ, {"DEV_PHASE": "prod", "TYCHO_APP_ENABLE_INIT_CONTAINER": "true",
+                                  "CREATE_HOME_DIRS": "true"})
+    def test_all_init_containers_read_only(self):
+        system = System.parse(Config(), "jupyter", json.dumps({"username": "alice"}),
+                              json.loads(json.dumps(self.SPEC)), "default", env={}, services={})
+        pod_spec = next(m for m in system.render("pod.yaml") if m and m.get("kind") == "Pod")["spec"]
+
+        init = {c["name"]: c for c in pod_spec["initContainers"]}
+        self.assertEqual(set(init), {"seed-volumes", "volume-tasks", "userless-volume-tasks"})
+        for name, container in init.items():
+            sc = container["securityContext"]
+            self.assertIs(sc.get("readOnlyRootFilesystem"), True, name)
+            self.assertIs(sc.get("allowPrivilegeEscalation"), False, name)

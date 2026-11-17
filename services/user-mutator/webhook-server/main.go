@@ -1314,8 +1314,15 @@ func getNSLCDVolumesMountsAndSidecar(configMapName, sidecarImage string) ([]core
 		// setting runAsNonRoot / capabilities / seccompProfile explicitly here
 		// disqualifies the pod from that SCC and it gets rejected. The SCC (or a
 		// namespace's PodSecurity defaults) supplies the rest.
+		//
+		// UNCDSR-182: readOnlyRootFilesystem is admitted by that SCC (app
+		// containers already set it). nslcd writes only its socket and pid file,
+		// both in the nslcd-socket emptyDir. The entrypoint's append of the
+		// runtime UID to /etc/passwd now fails, which it tolerates (|| true);
+		// nslcd.conf sets no uid/gid, so nslcd has no user to switch to.
 		SecurityContext: &corev1.SecurityContext{
 			AllowPrivilegeEscalation: boolPtr(false),
+			ReadOnlyRootFilesystem:   boolPtr(true),
 		},
 	}
 

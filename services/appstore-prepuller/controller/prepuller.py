@@ -109,18 +109,21 @@ def patch_daemonset(
     init_containers: list[client.V1Container],
 ) -> None:
     """Patch the prepuller DaemonSet so its init containers match the desired list."""
-    patch = {
-        "spec": {
-            "template": {
-                "spec": {
-                    "initContainers": [
-                        client.ApiClient().sanitize_for_serialization(c)
-                        for c in init_containers
-                    ]
-                }
-            }
-        }
-    }
+    # Keep this as a list body. When sent as a dict the client sends it as a strategic
+    # merge patch, which merges init containers by name and never removes one, so apps
+    # dropped from the catalog would keep being pulled.
+    #
+    # If passed as a list body the client sends it as a JSON patch. Oddly, the "add"
+    # operation with a path to a field sets that field, discarding the old list. And unlike
+    # "replace", "add" also works when the field doesn't exist yet.
+    patch = [{
+        "op": "add",
+        "path": "/spec/template/spec/initContainers",
+        "value": [
+            client.ApiClient().sanitize_for_serialization(c)
+            for c in init_containers
+        ],
+    }]
     apps_api.patch_namespaced_daemon_set(
         name=DAEMONSET_NAME,
         namespace=DAEMONSET_NAMESPACE,

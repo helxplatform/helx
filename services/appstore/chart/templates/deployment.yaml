@@ -15,11 +15,13 @@ spec:
       {{- include "appstore.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-    {{- with .Values.podAnnotations }}
       annotations:
+        {{- /* Roll the Pod when the -env ConfigMap changes: its keys reach the
+        container as environment variables, which are read only at startup. */}}
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-    {{- end }}
+        {{- end }}
       labels:
         {{- include "appstore.selectorLabels" . | nindent 8 }}
         {{- with .Values.networkPolicyLabels }}

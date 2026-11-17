@@ -53,8 +53,11 @@ daemonset:
   nodeSelector: {}
   # Use affinity to exclude nodes by label, which nodeSelector cannot express.
   affinity: {}
-  tolerations:
-    - operator: "Exists"
+  # None by default: the puller runs only on untainted nodes. Platform or
+  # environment values list the taints it should tolerate, e.g. a GPU pool's.
+  # Tolerating every taint put it on nodes the cluster autoscaler was removing,
+  # pulling the whole catalog onto them.
+  tolerations: []
   # UID for the pull init containers. Any numeric UID avoids "no users found"
   # errors from images whose USER is a name (e.g. pgadmin), and it need not
   # exist in the image, so root is unnecessary. "" leaves it unset so the

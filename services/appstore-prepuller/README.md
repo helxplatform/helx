@@ -60,7 +60,7 @@ helm install appstore-prepuller ./chart \
 | `daemonset.nodeSelector` | Node selector for prepuller pods | `{}` (all nodes) |
 | `daemonset.affinity` | Affinity for prepuller pods | `{}` |
 | `daemonset.initRunAsUser` | UID for the pull init containers; any numeric UID works, even one absent from the image. `""` lets the platform assign one (OpenShift only; elsewhere images whose `USER` is a name fail) | `65534` |
-| `daemonset.tolerations` | Tolerations for prepuller pods | Tolerate all |
+| `daemonset.tolerations` | Tolerations for prepuller pods; list the taints of any node pool whose nodes should be pre-pulled (e.g. a GPU pool) | `[]` (untainted nodes only) |
 | `daemonset.pauseImage` | Pause image for the main container | `registry.k8s.io/pause:3.9` |
 | `daemonset.resources` | DaemonSet resource requests/limits | 10m-50m CPU, 10Mi-20Mi mem |
 

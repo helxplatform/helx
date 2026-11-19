@@ -1144,7 +1144,8 @@ push-helx-images: $(PYTHON_READY)
 	done <<< "$$plan"
 
 # build-helx-chart: Package the umbrella chart. Set CHART_CHANNEL to build a
-# candidate; CHART_CHANNEL_COMMIT defaults to HEAD.
+# candidate; CHART_CHANNEL_COMMIT defaults to HEAD. Then warn about any image
+# left on a v<appVersion> that main has not built yet.
 # [SERVICES, TAG, IMAGE_REGISTRY, CHART_CHANNEL, CHART_CHANNEL_COMMIT,
 #  CHART_DIST, PYTHON, VENV]
 build-helx-chart: $(PYTHON_READY)
@@ -1173,7 +1174,12 @@ build-helx-chart: $(PYTHON_READY)
 	CHART_IMAGE_TAG="$$image_tag" \
 	CHART_IMAGE_REGISTRY="$(IMAGE_REGISTRY)" \
 	CHART_PACKAGE_DIR="$(CHART_DIST)" \
-		bash $(BUILD_CHART) "$(UMBRELLA_CHART)"
+		bash $(BUILD_CHART) "$(UMBRELLA_CHART)" || exit 1; \
+	if test -n "$$channel" && test -z "$$services"; then exit 0; fi; \
+	git fetch --quiet origin main 2>/dev/null || \
+		echo "warning: could not fetch origin main; what counts as released may be stale." >&2; \
+	$(PYTHON) $(CI_SCRIPT) unreleased-images --pinned "$$services" || \
+		echo "warning: could not check for unreleased images; the chart was still built." >&2
 	@echo 'Next: make helm-deploy-from-local RELEASE=<name> NAMESPACE=<ns> VALUES="a.yaml b.yaml"'
 
 # The helm-deploy-* targets differ only in where the chart comes from. Each

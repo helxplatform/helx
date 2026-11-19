@@ -281,6 +281,15 @@ anywhere.
    image tag into the packaged values for **only those services** — everything
    else stays on its released `v<appVersion>`. No `--set` flags needed.
 
+   "Released" means built from `main`, because `v*` images are only built
+   when `main` is pushed. A service whose image change has merged into
+   `develop` but not reached `main` has an `appVersion` with no image behind
+   it yet, so its pods fail with `ErrImagePull`. After packaging,
+   `build-helx-chart` compares every image it left unpinned with
+   `origin/main` and prints a warning naming each such image, with ways to
+   point it at one that exists, such as the `develop-<short-sha>` image CI
+   built for a `develop` commit.
+
    `SERVICES` rewrites image tags and nothing else. It does not set
    `enabled: true` for the services you name or `enabled: false` for the rest —
    the ones you leave out are still installed, just on their released images.

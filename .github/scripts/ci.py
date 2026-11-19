@@ -478,6 +478,16 @@ def values_path_exists(values: Any, path: str) -> bool:
     return True
 
 
+def values_at(values: Any, path: str) -> Any:
+    """Return the value at a dotted path in a values mapping, or None if absent."""
+    current = values
+    for part in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
 def lock_digest(chart_data: dict[str, Any], locked: list[Dependency]) -> str:
     """Compute a Chart.lock digest exactly as Helm's resolver.HashReq does."""
     declared = chart_data.get("dependencies") or []
@@ -1721,6 +1731,113 @@ def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _app_version_released(local: str, released: str | None) -> bool:
+    """Return whether main has already published the image for local.
+
+    main only ever raises an appVersion, so one below main's was released
+    earlier on the way up.
+    """
+    if released is None:
+        return False
+    if local == released:
+        return True
+    try:
+        return SemVer.parse(local) < SemVer.parse(released)
+    except CIError:
+        return False
+
+
+def unreleased_images(
+    root: Path,
+    pinned: Iterable[str] | None = None,
+    release_ref: str = DEFAULT_RELEASE_REF,
+    config_path: Path | None = None,
+) -> list[tuple[dict[str, Any], str, str | None]]:
+    """List the umbrella's images that will pull a v<appVersion> nobody built.
+
+    An image left unpinned falls back to v<appVersion>, and those are only
+    built when main is pushed. Between merging an image change into develop
+    and releasing it, a local build of develop therefore points that chart at
+    an image that does not exist yet, and nothing says so until the cluster
+    reports ErrImagePull.
+
+    `pinned` names the components build-helx-chart pins to TAG; their tag
+    wins, so they are skipped. It also decides which local charts the build
+    packages: with nothing pinned it takes a local chart only when its version
+    equals the lock, and otherwise pulls the published chart, whose image was
+    released with it; with something pinned it is a channel build, which takes
+    every local chart by name.
+
+    A tag already set in the umbrella's or the chart's own values.yaml is not
+    v<appVersion>, so it is not judged. Values files passed at install time are
+    not visible here.
+
+    Returns (image, local appVersion, released appVersion or None) per image.
+    """
+    grouped = component_images(root, config_path)
+    pinned_components = _selected_components(grouped, pinned) or set()
+    umbrella = root / UMBRELLA_DIR
+    locked = {
+        dependency.name: dependency.version
+        for dependency in exact_locked_dependencies(umbrella)
+    }
+    umbrella_values = read_yaml(umbrella / "values.yaml")
+    released = _ReleasedCharts(root, release_ref)
+    found: list[tuple[dict[str, Any], str, str | None]] = []
+    for component in sorted(grouped):
+        if component not in locked or component in pinned_components:
+            continue
+        for image in grouped[component]:
+            chart_dir = root / image["chart"]
+            label = relative_path(root, chart_file(chart_dir))
+            chart = read_yaml(chart_file(chart_dir))
+            if not pinned_components and metadata_value(chart, "version", label) != locked[component]:
+                continue
+            tag_path = image.get("tag_path", DEFAULT_TAG_PATH)
+            if values_at(umbrella_values.get(component), tag_path) or values_at(
+                read_yaml(chart_dir / "values.yaml"), tag_path
+            ):
+                continue
+            app_version = optional_metadata_value(chart, "appVersion", label)
+            if app_version is None:
+                continue
+            released_version = released.field(chart_dir, "appVersion")
+            if not _app_version_released(app_version, released_version):
+                found.append((image, app_version, released_version))
+    return found
+
+
+def unreleased_images_warning(
+    found: Sequence[tuple[dict[str, Any], str, str | None]], release_ref: str
+) -> str:
+    """Explain unreleased images and how to deploy without them."""
+    lines = [
+        "::warning::These images have not been released, so pods using them will "
+        "fail with ErrImagePull:"
+    ]
+    for image, app_version, released_version in found:
+        where = (
+            f"{release_ref} has appVersion {released_version}"
+            if released_version is not None
+            else f"not on {release_ref} yet"
+        )
+        lines.append(f"  {image['reference']}:v{app_version}  ({where})")
+    overrides = " ".join(
+        f"--set {image['component']}.{image.get('tag_path', DEFAULT_TAG_PATH)}"
+        "=develop-<short-sha>"
+        for image, _, _ in found
+    )
+    lines += [
+        "v* images are only built when main is pushed. Point them at an image that",
+        "exists, such as the develop-<short-sha> CI built for a develop commit:",
+        "  - add their services to SERVICES and build and push them under your TAG,",
+        "  - pin every service to develop: SERVICES=all TAG=develop-<short-sha>, or",
+        "  - override them when deploying:",
+        f'      HELM_FLAGS="{overrides}"',
+    ]
+    return "\n".join(lines)
+
+
 def release_decision(current: str, previous: str | None, force: bool = False) -> bool:
     """Determine whether the umbrella chart should be released."""
     current_version = SemVer.parse(current, "umbrella version")
@@ -2135,6 +2252,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     overlay_destination.add_argument("--output")
     overlay_destination.add_argument("--merge-into")
 
+    unreleased = commands.add_parser(
+        "unreleased-images",
+        help="warn about umbrella images a local build leaves on a v<appVersion> "
+        "that main has not built yet; what it finds is a warning, not a failure",
+    )
+    unreleased.add_argument(
+        "--pinned",
+        default="",
+        help="services build-helx-chart pins to TAG; empty for a build that pins nothing",
+    )
+    unreleased.add_argument("--release-ref", default=DEFAULT_RELEASE_REF)
+
     lock = commands.add_parser("sync-lock")
     lock.add_argument("chart_dir", nargs="?")
     lock.add_argument("--all", action="store_true", dest="all_charts")
@@ -2247,6 +2376,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 yaml.safe_dump(overlay, default_flow_style=False, sort_keys=True),
                 encoding="utf-8",
             )
+        elif args.command == "unreleased-images":
+            found = unreleased_images(
+                ROOT, args.pinned.split() or None, release_ref=args.release_ref
+            )
+            if found:
+                print(unreleased_images_warning(found, args.release_ref), file=sys.stderr)
         elif args.command == "sync-lock":
             if bool(args.chart_dir) == args.all_charts:
                 raise CIError("Choose either a chart directory or --all")

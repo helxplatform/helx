@@ -1973,6 +1973,187 @@ class ServiceAboveReleaseTests(GitFixtureTest):
         self.check(release_ref=self.base)
 
 
+class UnreleasedImageTests(GitFixtureTest):
+    """A local build should say so before a cluster finds v<appVersion> missing.
+
+    History: "early" has only api 1.0.0; "released" (what main has published)
+    adds worker 2.0.0, which owns two images. The working tree starts there.
+    """
+
+    def build_fixture(self) -> None:
+        self.write(
+            "images.yaml",
+            json.dumps(
+                {
+                    "registry": ci.REGISTRY,
+                    "images": [
+                        {
+                            "name": name,
+                            "component": component,
+                            "chart": f"services/{component}/chart",
+                            "repository": repository,
+                            "context": f"services/{component}",
+                            "dockerfile": f"services/{component}/Dockerfile",
+                            "sources": [f"services/{component}"],
+                            "excludes": [],
+                            **({"tag_path": tag_path} if tag_path else {}),
+                        }
+                        for name, component, repository, tag_path in (
+                            ("api", "api", "api", None),
+                            ("worker", "worker", "worker", None),
+                            ("worker-sidecar", "worker", "worker/sidecar", "sidecar.image.tag"),
+                        )
+                    ],
+                }
+            ),
+        )
+        self.write_umbrella()
+        self.write(
+            "deploy/helm/helx-chart/values.yaml",
+            "api:\n  enabled: true\nworker:\n  enabled: true\n",
+        )
+        self.set_chart("api", "1.0.0", "1.0.0", values='image:\n  tag: ""\n')
+        self.commit("api 1.0.0")
+        self.git("branch", "early")
+        self.set_chart(
+            "worker", "2.0.0", "2.0.0",
+            values='image:\n  tag: ""\nsidecar:\n  image:\n    tag: ""\n',
+        )
+        self.commit("worker 2.0.0")
+        self.git("branch", "released")
+
+    def write_umbrella(self, *, api: str = "1.0.0", worker: str = "2.0.0") -> None:
+        """Pin both charts in the umbrella's Chart.yaml and its matching lock."""
+        dependencies = "dependencies:\n" + "".join(
+            f"  - name: {name}\n    version: {version}\n"
+            "    repository: oci://example.invalid/charts\n"
+            for name, version in (("api", api), ("worker", worker))
+        )
+        self.write_chart(
+            "deploy/helm/helx-chart", name="helx", version="4.6.2", dependencies=dependencies
+        )
+        self.write("deploy/helm/helx-chart/Chart.lock", dependencies)
+
+    def set_chart(
+        self, component: str, version: str, app_version: str, *, values: str | None = None
+    ) -> None:
+        self.write_chart(
+            f"services/{component}/chart",
+            name=component,
+            version=version,
+            app_version=app_version,
+        )
+        if values is not None:
+            self.write(f"services/{component}/chart/values.yaml", values)
+
+    def unreleased(
+        self, pinned: list[str] | None = None, release_ref: str = "released"
+    ) -> list[tuple[dict[str, Any], str, str | None]]:
+        return ci.unreleased_images(
+            self.root, pinned, release_ref=release_ref, config_path=self.root / "images.yaml"
+        )
+
+    def found(
+        self, pinned: list[str] | None = None, release_ref: str = "released"
+    ) -> list[tuple[str, str, str | None]]:
+        return [
+            (image["name"], local, released)
+            for image, local, released in self.unreleased(pinned, release_ref)
+        ]
+
+    def test_charts_matching_main_are_released(self) -> None:
+        self.assertEqual(self.found(), [])
+
+    def test_an_image_change_not_yet_on_main_is_reported(self) -> None:
+        self.set_chart("api", "1.0.1", "1.1.0")
+        self.write_umbrella(api="1.0.1")
+        self.assertEqual(self.found(), [("api", "1.1.0", "1.0.0")])
+
+    def test_every_image_of_an_unreleased_chart_is_reported(self) -> None:
+        self.set_chart("worker", "2.0.1", "2.1.0")
+        self.write_umbrella(worker="2.0.1")
+        self.assertEqual(
+            self.found(),
+            [("worker", "2.1.0", "2.0.0"), ("worker-sidecar", "2.1.0", "2.0.0")],
+        )
+
+    def test_a_pinned_service_uses_its_own_tag(self) -> None:
+        self.set_chart("api", "1.0.1", "1.1.0")
+        self.write_umbrella(api="1.0.1")
+        self.assertEqual(self.found(["api"]), [])
+
+    def test_only_a_build_pinning_something_takes_a_chart_off_the_lock(self) -> None:
+        # The umbrella still pins api 1.0.0. A build pinning nothing matches
+        # local charts by version too, so it pulls the published api 1.0.0,
+        # whose image main built. Pinning anything makes it a channel build,
+        # which takes the local api by name, along with its unbuilt image.
+        self.set_chart("api", "1.0.1", "1.1.0")
+        self.assertEqual(self.found(), [])
+        self.assertEqual(self.found(["worker"]), [("api", "1.1.0", "1.0.0")])
+
+    def test_a_tag_set_in_values_is_not_judged(self) -> None:
+        self.set_chart("api", "1.0.1", "1.1.0")
+        self.write_umbrella(api="1.0.1")
+        with self.subTest("umbrella values"):
+            self.write(
+                "deploy/helm/helx-chart/values.yaml",
+                "api:\n  image:\n    tag: custom\nworker:\n  enabled: true\n",
+            )
+            self.assertEqual(self.found(), [])
+        self.write("deploy/helm/helx-chart/values.yaml", "api:\n  enabled: true\n")
+        with self.subTest("chart values"):
+            self.write("services/api/chart/values.yaml", "image:\n  tag: custom\n")
+            self.assertEqual(self.found(), [])
+
+    def test_an_app_version_below_main_was_released_on_the_way_up(self) -> None:
+        self.set_chart("api", "1.0.0", "0.9.0")
+        self.assertEqual(self.found(), [])
+
+    def test_a_chart_main_never_published_is_reported(self) -> None:
+        self.assertEqual(
+            self.found(release_ref="early"),
+            [("worker", "2.0.0", None), ("worker-sidecar", "2.0.0", None)],
+        )
+
+    def test_an_unavailable_release_ref_is_an_error(self) -> None:
+        with self.assertRaisesRegex(ci.CIError, "not available"):
+            self.found(release_ref="missing")
+
+    def test_the_warning_names_each_image_and_how_to_override_it(self) -> None:
+        self.set_chart("api", "1.0.1", "1.1.0")
+        self.write_umbrella(api="1.0.1")
+        text = ci.unreleased_images_warning(self.unreleased(release_ref="early"), "early")
+        self.assertIn(f"{ci.REGISTRY}/api:v1.1.0  (early has appVersion 1.0.0)", text)
+        self.assertIn(f"{ci.REGISTRY}/worker/sidecar:v2.0.0  (not on early yet)", text)
+        self.assertIn(
+            'HELM_FLAGS="--set api.image.tag=develop-<short-sha> '
+            "--set worker.image.tag=develop-<short-sha> "
+            '--set worker.sidecar.image.tag=develop-<short-sha>"',
+            text,
+        )
+
+
+class UnreleasedImageWiringTests(unittest.TestCase):
+    """build-helx-chart runs the check after packaging, unless it pinned everything.
+
+    A candidate build with no SERVICES pins every image to <channel>-<sha>, so
+    it has nothing to warn about. Every other build leaves something on
+    v<appVersion>.
+    """
+
+    def test_the_check_follows_a_successful_build(self) -> None:
+        makefile = SCRIPT.resolve().parents[2] / "Makefile"
+        if not makefile.is_file():  # pragma: no cover - only outside the repo
+            self.skipTest("Makefile not present")
+        recipe = makefile.read_text(encoding="utf-8").partition("\nbuild-helx-chart:")[2]
+        recipe = recipe.partition("\n\n")[0]
+        build = recipe.index('bash $(BUILD_CHART) "$(UMBRELLA_CHART)" || exit 1;')
+        skip = recipe.index('if test -n "$$channel" && test -z "$$services"; then exit 0; fi;')
+        check = recipe.index('unreleased-images --pinned "$$services"')
+        self.assertLess(build, skip)
+        self.assertLess(skip, check)
+
+
 class PrivilegeEscalationTests(TempTreeTest):
     def write_platform(self, platform: str, *environments: str) -> None:
         self.write(f"deploy/helm/values/{platform}/defaults/values.yaml", "{}\n")

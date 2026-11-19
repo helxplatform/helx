@@ -19,7 +19,11 @@ RUN npm run build
 # Production environment
 ########################
 
-FROM nginx:mainline-alpine-slim
+# Pinned to nginx 1.31.9 (mainline), which fixes the HTTP/2 integer-underflow
+# RCE CVE-2026-123007 (affects mainline 1.31.0-1.31.8). Pinning the exact patch
+# also makes the base image reproducible instead of tracking the floating
+# "mainline" tag.
+FROM nginx:1.31.9-alpine-slim
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/nginx.conf /etc/nginx/nginx.conf
 COPY --from=builder /usr/src/app/build/ /usr/share/nginx/static/

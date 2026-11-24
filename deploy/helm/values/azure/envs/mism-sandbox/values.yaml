@@ -20,7 +20,10 @@ appstore:
     bindPasswordSecret:
       name: openldap-credentials                         # helx-ldap's Secret (key LDAP_APPSTORE_PASSWORD)
     provision:
-      emailDomains: [duke.edu, uchc.edu]                 # LDAP account created at first login
+      # LDAP account created at first login. Exact match, so UNC subdomains are
+      # listed one by one. Never add an auto-onboarded person to the MISM Grouper
+      # group: ldap-sync would create a second entry with the same mail.
+      emailDomains: [duke.edu, uchc.edu, unc.edu, email.unc.edu, med.unc.edu, live.unc.edu, ad.unc.edu]
   tycho:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
     # Apps opt in to the autoscaled app pool, which carries the taint
@@ -66,10 +69,12 @@ appstore-prepuller:
 
 ldap-sync:
   searchBootstrap:
-    # Set explicitly (D5): MISM syncs the AI Sandbox groups. The azure defaults
-    # filter is unc:app:renci:internal:*. id (get-groups) and baseDN
+    # Set explicitly (D5): MISM syncs only its own Grouper group, synced as local
+    # cn=helx-users (the stem is dropped); other UNC users are auto-onboarded
+    # (appstore.ldap.provision.emailDomains). The azure defaults filter is
+    # unc:app:renci:internal:*. id (get-groups) and baseDN
     # (ou=groups,dc=unc,dc=edu) are inherited from the azure defaults.
-    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:ai-sandbox:*))'
+    filter: '(&(objectClass=uncgroup)(cn=unc:app:renci:mism-sandbox:helx-users))'
   # config.source (ldaps://ldap.unc.edu/, bind cn=unc:app:renci:helx:ns) is
   # inherited unchanged from the azure defaults.
 

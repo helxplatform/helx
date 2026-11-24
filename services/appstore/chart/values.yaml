@@ -507,6 +507,13 @@ tycho:
   # "nvidia.com/gpu", but other types exist, such as "nvidia.com/mig-1g.5gb"
   # and other manufacturers have their own types.
   GPUResourceName: "nvidia.com/gpu"
+  # -- Tolerations added to every Tycho-launched app pod, e.g. to let apps onto
+  # a tainted app node pool. A GPU app also keeps its GPU toleration.
+  appTolerations: []
+  # -- Node selector for every Tycho-launched app pod, e.g. to pin apps to the
+  # app node pool. It applies to GPU apps too, so leave it empty if GPU apps run
+  # on a different pool.
+  appNodeSelector: {}
   # -- Enable/disable the external app registry file for Tycho.
   externalAppRegistryEnabled: false
   # -- Can be set to a git repo URL for fetching the app registry file or

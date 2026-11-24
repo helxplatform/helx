@@ -14,6 +14,20 @@ from cryptography.hazmat.backends import default_backend as crypto_default_backe
 logger = logging.getLogger (__name__)
 
 
+def _json_env(name, kind):
+    """ Read a JSON env var used for app pod scheduling. Unset or empty means no constraint. """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return kind()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"{name} must be a JSON {kind.__name__}, got {raw!r}: {e}") from e
+    if not isinstance(value, kind):
+        raise ValueError(f"{name} must be a JSON {kind.__name__}, got a {type(value).__name__}: {raw!r}")
+    return value
+
+
 class Limits:
     """ Abstraction of resource limits on a container in a system. """
     def __init__(self,
@@ -291,6 +305,9 @@ class System:
         self.init_nobody_uid = int(os.environ.get("TYCHO_APP_INIT_NOBODY_UID", "524288"))
         self.init_nobody_gid = int(os.environ.get("TYCHO_APP_INIT_NOBODY_GID", "524288"))
         self.gpu_resource_name = os.environ.get("TYCHO_APP_GPU_RESOURCE_NAME", "nvidia.com/gpu")
+        """Scheduling for every app pod, from the chart's tycho.appTolerations / tycho.appNodeSelector"""
+        self.app_tolerations = _json_env("TYCHO_APP_TOLERATIONS", list)
+        self.app_node_selector = _json_env("TYCHO_APP_NODE_SELECTOR", dict)
         """Proxy rewrite rule for ambassador service annotations"""
         self.proxy_rewrite = proxy_rewrite
         # """Flag for checking if an IRODS connection is enabled"""

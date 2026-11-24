@@ -243,3 +243,52 @@ class InitContainerReadOnlyRootTests(TestCase):
             sc = container["securityContext"]
             self.assertIs(sc.get("readOnlyRootFilesystem"), True, name)
             self.assertIs(sc.get("allowPrivilegeEscalation"), False, name)
+
+
+class AppSchedulingRenderTests(TestCase):
+    """ tycho.appTolerations / tycho.appNodeSelector reach every app pod, and merge
+        with a GPU app's own toleration into one tolerations list. """
+
+    TOLERATIONS = [{"key": "workload", "operator": "Equal", "value": "apps", "effect": "NoSchedule"}]
+    NODE_SELECTOR = {"kubernetes.azure.com/agentpool": "apppool110"}
+
+    def _pod_spec(self, gpus=None):
+        service = {"image": "example.invalid/jupyter:test", "ports": ["8888:8888"]}
+        if gpus:
+            service["deploy"] = {"resources": {"limits": {"gpus": gpus}}}
+        spec = {"version": "3.6", "services": {"jupyter": service}}
+        system = System.parse(Config(), "jupyter", json.dumps({"username": "alice"}),
+                              spec, "default", env={}, services={})
+        return next(m for m in system.render("pod.yaml") if m and m.get("kind") == "Pod")["spec"]
+
+    def _env(self, **extra):
+        env = {"DEV_PHASE": "test",
+               "TYCHO_APP_TOLERATIONS": json.dumps(self.TOLERATIONS),
+               "TYCHO_APP_NODE_SELECTOR": json.dumps(self.NODE_SELECTOR)}
+        env.update(extra)
+        return mock.patch.dict(os.environ, env)
+
+    def test_settings_reach_the_pod(self):
+        with self._env():
+            pod_spec = self._pod_spec()
+        self.assertEqual(pod_spec["tolerations"], self.TOLERATIONS)
+        self.assertEqual(pod_spec["nodeSelector"], self.NODE_SELECTOR)
+
+    def test_gpu_app_keeps_its_gpu_toleration(self):
+        with self._env():
+            pod_spec = self._pod_spec(gpus=1)
+        self.assertEqual(pod_spec["tolerations"],
+                         [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}] + self.TOLERATIONS)
+
+    def test_unset_means_no_constraint(self):
+        with mock.patch.dict(os.environ, {"DEV_PHASE": "test"}):
+            os.environ.pop("TYCHO_APP_TOLERATIONS", None)
+            os.environ.pop("TYCHO_APP_NODE_SELECTOR", None)
+            pod_spec = self._pod_spec()
+        self.assertNotIn("tolerations", pod_spec)
+        self.assertNotIn("nodeSelector", pod_spec)
+
+    def test_malformed_setting_names_the_variable(self):
+        with self._env(TYCHO_APP_NODE_SELECTOR="[1, 2]"):
+            with self.assertRaisesRegex(ValueError, "TYCHO_APP_NODE_SELECTOR must be a JSON dict"):
+                self._pod_spec()

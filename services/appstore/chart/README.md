@@ -135,7 +135,9 @@ Additionally there is a workflow that allows bumping the chart version, if this 
 | sqliteStorage.claimName | string | `nil` | If a claim name is not specified, it defaults to appstore-oauth-pvc. |
 | tolerations | list | `[]` |  |
 | tycho.GPUResourceName | string | `"nvidia.com/gpu"` | The GPU resource name that a container can utilize.  Typically this is "nvidia.com/gpu", but other types exist, such as "nvidia.com/mig-1g.5gb" and other manufacturers have their own types. |
+| tycho.appNodeSelector | object | `{}` | Node selector for every Tycho-launched app pod, e.g. to pin apps to the app node pool. It applies to GPU apps too, so leave it empty if GPU apps run on a different pool. |
 | tycho.appRoutingMode | string | `"proxy"` | How Tycho-launched apps are routed. "proxy" (default on this branch): ClusterIP + /private prefix, backend resolved by an external reverse proxy (resty) via appstore's /api/v1/private-route/ resolver — the de-Ambassador design. "ambassador" (legacy): emit the Ambassador Mapping annotation when Ambassador is present. "none": no routing wiring. |
+| tycho.appTolerations | list | `[]` | Tolerations added to every Tycho-launched app pod, e.g. to let apps onto a tainted app node pool. A GPU app also keeps its GPU toleration. |
 | tycho.createHomeDirs | bool | `true` | Create Home and shared directories for users. |
 | tycho.enableInitContainer | bool | `true` | Start the init container to take care of any needed tasks before the main container is started.  This can be to create certain directories or set file permissions. |
 | tycho.enableTrashCli | bool | `false` | Enable trash-cli functionality in tycho-launched apps |

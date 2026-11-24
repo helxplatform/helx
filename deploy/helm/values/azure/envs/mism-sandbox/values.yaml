@@ -26,6 +26,14 @@ appstore:
       emailDomains: [duke.edu, uchc.edu, unc.edu, email.unc.edu, med.unc.edu, live.unc.edu, ad.unc.edu]
   tycho:
     externalAppRegistryBranch: helx-mism-sandbox-azure   # D4
+    # Apps opt in to the autoscaled app pool, which carries the taint
+    # workload=apps:NoSchedule once the corepool split is done; steady services
+    # stay off it. Harmless before then. Names the pool: if apppool110 is
+    # replaced, change this in the same step or new apps stay Pending.
+    appTolerations:
+    - {key: workload, operator: Equal, value: apps, effect: NoSchedule}
+    appNodeSelector:
+      kubernetes.azure.com/agentpool: apppool110
   userStorage:
     storageClass: azurefile-csi-nfs-pe           # NFS + private endpoint (R3, ACISITSM-3499)
   postgresql:
@@ -50,6 +58,14 @@ appstore-prepuller:
   appRegistry:
     branch: helx-mism-sandbox-azure              # D4
     brand: helx                                  # must equal the appstore brand (D7 option B)
+  daemonset:
+    # Pre-pull only where apps run: the app pool, which is tainted
+    # workload=apps:NoSchedule once the corepool split is done. Replaces the
+    # Azure default kubernetes.azure.com/mode: user, which would also match corepool.
+    tolerations:
+    - {key: workload, operator: Equal, value: apps, effect: NoSchedule}
+    nodeSelector:
+      kubernetes.azure.com/agentpool: apppool110
 
 ldap-sync:
   searchBootstrap:

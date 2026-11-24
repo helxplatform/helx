@@ -22,19 +22,32 @@ metadata:
     tycho-app-id: {{ system.app_id }}
   annotations:
     helx.renci.org/identity-exempt-containers: userless-volume-tasks
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 spec:
   enableServiceLinks: false
 {% if system.serviceaccount %}
   serviceAccountName: {{system.serviceaccount}}
 {% endif %}
+{% if system.app_node_selector %}
+  nodeSelector: {{ system.app_node_selector | tojson }}
+{% endif %}
 {% for container in system.containers %}
+  {% set gpu_toleration = namespace(on=false) %}
   {% if container.limits or container.requests %}
-  {% if container.limits.gpus != None and loop.first %}
+  {% if container.limits.gpus != None %}
+  {% set gpu_toleration.on = true %}
+  {% endif %}
+  {% endif %}
+  {% if loop.first and (gpu_toleration.on or system.app_tolerations) %}
   tolerations:
+  {% if gpu_toleration.on %}
   - key: "{{ system.gpu_resource_name }}"
     operator: "Exists"
     effect: "NoSchedule"
   {% endif %}
+  {% for toleration in system.app_tolerations %}
+  - {{ toleration | tojson }}
+  {% endfor %}
   {% endif %}
   {% if system.security_context["run_as_user"] or system.security_context.run_as_group or system.security_context.fs_group %}
   securityContext:

@@ -280,6 +280,10 @@ spec:
               name: {{ include "appstore.fullname" . }}-env
         - name: TYCHO_APP_GPU_RESOURCE_NAME
           value: "{{- .Values.tycho.GPUResourceName }}"
+        - name: TYCHO_APP_TOLERATIONS
+          value: {{ .Values.tycho.appTolerations | default list | toJson | quote }}
+        - name: TYCHO_APP_NODE_SELECTOR
+          value: {{ .Values.tycho.appNodeSelector | default dict | toJson | quote }}
         - name: TYCHO_APP_RUN_AS_USER
           value: "{{- include "appstore.intValue" .Values.tycho.runAsUser }}"
         - name: TYCHO_APP_RUN_AS_GROUP
